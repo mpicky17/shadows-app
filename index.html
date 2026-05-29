@@ -656,7 +656,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v4';
+    const APP_VERSION = 'shadows-v5';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1190,6 +1190,8 @@
         // Update setup overlay visibility if already in game
         if (inGameScreen) {
           $('setup-overlay').classList.toggle('hidden', roomData.status !== 'setup');
+          // Re-render game UI whenever meta changes (turn phase, current player, etc.)
+          renderGamePlayers();
           // Phase 3: handle revealed black card and pending interaction
           onRevealedBlackCardChanged();
           renderPendingInteraction();
