@@ -196,7 +196,7 @@ Moving between Round Table and Siege Area is free (no Heroic Action cost).
 - **Progression of Evil:** Black Knight card drawn → placed on quest. 4th Black Knight card ends the quest.
 - **Heroic Action:** Play 1 White Fight card (value 1–5) on empty Knights' side spot. 4th White card → quest ends.
 - **Resolution:** Compare sum of White Fight cards vs sum of Black cards (shuffle Black cards before revealing). Higher total wins. Ties go to Evil.
-- **Victory:** 1 White Sword. Knight gains 1 LP. Knight goes to Round Table.
+- **Victory:** 1 White Sword. Knight gains 1 LP. 3 White cards shared. Knight goes to Round Table.
 - **Defeat:** 1 Black Sword. Knight loses 1 LP. Knight goes to Round Table.
 - **Perpetual:** Quest resets after completion — a new tournament begins.
 - **Sir Kay:** may play 1 extra Fight card after Black cards are revealed.
@@ -207,7 +207,7 @@ Moving between Round Table and Siege Area is free (no Heroic Action cost).
 - **Progression of Evil:** Lancelot card drawn → placed on quest. 5th Lancelot card ends the quest.
 - **Heroic Action:** Play 1 White Fight card on empty Knights' side spot. 5th White card → quest ends.
 - **Resolution:** Compare sums. Higher wins. Ties go to Evil.
-- **Victory:** 1 White Sword. Knight gets Lancelot's Armor relic.
+- **Victory:** 1 White Sword. Knight gains 1 LP. Knight gets Lancelot's Armor relic. 4 White cards to winner.
 - **Defeat:** 1 Black Sword. Knights present lose 1 LP. Knight goes to Round Table.
 - **One-time quest:** Once completed (won or lost), flips to Dragon's Quest.
 - **Sir Kay:** may play 1 extra Fight card after Black cards are revealed.
@@ -218,8 +218,8 @@ Moving between Round Table and Siege Area is free (no Heroic Action cost).
 - **Progression of Evil:** Dragon card drawn → placed on quest. 5th Dragon card ends the quest.
 - **Heroic Action:** Play 1 White Fight card on empty Knights' side spot. 9th White card → quest ends.
 - **Resolution:** Compare sums. Higher wins. Ties go to Evil.
-- **Victory:** 1 White Sword. Knight goes to Round Table.
-- **Defeat:** 1 Black Sword. Knights present lose 1 LP. 1 Siege Engine added. Knight goes to Round Table.
+- **Victory:** 2 White Swords. Knights gain 2 LP. 7 White cards shared. Knight goes to Round Table.
+- **Defeat:** 2 Black Swords. Knights present lose 2 LP. Knight goes to Round Table.
 - **One-time quest:** Once completed, this quest is removed from game.
 - **Note:** Lancelot/Dragon cards use dual values — Lancelot value when Lancelot quest active, Dragon value when Dragon quest active.
 - **Sir Kay:** may play 1 extra Fight card after Black cards are revealed.
@@ -229,8 +229,8 @@ Moving between Round Table and Siege Area is free (no Heroic Action cost).
 - **Board:** River with positions. Excalibur starts in the middle.
 - **Progression of Evil:** Excalibur Black card drawn → moves Excalibur 1 space toward Evil side. If reaches last Evil position → quest lost.
 - **Heroic Action:** Discard 1 White card face-down → move Excalibur 1 space toward Knight side. If reaches last Knight position → quest won.
-- **Victory:** 1 White Sword. Completing Knight gets Excalibur relic. All Knights on quest go to Round Table.
-- **Defeat:** 2 Black Swords. Excalibur removed from game forever. All Knights on quest go to Round Table.
+- **Victory:** 2 White Swords. Knights gain 1 LP each. 7 White cards divided among knights. Completing Knight gets Excalibur relic. All Knights on quest go to Round Table.
+- **Defeat:** 2 Black Swords. Knights lose 1 LP. Excalibur removed from game forever. All Knights on quest go to Round Table.
 - **One-time quest:** Once completed, quest is removed.
 - **Any White card works** (not just specific types).
 
@@ -241,23 +241,23 @@ Moving between Round Table and Siege Area is free (no Heroic Action cost).
 - **Heroic Action:** Play 1 Grail card on the first empty spot closest to the Grail. If all 7 spots are filled (mix of Grail + Despair cards), instead remove the closest Despair/Desolation card (discard both the Grail card played and the Despair removed).
 - **Win Condition:** 7th Grail card placed on the last empty spot → quest won.
 - **Loss Condition:** All spots filled with Black cards (Despair/Desolation) with no Grail cards → quest lost.
-- **Victory:** 3 White Swords. Completing Knight gets Holy Grail relic. All Knights on quest go to Round Table.
-- **Defeat:** 3 Black Swords. Holy Grail removed from game forever. All Knights on quest go to Round Table.
+- **Victory:** 3 White Swords. Knights gain 1 LP. 7 White cards shared. Completing Knight gets Holy Grail relic. All Knights on quest go to Round Table.
+- **Defeat:** 3 Black Swords. Knights lose 1 LP. Holy Grail removed from game forever. All Knights on quest go to Round Table.
 - **One-time quest.**
 
 ### Pict War
 - **Type:** Perpetual, Group Quest
 - **Progression of Evil:** Pict or Mercenary card drawn → add 1 Pict warrior figure. 4th Pict warrior → quest lost.
 - **Heroic Action:** Play 1 Fight card in ascending straight (must start with 1, each subsequent card exactly +1). 5th Fight card (value 5) → quest won.
-- **Victory:** 1 White Sword. Knights on quest gain 1 LP each. Draw 3 White cards from top, share among Knights present.
-- **Defeat:** 2 Black Swords + 1 Siege Engine. Knights on quest lose 1 LP.
+- **Victory:** 1 White Sword. Knights on quest gain 1 LP each. Draw 4 White cards from top, share among Knights present.
+- **Defeat:** 1 Black Sword + 2 Siege Engines. Knights on quest lose 1 LP.
 - **Perpetual:** Quest resets after completion.
 
 ### Saxon War
 - **Type:** Perpetual, Group Quest
 - **Identical mechanics to Pict War** but with Saxon warriors and Saxon/Mercenary cards.
-- **Victory:** 1 White Sword. Knights on quest gain 1 LP each. Draw 3 White cards from top, share among Knights present.
-- **Defeat:** 2 Black Swords + 1 Siege Engine. Knights on quest lose 1 LP.
+- **Victory:** 1 White Sword. Knights on quest gain 1 LP each. Draw 4 White cards from top, share among Knights present.
+- **Defeat:** 1 Black Sword + 2 Siege Engines. Knights on quest lose 1 LP.
 - **Perpetual:** Quest resets after completion.
 
 ### Quest Completion (General Rules)
@@ -351,7 +351,7 @@ All identical. Used exclusively in the Quest for the Holy Grail.
 #### Special White Cards (15 total)
 | Card | Count | Effect |
 |------|-------|--------|
-| Merlin | x7 | 3 Merlin cards played collectively (by any players) cancel 1 Special Black card immediately when drawn. Cannot be applied retroactively. During setup, 1 Merlin given to each player before shuffling. |
+| Merlin | x7 | **Cancel:** 3 Merlin cards played collectively (by any players) cancel 1 Special Black card immediately when drawn. Cannot be applied retroactively. **Heroic Play:** Play 1 Merlin to: remove 1 Siege Engine, OR remove last standard black card from any quest, OR remove 1 warrior from Saxon/Pict War. During setup, 1 Merlin given to each player before shuffling. |
 | Fate | x1 | **If Loyal:** All Knights draw 1 White card. **If Traitor:** Reveal yourself. All opponents discard 2 White cards. |
 | Piety | x1 | Gain 3 Life points (max 6) OR each other Knight gains 1 Life point (max 6). |
 | Heroism | x1 | Place on the Quest of your choice. Adds 1 White Sword (if quest won) or 1 Black Sword (if quest lost) to that Quest's outcome. |

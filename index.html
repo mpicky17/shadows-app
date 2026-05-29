@@ -370,6 +370,8 @@
     .gp-chip.dead { opacity: 0.4; }
     .gp-chip img { width: 24px; height: 24px; }
     .gp-life { color: var(--red-bright); font-weight: 700; font-size: 0.875rem; }
+    .gp-relics { display: inline-flex; gap: 2px; margin-left: 4px; }
+    .gp-relic { width: 16px; height: 16px; vertical-align: middle; }
 
     .quest-grid {
       display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0.5rem;
@@ -700,7 +702,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v9';
+    const APP_VERSION = 'shadows-v10';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1699,7 +1701,7 @@
           if (card.type !== 'fight') el.classList.add('dimmed');
           else if ((heroicSubState.selectedCards || []).includes(card.id)) el.classList.add('multi-selected');
         } else if (heroicMode === 'specialWhite') {
-          if (card.type !== 'special' || card.name === 'Merlin') el.classList.add('dimmed');
+          if (card.type !== 'special') el.classList.add('dimmed');
         } else if (heroicMode === 'kayExtra') {
           if (card.type !== 'fight') el.classList.add('dimmed');
         } else if (heroicMode === 'messenger' && heroicSubState.step === 'selectCards') {
@@ -1797,14 +1799,25 @@
           return gc + ' grail, ' + bc + ' despair';
         }},
         { key: 'excalibur', name: 'Excalibur', info: q => 'Position: ' + (q.position || 0) },
-        { key: 'blackKnight', name: 'Black Knight', info: q =>
-          (q.whiteCards || []).length + '/4 W, ' + (q.blackCards || []).length + '/4 B'
-        },
+        { key: 'blackKnight', name: 'Black Knight', info: q => {
+          const wc = q.whiteCards || [], bc = q.blackCards || [];
+          const wv = wc.map(c => c.value).join(',');
+          const bv = bc.map(c => c.faceDown ? '?' : c.value).join(',');
+          return wc.length + '/4 W' + (wv ? ' [' + wv + ']' : '') +
+            ', ' + bc.length + '/4 B' + (bv ? ' [' + bv + ']' : '');
+        }},
         { key: 'lancelot', name: 'Lancelot', info: q => {
           const phase = q.phase === 'dragon' ? 'Dragon' : 'Lancelot';
           const wMax = q.phase === 'dragon' ? 9 : 5;
           const bMax = 5;
-          return phase + ' — ' + (q.whiteCards || []).length + '/' + wMax + ' W, ' + (q.blackCards || []).length + '/' + bMax + ' B';
+          const wc = q.whiteCards || [], bc = q.blackCards || [];
+          const wv = wc.map(c => c.value).join(',');
+          const bv = bc.map(c => {
+            if (c.faceDown) return '?';
+            return q.phase === 'dragon' ? (c.dragonValue || c.value) : (c.lancelotValue || c.value);
+          }).join(',');
+          return phase + ' — ' + wc.length + '/' + wMax + ' W' + (wv ? ' [' + wv + ']' : '') +
+            ', ' + bc.length + '/' + bMax + ' B' + (bv ? ' [' + bv + ']' : '');
         }},
         { key: 'saxonWar', name: 'Saxon War', info: q =>
           (q.warriors || 0) + '/4 warriors, ' + (q.fightCards || []).length + '/5 fight'
@@ -1838,10 +1851,15 @@
         if (isCurrent) cls += ' current-turn';
         if (isMe) cls += ' me';
         if (!p.alive) cls += ' dead';
+        let relicHtml = '';
+        if (p.relics?.excalibur) relicHtml += '<img src="assets/excalibur.svg" class="gp-relic" title="Excalibur">';
+        if (p.relics?.holyGrail) relicHtml += '<img src="assets/holy-grail.svg" class="gp-relic" title="Holy Grail">';
+        if (p.relics?.lancelotArmor) relicHtml += '<img src="assets/lancelot-armor.svg" class="gp-relic" title="Lancelot\'s Armor">';
         return '<div class="' + cls + '">' +
           '<img src="' + knight.icon + '" alt="">' +
           '<span>' + p.displayName + '</span>' +
           '<span class="gp-life">' + '\u2665'.repeat(Math.max(0, p.life)) + '</span>' +
+          (relicHtml ? '<span class="gp-relics">' + relicHtml + '</span>' : '') +
           '<span class="gp-loc">' + getLocationLabel(p.location || 'roundTable') + '</span>' +
           '</div>';
       }).join('');
@@ -2314,15 +2332,27 @@
       // Render card visual
       const val = getBlackCardValue(card);
       const name = getBlackCardDisplayName(card);
+      const isCombatCard = card.type === 'blackKnight' || card.type === 'lancelotDragon';
+      const isDrawer = data.drawnBy === myKnight;
       const typeLabel = card.type === 'specialBlack' ? 'Special Black' :
-                        (card.type === 'blackKnight' || card.type === 'lancelotDragon') ? 'Combat' : 'Quest';
+                        isCombatCard ? 'Combat' : 'Quest';
 
       let cardHtml = '<div class="rc-type">' + typeLabel + '</div>';
-      if (val !== null) cardHtml += '<div class="rc-value">' + val + '</div>';
+      if (val !== null) {
+        if (isCombatCard && !isDrawer) {
+          cardHtml += '<div class="rc-value">?</div>';
+        } else {
+          cardHtml += '<div class="rc-value">' + val + '</div>';
+        }
+      }
       cardHtml += '<div class="rc-name">' + name + '</div>';
       $('revealed-card-display').innerHTML = cardHtml;
 
-      $('reveal-effect-desc').textContent = getBlackCardDescription(card);
+      if (isCombatCard && !isDrawer) {
+        $('reveal-effect-desc').textContent = name + ' card drawn — value hidden';
+      } else {
+        $('reveal-effect-desc').textContent = getBlackCardDescription(card);
+      }
 
       // Render action buttons (only for active player)
       renderRevealActions(data);
@@ -2443,8 +2473,9 @@
       if (faceDown) await requestCardDraw('white', 1);
 
       if (blackCards.length >= 4) {
-        await addLog('quest', 'Black Knight quest ready for resolution!');
-        // Full combat resolution deferred to Phase 4
+        await addLog('quest', 'Black Knight — 4th black card forces combat!');
+        await triggerCombatResolution('blackKnight', true);
+        return;
       }
 
       if (await checkGameEnd()) return;
@@ -2476,7 +2507,9 @@
       if (faceDown) await requestCardDraw('white', 1);
 
       if (blackCards.length >= maxBlack) {
-        await addLog('quest', phaseName + ' quest ready for resolution!');
+        await addLog('quest', phaseName + ' — max black cards forces combat!');
+        await triggerCombatResolution('lancelot', true);
+        return;
       }
 
       if (await checkGameEnd()) return;
@@ -2505,15 +2538,16 @@
         swords.push({ color: 'black', source: 'excalibur' });
         updates['games/' + currentRoom + '/board/swords'] = swords;
 
-        // Knights on quest return to Round Table
+        // Knights on quest lose 1 LP and return to Round Table
         const knightsPresent = quest.knightsPresent || [];
         for (const kid of knightsPresent) {
+          updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.max(0, (cachedPlayers[kid]?.life ?? 4) - 1);
           updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
         }
         updates['games/' + currentRoom + '/quests/excalibur/knightsPresent'] = [];
 
         await fbDb.ref().update(updates);
-        await addLog('quest', 'Excalibur quest LOST! 2 Black Swords added. Excalibur removed from game.');
+        await addLog('quest', 'Excalibur quest LOST! 2 Black Swords, -1 LP. Excalibur removed from game.');
       } else {
         await fbDb.ref().update(updates);
       }
@@ -2549,12 +2583,13 @@
 
         const knightsPresent = quest.knightsPresent || [];
         for (const kid of knightsPresent) {
+          updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.max(0, (cachedPlayers[kid]?.life ?? 4) - 1);
           updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
         }
         updates['games/' + currentRoom + '/quests/holyGrail/knightsPresent'] = [];
 
         await fbDb.ref().update(updates);
-        await addLog('quest', 'Holy Grail quest LOST! 3 Black Swords added. Holy Grail removed from game.');
+        await addLog('quest', 'Holy Grail quest LOST! 3 Black Swords, -1 LP. Holy Grail removed from game.');
       } else {
         await fbDb.ref().update(updates);
         await addLog('quest', 'Despair placed on Holy Grail (' + blackCount + ' black, ' + grailCount + ' grail)');
@@ -2594,11 +2629,10 @@
         updates['games/' + currentRoom + '/quests/' + questKey + '/status'] = 'lost';
         const swords = cachedBoard?.swords || [];
         swords.push({ color: 'black', source: questKey });
-        swords.push({ color: 'black', source: questKey });
         updates['games/' + currentRoom + '/board/swords'] = swords;
 
-        // +1 siege engine
-        const siegeCount = (cachedBoard?.siegeEngines || 0) + 1;
+        // +2 siege engines
+        const siegeCount = (cachedBoard?.siegeEngines || 0) + 2;
         updates['games/' + currentRoom + '/board/siegeEngines'] = siegeCount;
 
         // Knights on quest lose 1 LP
@@ -2616,7 +2650,7 @@
         updates['games/' + currentRoom + '/quests/' + questKey + '/status'] = 'active';
 
         await fbDb.ref().update(updates);
-        await addLog('quest', label + ' War LOST! 4th warrior placed. 2 Black Swords + 1 Siege Engine. Quest resets.');
+        await addLog('quest', label + ' War LOST! 4th warrior placed. 1 Black Sword + 2 Siege Engines. Quest resets.');
       } else {
         await fbDb.ref().update(updates);
         await addLog('quest', label + ' warrior added (' + newWarriors + '/4)');
@@ -3295,6 +3329,9 @@
       if (heroicMode === 'heal') { renderHealUI(area); return; }
       if (heroicMode === 'specialWhite') { renderSpecialWhiteUI(area); return; }
       if (heroicMode === 'messenger') { renderMessengerUI(area); return; }
+      if (heroicMode === 'merlinChoice') { renderMerlinChoiceUI(area); return; }
+      if (heroicMode === 'merlinQuest') { renderMerlinQuestUI(area); return; }
+      if (heroicMode === 'merlinWar') { renderMerlinWarUI(area); return; }
       if (heroicMode === 'kayExtra') { return; } // Handled by combat overlay
 
       // After action taken — show End Turn + optional Sacrifice
@@ -3593,6 +3630,17 @@
       });
     }
 
+    function canFormPattern(existingCards, newCard, pattern) {
+      const values = [...existingCards.map(c => c.value), newCard.value];
+      const freq = {};
+      for (const v of values) freq[v] = (freq[v] || 0) + 1;
+      const distinctCount = Object.keys(freq).length;
+      const maxFreq = Math.max(...Object.values(freq));
+      if (pattern === 'fullHouse') return distinctCount <= 2 && maxFreq <= 3;
+      if (pattern === 'threeTriples') return distinctCount <= 3 && maxFreq <= 3;
+      return true;
+    }
+
     function validateCardForQuest(card, questKey) {
       const q = cachedQuests?.[questKey];
       if (!q || q.status !== 'active') return false;
@@ -3605,7 +3653,9 @@
       if (questKey === 'blackKnight') return card.type === 'fight' && (q.whiteCards || []).length < 4;
       if (questKey === 'lancelot') {
         const max = q.phase === 'dragon' ? 9 : 5;
-        return card.type === 'fight' && (q.whiteCards || []).length < max;
+        if (card.type !== 'fight' || (q.whiteCards || []).length >= max) return false;
+        const pattern = q.phase === 'dragon' ? 'threeTriples' : 'fullHouse';
+        return canFormPattern(q.whiteCards || [], card, pattern);
       }
       return false;
     }
@@ -3694,22 +3744,27 @@
     //  SECTION 13E: Heroic Actions — Combat Resolution
     // ═══════════════════════════════════════════════════════════════════
 
-    async function triggerCombatResolution(questKey) {
+    async function triggerCombatResolution(questKey, fromEvil = false) {
       const q = cachedQuests[questKey];
       if (!q) return;
       const whiteCards = q.whiteCards || [];
-      // Shuffle black cards for reveal
       const blackCards = shuffle([...(q.blackCards || [])]);
-      const whiteSum = whiteCards.reduce((s, c) => s + (c.value || 0), 0);
+      const rawWhiteSum = whiteCards.reduce((s, c) => s + (c.value || 0), 0);
       const blackSum = blackCards.reduce((s, c) => {
         if (questKey === 'lancelot' && q.phase === 'dragon') return s + (c.dragonValue || c.value || 0);
         return s + (c.value || c.lancelotValue || 0);
       }, 0);
-      const kayPresent = (q.knightsPresent || []).includes('kay') && cachedPlayers['kay']?.alive !== false;
+      // Excalibur relic: +1 if any knight present has it
+      const knightsPresent = q.knightsPresent || [];
+      const hasExcalibur = knightsPresent.some(kid => cachedPlayers[kid]?.relics?.excalibur);
+      const whiteSum = rawWhiteSum + (hasExcalibur ? 1 : 0);
+      const kayPresent = knightsPresent.includes('kay') && cachedPlayers['kay']?.alive !== false;
 
       await fbDb.ref('games/' + currentRoom + '/meta/combatResolution').set({
         questKey, whiteCards, blackCards, whiteSum, blackSum,
+        excaliburBonus: hasExcalibur,
         kayPrompt: kayPresent, kayPlayed: false, winner: null,
+        fromEvil,
       });
     }
 
@@ -3730,7 +3785,7 @@
       for (const c of res.whiteCards) {
         html += '<div class="combat-card white-side"><div class="cc-val">' + (c.value || '?') + '</div><div style="font-size:0.625rem;">Fight</div></div>';
       }
-      html += '</div><p style="color:var(--gold);font-size:1.25rem;font-weight:700;">Total: ' + res.whiteSum + '</p>';
+      html += '</div><p style="color:var(--gold);font-size:1.25rem;font-weight:700;">Total: ' + res.whiteSum + (res.excaliburBonus ? ' (incl. Excalibur +1)' : '') + '</p>';
 
       html += '<p style="color:var(--text-dim);font-size:1rem;margin-top:0.5rem;">Black Cards (Evil)</p>' +
         '<div class="combat-cards">';
@@ -3831,60 +3886,54 @@
         if (questKey === 'blackKnight') {
           await addSword('white', 'blackKnight');
           for (const kid of knightsOnQuest) {
-            const life = Math.min(6, (cachedPlayers[kid]?.life || 4) + 1);
+            let life = Math.min(6, (cachedPlayers[kid]?.life || 4) + 1);
+            if (kid === 'palamedes') life = Math.min(6, life + 1);
             updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
-            // Palamedes bonus
-            if (kid === 'palamedes') {
-              updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.min(6, life + 1);
-            }
           }
-          await addLog('quest', 'Black Knight Tournament WON! 1 White Sword placed.');
+          await requestCardDraw('white', 3);
+          await addLog('quest', 'Black Knight Tournament WON! 1 White Sword, +1 LP, 3 cards.');
         } else if (questKey === 'lancelot' && q.phase === 'lancelot') {
           await addSword('white', 'lancelot');
-          // Grant Lancelot's Armor to the knight on quest
           if (knightsOnQuest.length > 0) {
             updates['games/' + currentRoom + '/players/' + knightsOnQuest[0] + '/relics/lancelotArmor'] = true;
           }
           for (const kid of knightsOnQuest) {
-            if (kid === 'palamedes') {
-              updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.min(6, (cachedPlayers[kid]?.life || 4) + 1);
-            }
+            let life = Math.min(6, (cachedPlayers[kid]?.life || 4) + 1);
+            if (kid === 'palamedes') life = Math.min(6, life + 1);
+            updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
           }
-          await addLog('quest', 'Quest for Lancelot WON! 1 White Sword + Lancelot\'s Armor.');
+          await requestCardDraw('white', 4);
+          await addLog('quest', 'Quest for Lancelot WON! 1 White Sword, +1 LP, Armor relic, 4 cards.');
         } else if (questKey === 'lancelot' && q.phase === 'dragon') {
-          await addSword('white', 'dragon');
+          for (let i = 0; i < 2; i++) await addSword('white', 'dragon');
           for (const kid of knightsOnQuest) {
-            if (kid === 'palamedes') {
-              updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.min(6, (cachedPlayers[kid]?.life || 4) + 1);
-            }
+            let life = Math.min(6, (cachedPlayers[kid]?.life || 4) + 2);
+            if (kid === 'palamedes') life = Math.min(6, life + 1);
+            updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
           }
-          await addLog('quest', "Dragon's Quest WON! 1 White Sword placed.");
+          await requestCardDraw('white', 7);
+          await addLog('quest', "Dragon's Quest WON! 2 White Swords, +2 LP, 7 cards.");
         }
       } else {
         // Defeat
         if (questKey === 'blackKnight') {
           await addSword('black', 'blackKnight');
           for (const kid of knightsOnQuest) {
-            const life = Math.max(0, (cachedPlayers[kid]?.life || 4) - 1);
-            updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
+            updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.max(0, (cachedPlayers[kid]?.life || 4) - 1);
           }
-          await addLog('quest', 'Black Knight Tournament LOST! 1 Black Sword placed.');
+          await addLog('quest', 'Black Knight Tournament LOST! 1 Black Sword, -1 LP.');
         } else if (questKey === 'lancelot' && q.phase === 'lancelot') {
           await addSword('black', 'lancelot');
           for (const kid of knightsOnQuest) {
-            const life = Math.max(0, (cachedPlayers[kid]?.life || 4) - 1);
-            updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
+            updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.max(0, (cachedPlayers[kid]?.life || 4) - 1);
           }
-          await addLog('quest', 'Quest for Lancelot LOST! 1 Black Sword placed.');
+          await addLog('quest', 'Quest for Lancelot LOST! 1 Black Sword, -1 LP.');
         } else if (questKey === 'lancelot' && q.phase === 'dragon') {
-          await addSword('black', 'dragon');
+          for (let i = 0; i < 2; i++) await addSword('black', 'dragon');
           for (const kid of knightsOnQuest) {
-            const life = Math.max(0, (cachedPlayers[kid]?.life || 4) - 1);
-            updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
+            updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.max(0, (cachedPlayers[kid]?.life || 4) - 2);
           }
-          // Dragon defeat also adds siege engine
-          updates['games/' + currentRoom + '/board/siegeEngines'] = (cachedBoard?.siegeEngines || 0) + 1;
-          await addLog('quest', "Dragon's Quest LOST! 1 Black Sword + 1 Siege Engine.");
+          await addLog('quest', "Dragon's Quest LOST! 2 Black Swords, -2 LP.");
         }
       }
 
@@ -3911,9 +3960,11 @@
       }
 
       // Clear combat resolution
+      const wasFromEvil = roomData?.combatResolution?.fromEvil;
       updates['games/' + currentRoom + '/meta/combatResolution'] = null;
       await fbDb.ref().update(updates);
       if (await checkGameEnd()) return;
+      if (wasFromEvil) await advanceToHeroicPhase();
     }
 
     async function addSword(color, source) {
@@ -3933,55 +3984,48 @@
       const updates = {};
 
       if (questKey === 'excalibur') {
-        await addSword('white', 'excalibur');
-        // Grant Excalibur relic to completing knight (the one who played the card)
+        for (let i = 0; i < 2; i++) await addSword('white', 'excalibur');
         updates['games/' + currentRoom + '/players/' + myKnight + '/relics/excalibur'] = true;
         for (const kid of knightsOnQuest) {
+          let life = Math.min(6, (cachedPlayers[kid]?.life || 4) + 1);
+          if (kid === 'palamedes') life = Math.min(6, life + 1);
+          updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
           updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
-          if (kid === 'palamedes') {
-            updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.min(6, (cachedPlayers[kid]?.life || 4) + 1);
-          }
         }
         updates['games/' + currentRoom + '/quests/excalibur/status'] = 'won';
         updates['games/' + currentRoom + '/quests/excalibur/knightsPresent'] = [];
         await fbDb.ref().update(updates);
-        await addLog('quest', 'Quest for Excalibur WON! 1 White Sword + Excalibur relic to ' + getKnightDisplayName(myKnight));
+        await requestCardDraw('white', 7);
+        await addLog('quest', 'Quest for Excalibur WON! 2 White Swords, +1 LP each, 7 cards, Excalibur relic to ' + getKnightDisplayName(myKnight));
 
       } else if (questKey === 'holyGrail') {
         for (let i = 0; i < 3; i++) await addSword('white', 'holyGrail');
         updates['games/' + currentRoom + '/players/' + myKnight + '/relics/holyGrail'] = true;
         for (const kid of knightsOnQuest) {
+          let life = Math.min(6, (cachedPlayers[kid]?.life || 4) + 1);
+          if (kid === 'palamedes') life = Math.min(6, life + 1);
+          updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
           updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
-          if (kid === 'palamedes') {
-            updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.min(6, (cachedPlayers[kid]?.life || 4) + 1);
-          }
         }
         updates['games/' + currentRoom + '/quests/holyGrail/status'] = 'won';
         updates['games/' + currentRoom + '/quests/holyGrail/knightsPresent'] = [];
         await fbDb.ref().update(updates);
-        await addLog('quest', 'Quest for the Holy Grail WON! 3 White Swords + Holy Grail relic to ' + getKnightDisplayName(myKnight));
+        await requestCardDraw('white', 7);
+        await addLog('quest', 'Quest for the Holy Grail WON! 3 White Swords, +1 LP, 7 cards, Holy Grail relic to ' + getKnightDisplayName(myKnight));
 
       } else if (questKey === 'saxonWar' || questKey === 'pictWar') {
         const warName = questKey === 'saxonWar' ? 'Saxon War' : 'Pict War';
         await addSword('white', questKey);
         for (const kid of knightsOnQuest) {
-          const life = Math.min(6, (cachedPlayers[kid]?.life || 4) + 1);
+          let life = Math.min(6, (cachedPlayers[kid]?.life || 4) + 1);
+          if (kid === 'palamedes') life = Math.min(6, life + 1);
           updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
           updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
-          if (kid === 'palamedes') {
-            updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.min(6, life + 1);
-          }
         }
-        // Reset perpetual quest
         updates['games/' + currentRoom + '/quests/' + questKey] = { status: 'active', warriors: 0, fightCards: [], knightsPresent: [] };
         await fbDb.ref().update(updates);
-
-        // Draw & share 3 White cards among knights present
-        if (knightsOnQuest.length > 0) {
-          // For simplicity, give cards to the active player for now (sharing is complex)
-          await requestCardDraw('white', 3);
-        }
-        await addLog('quest', warName + ' WON! 1 White Sword, +1 LP each, 3 cards drawn.');
+        await requestCardDraw('white', 4);
+        await addLog('quest', warName + ' WON! 1 White Sword, +1 LP each, 4 cards drawn.');
       }
 
       await checkGameEnd();
@@ -4190,9 +4234,9 @@
     }
 
     function renderSpecialWhiteUI(area) {
-      const specials = myHand.filter(c => c.type === 'special' && c.name !== 'Merlin');
+      const specials = myHand.filter(c => c.type === 'special');
       const selectedCard = selectedCardId ? myHand.find(c => c.id === selectedCardId) : null;
-      const validSelection = selectedCard && selectedCard.type === 'special' && selectedCard.name !== 'Merlin';
+      const validSelection = selectedCard && selectedCard.type === 'special';
 
       let html = '<div class="quest-play-panel"><h3>Play Special White Card</h3>';
 
@@ -4218,6 +4262,7 @@
 
     function getSpecialWhiteDesc(name) {
       const descs = {
+        'Merlin': 'Remove 1 siege engine, OR remove last black card from a quest, OR remove 1 warrior',
         'Piety': 'Gain 3 LP OR each other knight gains 1 LP',
         'Reinforcements': 'Draw 4 White cards OR each other knight draws 1',
         'Lady of the Lake': 'Move Excalibur 1 toward knights (or gain 2 LP if quest done)',
@@ -4232,7 +4277,7 @@
 
     async function performSpecialWhitePlay(cardId) {
       const card = myHand.find(c => c.id === cardId);
-      if (!card || card.type !== 'special' || card.name === 'Merlin') return;
+      if (!card || card.type !== 'special') return;
 
       // Remove from hand
       myHand = myHand.filter(c => c.id !== cardId);
@@ -4316,11 +4361,127 @@
         heroicSubState = { cardsToPass: [], step: 'selectCards' };
         renderTurnActions();
 
+      } else if (name === 'Merlin') {
+        heroicMode = 'merlinChoice';
+        renderTurnActions();
+
       } else {
         // Deferred cards (Fate, Heroism, Clairvoyance, Convocation)
         showToast(name + ' — coming in Phase 5');
         await completeHeroicAction('specialWhite');
       }
+    }
+
+    function renderMerlinChoiceUI(area) {
+      const hasSiege = (cachedBoard?.siegeEngines || 0) > 0;
+      const hasBlackOnQuest = getMerlinQuestTargets().length > 0;
+      const hasSaxon = (cachedQuests?.saxonWar?.warriors || 0) > 0;
+      const hasPict = (cachedQuests?.pictWar?.warriors || 0) > 0;
+      const hasWarrior = hasSaxon || hasPict;
+
+      let html = '<div class="quest-play-panel"><h3>Merlin — Choose Effect</h3>';
+      html += '<button class="btn btn-heroic" id="btn-merlin-siege"' +
+        (hasSiege ? '' : ' disabled') + '>Remove 1 Siege Engine</button>';
+      html += '<button class="btn btn-heroic" id="btn-merlin-quest" style="margin-top:0.5rem;"' +
+        (hasBlackOnQuest ? '' : ' disabled') + '>Remove last black card from quest</button>';
+      html += '<button class="btn btn-heroic" id="btn-merlin-war" style="margin-top:0.5rem;"' +
+        (hasWarrior ? '' : ' disabled') + '>Remove 1 warrior from war</button>';
+      html += '<button class="btn btn-heroic" id="btn-cancel-merlin" style="margin-top:0.75rem;opacity:0.7;">Cancel</button></div>';
+      area.innerHTML = html;
+
+      document.getElementById('btn-merlin-siege')?.addEventListener('click', async () => {
+        const se = Math.max(0, (cachedBoard?.siegeEngines || 0) - 1);
+        await fbDb.ref('games/' + currentRoom + '/board/siegeEngines').set(se);
+        await addLog('info', getKnightDisplayName(myKnight) + ' used Merlin to remove 1 Siege Engine');
+        heroicMode = null;
+        await completeHeroicAction('specialWhite');
+      });
+      document.getElementById('btn-merlin-quest')?.addEventListener('click', () => {
+        heroicMode = 'merlinQuest';
+        renderTurnActions();
+      });
+      document.getElementById('btn-merlin-war')?.addEventListener('click', () => {
+        heroicMode = 'merlinWar';
+        renderTurnActions();
+      });
+      document.getElementById('btn-cancel-merlin')?.addEventListener('click', () => {
+        heroicMode = null; selectedCardId = null; renderHand(); renderTurnActions();
+      });
+    }
+
+    function getMerlinQuestTargets() {
+      const targets = [];
+      const q = cachedQuests;
+      if (!q) return targets;
+      if (q.blackKnight?.status === 'active' && (q.blackKnight.blackCards || []).length > 0) targets.push('blackKnight');
+      if (q.lancelot?.status === 'active' && (q.lancelot.blackCards || []).length > 0) targets.push('lancelot');
+      if (q.excalibur?.status === 'active' && (q.excalibur.position || 0) < 0) targets.push('excalibur');
+      if (q.holyGrail?.status === 'active') {
+        const despair = (q.holyGrail.cards || []).filter(c => c.type === 'despair' || c.type === 'desolation');
+        if (despair.length > 0) targets.push('holyGrail');
+      }
+      return targets;
+    }
+
+    function renderMerlinQuestUI(area) {
+      const targets = getMerlinQuestTargets();
+      let html = '<div class="quest-play-panel"><h3>Merlin — Remove Black Card from Quest</h3><div class="move-grid">';
+      for (const key of targets) {
+        html += '<div class="move-dest" data-quest="' + key + '"><div class="dest-name">' + getLocationLabel(key) + '</div></div>';
+      }
+      html += '</div><button class="btn btn-heroic" id="btn-back-merlin" style="margin-top:0.75rem;opacity:0.7;">Back</button></div>';
+      area.innerHTML = html;
+      document.querySelectorAll('.move-dest[data-quest]').forEach(el => {
+        el.addEventListener('click', () => performMerlinQuestRemove(el.dataset.quest));
+      });
+      document.getElementById('btn-back-merlin')?.addEventListener('click', () => { heroicMode = 'merlinChoice'; renderTurnActions(); });
+    }
+
+    async function performMerlinQuestRemove(questKey) {
+      const q = cachedQuests[questKey];
+      if (!q) return;
+      const updates = {};
+      if (questKey === 'excalibur') {
+        updates['games/' + currentRoom + '/quests/excalibur/position'] = (q.position || 0) + 1;
+        await addLog('info', getKnightDisplayName(myKnight) + ' used Merlin to move Excalibur toward knights');
+      } else if (questKey === 'holyGrail') {
+        const cards = [...(q.cards || [])];
+        for (let i = cards.length - 1; i >= 0; i--) {
+          if (cards[i].type === 'despair' || cards[i].type === 'desolation') { cards.splice(i, 1); break; }
+        }
+        updates['games/' + currentRoom + '/quests/holyGrail/cards'] = cards;
+        await addLog('info', getKnightDisplayName(myKnight) + ' used Merlin to remove last Despair from Holy Grail');
+      } else {
+        const blackCards = [...(q.blackCards || [])];
+        blackCards.pop();
+        updates['games/' + currentRoom + '/quests/' + questKey + '/blackCards'] = blackCards;
+        await addLog('info', getKnightDisplayName(myKnight) + ' used Merlin to remove last black card from ' + getLocationLabel(questKey));
+      }
+      await fbDb.ref().update(updates);
+      heroicMode = null;
+      await completeHeroicAction('specialWhite');
+    }
+
+    function renderMerlinWarUI(area) {
+      const hasSaxon = (cachedQuests?.saxonWar?.warriors || 0) > 0;
+      const hasPict = (cachedQuests?.pictWar?.warriors || 0) > 0;
+      let html = '<div class="quest-play-panel"><h3>Merlin — Remove 1 Warrior</h3><div class="move-grid">';
+      if (hasSaxon) html += '<div class="move-dest" data-war="saxonWar"><div class="dest-name">Saxon War</div><div class="dest-info">' + cachedQuests.saxonWar.warriors + ' warriors</div></div>';
+      if (hasPict) html += '<div class="move-dest" data-war="pictWar"><div class="dest-name">Pict War</div><div class="dest-info">' + cachedQuests.pictWar.warriors + ' warriors</div></div>';
+      html += '</div><button class="btn btn-heroic" id="btn-back-merlin" style="margin-top:0.75rem;opacity:0.7;">Back</button></div>';
+      area.innerHTML = html;
+      document.querySelectorAll('.move-dest[data-war]').forEach(el => {
+        el.addEventListener('click', async () => {
+          const warKey = el.dataset.war;
+          const w = Math.max(0, (cachedQuests?.[warKey]?.warriors || 0) - 1);
+          await fbDb.ref('games/' + currentRoom + '/quests/' + warKey + '/warriors').set(w);
+          const warName = warKey === 'saxonWar' ? 'Saxon' : 'Pict';
+          await addLog('info', getKnightDisplayName(myKnight) + ' used Merlin to remove 1 ' + warName + ' warrior');
+          heroicMode = null;
+          await completeHeroicAction('specialWhite');
+        });
+      });
+      document.getElementById('btn-back-merlin')?.addEventListener('click', () => { heroicMode = 'merlinChoice'; renderTurnActions(); });
     }
 
     function renderMessengerUI(area) {
