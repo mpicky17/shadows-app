@@ -526,6 +526,45 @@
     .log-entry.info { color: var(--text-dim); }
     .log-entry.quest { color: var(--gold); }
     .log-entry.system { color: var(--blue); }
+    /* ── Phase 4: Heroic Actions ─────────────────────────────────── */
+    .heroic-menu { padding: 1rem; background: var(--bg-card); border-radius: var(--radius); border: 1px solid var(--gold-dim); }
+    .heroic-menu h3 { color: var(--gold); font-size: 1rem; margin-bottom: 0.25rem; }
+    .location-bar { color: var(--text-dim); font-size: 1rem; margin-bottom: 0.75rem; display: flex; justify-content: space-between; align-items: center; }
+    .location-bar .loc-name { color: var(--gold); font-weight: 600; }
+    .heroic-actions { display: flex; flex-direction: column; gap: 0.5rem; }
+    .btn-heroic:disabled { opacity: 0.4; cursor: not-allowed; }
+    .btn-sacrifice { border-color: var(--red-bright); color: var(--red-bright); font-size: 1rem; width: 100%; }
+    .btn-sacrifice:hover { background: var(--red-bright); color: white; }
+    .move-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.5rem; margin-top: 0.5rem; }
+    .move-dest { padding: 0.75rem; background: var(--bg-card); border: 1px solid var(--gold-dim); border-radius: var(--radius); cursor: pointer; text-align: center; font-size: 1rem; color: var(--parchment); }
+    .move-dest:hover { border-color: var(--gold); }
+    .move-dest.current { border-color: var(--gold); background: rgba(212,168,67,0.15); }
+    .move-dest.disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
+    .move-dest .dest-name { font-weight: 600; }
+    .move-dest .dest-info { font-size: 0.875rem; color: var(--text-dim); margin-top: 0.25rem; }
+    .siege-panel { padding: 1rem; background: var(--bg-card); border-radius: var(--radius); border: 1px solid var(--gold-dim); text-align: center; }
+    .siege-panel h3 { color: var(--gold); font-size: 1rem; margin-bottom: 0.5rem; }
+    .siege-total { font-size: 1.25rem; font-weight: 700; color: var(--gold); margin: 0.5rem 0; }
+    .d8-result { font-size: 2rem; font-weight: 700; margin: 0.5rem 0; }
+    .d8-result.win { color: var(--green); }
+    .d8-result.lose { color: var(--red-bright); }
+    .combat-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); z-index: 200; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 1.5rem; gap: 1rem; text-align: center; overflow-y: auto; }
+    .combat-overlay.hidden { display: none; }
+    .combat-cards { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center; margin: 0.5rem 0; }
+    .combat-card { width: 60px; min-height: 80px; border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 1rem; font-weight: 700; padding: 0.375rem; }
+    .combat-card.white-side { background: linear-gradient(135deg, #F5F0E1, #E8DCC8); color: #333; border: 2px solid var(--gold); }
+    .combat-card.black-side { background: linear-gradient(135deg, #1a1a1a, #2a1a1a); color: var(--parchment); border: 2px solid var(--red-bright); }
+    .combat-card .cc-val { font-size: 1.25rem; }
+    .combat-result { font-size: 1.5rem; font-weight: 700; margin: 0.5rem 0; }
+    .combat-result.victory { color: var(--gold); }
+    .combat-result.defeat { color: var(--red-bright); }
+    .hand-card.dimmed { opacity: 0.35; pointer-events: none; }
+    .hand-card.multi-selected { border-color: var(--gold); transform: translateY(-8px); box-shadow: 0 4px 12px rgba(212,168,67,0.4); }
+    .quest-play-panel { padding: 1rem; background: var(--bg-card); border-radius: var(--radius); border: 1px solid var(--gold-dim); text-align: center; }
+    .quest-play-panel h3 { color: var(--gold); font-size: 1rem; margin-bottom: 0.5rem; }
+    .gp-loc { font-size: 0.75rem; color: var(--text-dim); display: block; margin-top: 0.125rem; }
+    .heal-option { padding: 0.75rem; margin: 0.25rem 0; border: 1px solid var(--gold-dim); border-radius: var(--radius); cursor: pointer; text-align: center; font-size: 1rem; color: var(--parchment); }
+    .heal-option:hover { border-color: var(--gold); }
   </style>
 </head>
 <body>
@@ -646,6 +685,11 @@
       <p id="reveal-effect-desc"></p>
       <div class="card-reveal-actions" id="reveal-actions"></div>
     </div>
+    <div class="combat-overlay hidden" id="combat-overlay">
+      <h2 id="combat-title">Quest Resolution</h2>
+      <div id="combat-content"></div>
+      <div id="combat-actions"></div>
+    </div>
   </div>
 
   <!-- Toast -->
@@ -656,7 +700,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v8';
+    const APP_VERSION = 'shadows-v9';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -752,6 +796,9 @@
     let logListener = null;
     let discardMode = null;
     let discardCount = 0;
+    let heroicMode = null;       // 'move'|'playCard'|'fightSiege'|'heal'|'specialWhite'|null
+    let heroicSubState = {};     // context for current heroic sub-action
+    let lastHeroicAction = null; // track first action type for sacrifice restriction
 
     // ═══════════════════════════════════════════════════════════════════
     //  SECTION 3: Firebase Setup
@@ -1195,6 +1242,7 @@
           // Phase 3: handle revealed black card and pending interaction
           onRevealedBlackCardChanged();
           renderPendingInteraction();
+          onCombatResolutionChanged();
         }
       });
 
@@ -1324,6 +1372,9 @@
       cachedPlayers = {};
       discardMode = null;
       discardCount = 0;
+      heroicMode = null;
+      heroicSubState = {};
+      lastHeroicAction = null;
 
       showScreen('home-screen');
       updateHomeScreenForSession();
@@ -1641,6 +1692,19 @@
         const el = document.createElement('div');
         el.className = 'hand-card ' + getCardCSSClass(card);
         if (card.id === selectedCardId) el.classList.add('selected');
+        // Heroic mode dimming & multi-select
+        if (heroicMode === 'playCard') {
+          if (!validateCardForQuest(card, getMyLocation())) el.classList.add('dimmed');
+        } else if (heroicMode === 'fightSiege') {
+          if (card.type !== 'fight') el.classList.add('dimmed');
+          else if ((heroicSubState.selectedCards || []).includes(card.id)) el.classList.add('multi-selected');
+        } else if (heroicMode === 'specialWhite') {
+          if (card.type !== 'special' || card.name === 'Merlin') el.classList.add('dimmed');
+        } else if (heroicMode === 'kayExtra') {
+          if (card.type !== 'fight') el.classList.add('dimmed');
+        } else if (heroicMode === 'messenger' && heroicSubState.step === 'selectCards') {
+          if ((heroicSubState.cardsToPass || []).includes(card.id)) el.classList.add('multi-selected');
+        }
 
         const val = getCardValueDisplay(card);
         const name = getCardDisplayName(card);
@@ -1698,7 +1762,13 @@
         return;
       }
 
-      // Normal card selection (for future heroic actions)
+      // Heroic mode card selection
+      if (heroicMode) {
+        handleHeroicCardTap(cardId);
+        return;
+      }
+
+      // Normal card selection
       selectedCardId = (selectedCardId === cardId) ? null : cardId;
       renderHand();
     }
@@ -1772,6 +1842,7 @@
           '<img src="' + knight.icon + '" alt="">' +
           '<span>' + p.displayName + '</span>' +
           '<span class="gp-life">' + '\u2665'.repeat(Math.max(0, p.life)) + '</span>' +
+          '<span class="gp-loc">' + getLocationLabel(p.location || 'roundTable') + '</span>' +
           '</div>';
       }).join('');
 
@@ -2083,14 +2154,7 @@
         }
       } else if (roomData.turnPhase === 'heroic') {
         if (isMyTurn()) {
-          area.innerHTML =
-            '<div class="turn-actions">' +
-            '<h3>Heroic Action</h3>' +
-            '<p style="color:var(--text-dim);font-size:0.875rem;margin-bottom:0.5rem;">Heroic actions coming in Phase 4. End your turn for now.</p>' +
-            '<div class="action-buttons">' +
-            '<button class="btn btn-heroic" id="btn-end-turn">End Turn</button>' +
-            '</div></div>';
-          document.getElementById('btn-end-turn').addEventListener('click', advanceTurn);
+          renderHeroicMenu();
         } else {
           area.innerHTML = '<div class="turn-actions"><p class="waiting-text">Waiting for ' + currentName + '\'s heroic action...</p></div>';
         }
@@ -3153,7 +3217,14 @@
       updates['games/' + currentRoom + '/meta/heroicActionTaken'] = false;
       updates['games/' + currentRoom + '/meta/sacrificeUsed'] = false;
       updates['games/' + currentRoom + '/meta/specialWhitePlayed'] = false;
+      updates['games/' + currentRoom + '/meta/combatResolution'] = null;
       await fbDb.ref().update(updates);
+
+      // Reset local heroic state
+      heroicMode = null;
+      heroicSubState = {};
+      lastHeroicAction = null;
+      selectedCardId = null;
 
       await addLog('info', 'Turn ' + ((roomData.turnNumber || 1) + 1) + ': ' + getKnightDisplayName(nextKnight) + '\'s turn');
     }
@@ -3172,7 +3243,1181 @@
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    //  SECTION 13: Service Worker Registration
+    //  SECTION 13A: Heroic Actions — Menu & Helpers
+    // ═══════════════════════════════════════════════════════════════════
+
+    const LOCATION_LABELS = {
+      roundTable: 'Round Table', siege: 'Siege Area',
+      blackKnight: 'Black Knight Tournament', lancelot: 'Quest for Lancelot',
+      excalibur: 'Quest for Excalibur', holyGrail: 'Quest for the Holy Grail',
+      saxonWar: 'Saxon War', pictWar: 'Pict War',
+    };
+
+    function getMyLocation() { return cachedPlayers[myKnight]?.location || 'roundTable'; }
+
+    function getLocationLabel(loc) {
+      if (loc === 'lancelot' && cachedQuests?.lancelot?.phase === 'dragon') return "Dragon's Quest";
+      return LOCATION_LABELS[loc] || loc;
+    }
+
+    function getHandLimit() { return roomData?.persistentEffects?.vivien ? 10 : 12; }
+
+    function isSoloQuest(qk) { return qk === 'blackKnight' || qk === 'lancelot'; }
+
+    function isSoloQuestOccupied(qk) {
+      const q = cachedQuests?.[qk];
+      if (!q) return false;
+      return (q.knightsPresent || []).some(k => k !== myKnight);
+    }
+
+    function isQuestAvailable(qk) {
+      const q = cachedQuests?.[qk];
+      return q && q.status === 'active';
+    }
+
+    async function completeHeroicAction(actionType) {
+      lastHeroicAction = actionType;
+      heroicMode = null;
+      heroicSubState = {};
+      selectedCardId = null;
+      await fbDb.ref('games/' + currentRoom + '/meta/heroicActionTaken').set(true);
+      renderHand();
+    }
+
+    function renderHeroicMenu() {
+      const area = $('turn-action-area');
+      const loc = getMyLocation();
+
+      // If in a sub-mode, delegate to that renderer
+      if (heroicMode === 'move') { renderMoveSelector(area); return; }
+      if (heroicMode === 'playCard') { renderQuestCardPlayUI(area); return; }
+      if (heroicMode === 'fightSiege') { renderSiegeFightUI(area); return; }
+      if (heroicMode === 'heal') { renderHealUI(area); return; }
+      if (heroicMode === 'specialWhite') { renderSpecialWhiteUI(area); return; }
+      if (heroicMode === 'messenger') { renderMessengerUI(area); return; }
+      if (heroicMode === 'kayExtra') { return; } // Handled by combat overlay
+
+      // After action taken — show End Turn + optional Sacrifice
+      if (roomData.heroicActionTaken) {
+        let html = '<div class="heroic-menu"><h3>Action Complete</h3><div class="heroic-actions">' +
+          '<button class="btn btn-heroic" id="btn-end-turn">End Turn</button>';
+        if (!roomData.sacrificeUsed && (cachedPlayers[myKnight]?.life || 0) > 1) {
+          html += '<button class="btn btn-sacrifice" id="btn-sacrifice">Sacrifice 1 LP for another action</button>';
+        }
+        html += '</div></div>';
+        area.innerHTML = html;
+        document.getElementById('btn-end-turn').addEventListener('click', advanceTurn);
+        const sacBtn = document.getElementById('btn-sacrifice');
+        if (sacBtn) sacBtn.addEventListener('click', performSacrifice);
+        return;
+      }
+
+      // Build the heroic action menu
+      const locLabel = getLocationLabel(loc);
+      const handLimit = getHandLimit();
+      const atLimit = myHand.length >= handLimit;
+      const mistActive = roomData?.persistentEffects?.mistOfAvalon;
+      const hasSpecialWhite = myHand.some(c => c.type === 'special' && c.name !== 'Merlin');
+      const siegeEngines = cachedBoard?.siegeEngines || 0;
+
+      let html = '<div class="heroic-menu"><h3>Heroic Action</h3>' +
+        '<div class="location-bar"><span>Location: <span class="loc-name">' + locLabel + '</span></span>';
+      // Free RT ↔ Siege toggle
+      if (loc === 'roundTable') {
+        html += '<button class="btn btn-heroic" style="padding:0.375rem 0.75rem;font-size:0.875rem;" id="btn-free-siege">Go to Siege Area</button>';
+      } else if (loc === 'siege') {
+        html += '<button class="btn btn-heroic" style="padding:0.375rem 0.75rem;font-size:0.875rem;" id="btn-free-rt">Go to Round Table</button>';
+      }
+      html += '</div><div class="heroic-actions">';
+
+      // Location-specific action
+      if (loc === 'roundTable') {
+        const blocked = lastHeroicAction === 'drawCards';
+        html += '<button class="btn btn-heroic" id="btn-draw-white"' + (atLimit || blocked ? ' disabled' : '') + '>' +
+          'Draw White Cards' + (atLimit ? ' (hand full)' : '') + '</button>';
+      } else if (loc === 'siege') {
+        const hasFight = myHand.some(c => c.type === 'fight');
+        const blocked = lastHeroicAction === 'siegeFight';
+        html += '<button class="btn btn-heroic" id="btn-siege-fight"' + (!hasFight || siegeEngines === 0 || blocked ? ' disabled' : '') + '>' +
+          'Fight Siege Engine' + (siegeEngines === 0 ? ' (none)' : '') + '</button>';
+      } else if (isQuestAvailable(loc)) {
+        const canPlay = canPlayCardOnQuest(loc);
+        const blocked = lastHeroicAction === 'questAction';
+        html += '<button class="btn btn-heroic" id="btn-quest-action"' + (!canPlay || blocked ? ' disabled' : '') + '>' +
+          getQuestActionLabel(loc) + '</button>';
+      }
+
+      // Universal actions
+      const moveBlocked = lastHeroicAction === 'move';
+      html += '<button class="btn btn-heroic" id="btn-move"' + (moveBlocked ? ' disabled' : '') + '>Move to a Quest</button>';
+
+      if (hasSpecialWhite && !mistActive && !roomData.specialWhitePlayed) {
+        const swBlocked = lastHeroicAction === 'specialWhite';
+        html += '<button class="btn btn-heroic" id="btn-special-white"' + (swBlocked ? ' disabled' : '') + '>Play Special White Card</button>';
+      }
+
+      const healSets = findHealSets();
+      const healBlocked = lastHeroicAction === 'heal';
+      if (healSets.length > 0) {
+        html += '<button class="btn btn-heroic" id="btn-heal"' + (healBlocked ? ' disabled' : '') + '>Heal (discard 3 identical)</button>';
+      }
+
+      html += '<button class="btn btn-heroic" id="btn-end-turn" style="margin-top:0.5rem;opacity:0.7;">End Turn (skip action)</button>';
+      html += '</div></div>';
+      area.innerHTML = html;
+
+      // Event listeners
+      const drawBtn = document.getElementById('btn-draw-white');
+      if (drawBtn) drawBtn.addEventListener('click', performDrawWhiteCards);
+      const siegeBtn = document.getElementById('btn-siege-fight');
+      if (siegeBtn) siegeBtn.addEventListener('click', startSiegeFight);
+      const questBtn = document.getElementById('btn-quest-action');
+      if (questBtn) questBtn.addEventListener('click', startQuestCardPlay);
+      const moveBtn = document.getElementById('btn-move');
+      if (moveBtn) moveBtn.addEventListener('click', startMoveAction);
+      const swBtn = document.getElementById('btn-special-white');
+      if (swBtn) swBtn.addEventListener('click', startSpecialWhitePlay);
+      const healBtn = document.getElementById('btn-heal');
+      if (healBtn) healBtn.addEventListener('click', startHealAction);
+      document.getElementById('btn-end-turn').addEventListener('click', advanceTurn);
+
+      // Free move listeners
+      const freeSiege = document.getElementById('btn-free-siege');
+      if (freeSiege) freeSiege.addEventListener('click', () => performFreeMove('siege'));
+      const freeRT = document.getElementById('btn-free-rt');
+      if (freeRT) freeRT.addEventListener('click', () => performFreeMove('roundTable'));
+    }
+
+    function getQuestActionLabel(loc) {
+      if (loc === 'holyGrail') return 'Play Grail Card';
+      if (loc === 'excalibur') return 'Discard Card for Excalibur';
+      if (loc === 'saxonWar' || loc === 'pictWar') {
+        const q = cachedQuests?.[loc];
+        const next = (q?.fightCards || []).length + 1;
+        return 'Play Fight ' + next + ' Card';
+      }
+      return 'Play Fight Card';
+    }
+
+    function canPlayCardOnQuest(loc) {
+      const q = cachedQuests?.[loc];
+      if (!q || q.status !== 'active') return false;
+      if (loc === 'holyGrail') return myHand.some(c => c.type === 'grail');
+      if (loc === 'excalibur') return myHand.length > 0;
+      if (loc === 'saxonWar' || loc === 'pictWar') {
+        const next = (q.fightCards || []).length + 1;
+        return myHand.some(c => c.type === 'fight' && c.value === next);
+      }
+      // Combat quests
+      if (loc === 'blackKnight') return (q.whiteCards || []).length < 4 && myHand.some(c => c.type === 'fight');
+      if (loc === 'lancelot') {
+        const max = q.phase === 'dragon' ? 9 : 5;
+        return (q.whiteCards || []).length < max && myHand.some(c => c.type === 'fight');
+      }
+      return false;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SECTION 13B: Heroic Actions — Move System
+    // ═══════════════════════════════════════════════════════════════════
+
+    function startMoveAction() {
+      heroicMode = 'move';
+      renderTurnActions();
+    }
+
+    function renderMoveSelector(area) {
+      const currentLoc = getMyLocation();
+      const destinations = [
+        { key: 'roundTable', name: 'Round Table', info: 'Draw White cards' },
+        { key: 'siege', name: 'Siege Area', info: (cachedBoard?.siegeEngines || 0) + ' siege engines' },
+        { key: 'holyGrail', name: 'Holy Grail', info: getQuestStatusInfo('holyGrail') },
+        { key: 'excalibur', name: 'Excalibur', info: getQuestStatusInfo('excalibur') },
+        { key: 'blackKnight', name: 'Black Knight', info: getQuestStatusInfo('blackKnight') },
+        { key: 'lancelot', name: cachedQuests?.lancelot?.phase === 'dragon' ? 'Dragon' : 'Lancelot', info: getQuestStatusInfo('lancelot') },
+        { key: 'saxonWar', name: 'Saxon War', info: getQuestStatusInfo('saxonWar') },
+        { key: 'pictWar', name: 'Pict War', info: getQuestStatusInfo('pictWar') },
+      ];
+
+      let html = '<div class="heroic-menu"><h3>Move to a Quest</h3>' +
+        '<p style="color:var(--text-dim);font-size:0.875rem;margin-bottom:0.5rem;">Select destination:</p>' +
+        '<div class="move-grid">';
+
+      for (const dest of destinations) {
+        let cls = 'move-dest';
+        let disabled = false;
+        if (dest.key === currentLoc) { cls += ' current'; disabled = true; }
+        if (!isQuestAvailable(dest.key) && dest.key !== 'roundTable' && dest.key !== 'siege') { cls += ' disabled'; disabled = true; }
+        if (isSoloQuest(dest.key) && isSoloQuestOccupied(dest.key)) { cls += ' disabled'; disabled = true; }
+        html += '<div class="' + cls + '" data-dest="' + dest.key + '">' +
+          '<div class="dest-name">' + dest.name + '</div>' +
+          '<div class="dest-info">' + dest.info + '</div></div>';
+      }
+
+      html += '</div><button class="btn btn-heroic" id="btn-cancel-move" style="margin-top:0.75rem;">Cancel</button></div>';
+      area.innerHTML = html;
+
+      document.querySelectorAll('.move-dest:not(.current):not(.disabled)').forEach(el => {
+        el.addEventListener('click', () => performMove(el.dataset.dest));
+      });
+      document.getElementById('btn-cancel-move').addEventListener('click', () => { heroicMode = null; renderTurnActions(); });
+    }
+
+    function getQuestStatusInfo(qk) {
+      const q = cachedQuests?.[qk];
+      if (!q) return 'N/A';
+      if (q.status !== 'active') return q.status;
+      const knights = (q.knightsPresent || []).length;
+      const kStr = knights > 0 ? ' (' + knights + ' knight' + (knights > 1 ? 's' : '') + ')' : '';
+      if (qk === 'holyGrail') {
+        const gc = (q.cards || []).filter(c => c?.type === 'grail').length;
+        const bc = (q.cards || []).filter(c => c?.type !== 'grail').length;
+        return gc + ' grail, ' + bc + ' despair' + kStr;
+      }
+      if (qk === 'excalibur') return 'Position: ' + (q.position || 0) + kStr;
+      if (qk === 'blackKnight') return (q.whiteCards || []).length + '/4 W, ' + (q.blackCards || []).length + '/4 B' + kStr;
+      if (qk === 'lancelot') {
+        const wMax = q.phase === 'dragon' ? 9 : 5;
+        return (q.whiteCards || []).length + '/' + wMax + ' W, ' + (q.blackCards || []).length + '/5 B' + kStr;
+      }
+      if (qk === 'saxonWar' || qk === 'pictWar') return (q.warriors || 0) + '/4 warriors, ' + (q.fightCards || []).length + '/5 fight' + kStr;
+      return kStr;
+    }
+
+    async function performMove(destination) {
+      const currentLoc = getMyLocation();
+      const updates = {};
+
+      // Remove from old quest's knightsPresent
+      if (currentLoc !== 'roundTable' && currentLoc !== 'siege' && cachedQuests?.[currentLoc]) {
+        const oldKnights = (cachedQuests[currentLoc].knightsPresent || []).filter(k => k !== myKnight);
+        updates['games/' + currentRoom + '/quests/' + currentLoc + '/knightsPresent'] = oldKnights;
+      }
+
+      // Add to new quest's knightsPresent
+      if (destination !== 'roundTable' && destination !== 'siege' && cachedQuests?.[destination]) {
+        const newKnights = [...(cachedQuests[destination].knightsPresent || []), myKnight];
+        updates['games/' + currentRoom + '/quests/' + destination + '/knightsPresent'] = newKnights;
+      }
+
+      updates['games/' + currentRoom + '/players/' + myKnight + '/location'] = destination;
+      await fbDb.ref().update(updates);
+      await addLog('info', getKnightDisplayName(myKnight) + ' moved to ' + getLocationLabel(destination));
+
+      // Check if this is a free move (Tristan leaving RT)
+      const isTristanFree = myKnight === 'tristan' && currentLoc === 'roundTable';
+      if (isTristanFree) {
+        heroicMode = null;
+        heroicSubState = {};
+        renderTurnActions();
+        showToast('Free move! (Sir Tristan)');
+      } else {
+        await completeHeroicAction('move');
+      }
+    }
+
+    async function performFreeMove(destination) {
+      const currentLoc = getMyLocation();
+      const updates = {};
+      // Remove from old
+      if (currentLoc !== 'roundTable' && currentLoc !== 'siege' && cachedQuests?.[currentLoc]) {
+        const oldKnights = (cachedQuests[currentLoc].knightsPresent || []).filter(k => k !== myKnight);
+        updates['games/' + currentRoom + '/quests/' + currentLoc + '/knightsPresent'] = oldKnights;
+      }
+      // Add to new
+      if (destination !== 'roundTable' && destination !== 'siege' && cachedQuests?.[destination]) {
+        const newKnights = [...(cachedQuests[destination].knightsPresent || []), myKnight];
+        updates['games/' + currentRoom + '/quests/' + destination + '/knightsPresent'] = newKnights;
+      }
+      updates['games/' + currentRoom + '/players/' + myKnight + '/location'] = destination;
+      await fbDb.ref().update(updates);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SECTION 13C: Heroic Actions — Round Table Draw
+    // ═══════════════════════════════════════════════════════════════════
+
+    async function performDrawWhiteCards() {
+      const handLimit = getHandLimit();
+      if (myHand.length >= handLimit) { showToast('Hand is full!'); return; }
+
+      let count = myKnight === 'gawain' ? 3 : 2;
+      if (roomData?.persistentEffects?.darkForest) count = Math.max(1, count - 1);
+      // Cap so we don't exceed hand limit
+      count = Math.min(count, handLimit - myHand.length);
+
+      await requestCardDraw('white', count);
+      await addLog('info', getKnightDisplayName(myKnight) + ' drew ' + count + ' White card' + (count > 1 ? 's' : '') + ' at the Round Table');
+      await completeHeroicAction('drawCards');
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SECTION 13D: Heroic Actions — Quest Card Play
+    // ═══════════════════════════════════════════════════════════════════
+
+    function startQuestCardPlay() {
+      heroicMode = 'playCard';
+      selectedCardId = null;
+      renderTurnActions();
+    }
+
+    function renderQuestCardPlayUI(area) {
+      const loc = getMyLocation();
+      const q = cachedQuests?.[loc];
+      if (!q) { heroicMode = null; renderTurnActions(); return; }
+
+      let prompt = getQuestActionLabel(loc);
+      let selectedCard = selectedCardId ? myHand.find(c => c.id === selectedCardId) : null;
+      let validSelection = selectedCard && validateCardForQuest(selectedCard, loc);
+
+      let html = '<div class="quest-play-panel"><h3>' + getLocationLabel(loc) + '</h3>' +
+        '<p style="color:var(--text-dim);font-size:1rem;margin-bottom:0.5rem;">' + prompt + '</p>';
+
+      if (selectedCard && validSelection) {
+        html += '<p style="color:var(--gold);font-size:1rem;">Selected: ' + getCardDisplayName(selectedCard) +
+          (selectedCard.value ? ' (' + selectedCard.value + ')' : '') + '</p>' +
+          '<button class="btn btn-heroic" id="btn-confirm-play" style="margin-top:0.5rem;">Confirm Play</button>';
+      } else if (selectedCard) {
+        html += '<p style="color:var(--red-bright);font-size:1rem;">Invalid card for this quest</p>';
+      } else {
+        html += '<p style="color:var(--text-dim);font-size:0.875rem;">Tap a card in your hand</p>';
+      }
+
+      html += '<button class="btn btn-heroic" id="btn-cancel-play" style="margin-top:0.5rem;opacity:0.7;">Cancel</button></div>';
+      area.innerHTML = html;
+
+      const confirmBtn = document.getElementById('btn-confirm-play');
+      if (confirmBtn) confirmBtn.addEventListener('click', () => performQuestCardPlay(selectedCardId));
+      document.getElementById('btn-cancel-play').addEventListener('click', () => {
+        heroicMode = null; selectedCardId = null; renderHand(); renderTurnActions();
+      });
+    }
+
+    function validateCardForQuest(card, questKey) {
+      const q = cachedQuests?.[questKey];
+      if (!q || q.status !== 'active') return false;
+      if (questKey === 'holyGrail') return card.type === 'grail';
+      if (questKey === 'excalibur') return true; // Any white card
+      if (questKey === 'saxonWar' || questKey === 'pictWar') {
+        const next = (q.fightCards || []).length + 1;
+        return card.type === 'fight' && card.value === next;
+      }
+      if (questKey === 'blackKnight') return card.type === 'fight' && (q.whiteCards || []).length < 4;
+      if (questKey === 'lancelot') {
+        const max = q.phase === 'dragon' ? 9 : 5;
+        return card.type === 'fight' && (q.whiteCards || []).length < max;
+      }
+      return false;
+    }
+
+    async function performQuestCardPlay(cardId) {
+      const loc = getMyLocation();
+      const card = myHand.find(c => c.id === cardId);
+      if (!card) return;
+
+      // Remove from hand
+      myHand = myHand.filter(c => c.id !== cardId);
+      const updates = {};
+      updates['private/' + currentRoom + '/' + myKnight + '/hand'] = myHand;
+
+      const q = cachedQuests[loc];
+
+      if (loc === 'excalibur') {
+        // Move Excalibur 1 toward knights
+        const newPos = (q.position || 0) + 1;
+        updates['games/' + currentRoom + '/quests/excalibur/position'] = newPos;
+        await fbDb.ref().update(updates);
+        await addLog('quest', getKnightDisplayName(myKnight) + ' moved Excalibur toward the knights (position ' + newPos + ')');
+        renderHand();
+        if (newPos >= 5) {
+          await resolveQuestVictory('excalibur');
+        }
+        await completeHeroicAction('questAction');
+
+      } else if (loc === 'holyGrail') {
+        const cards = q.cards || [];
+        const grailCount = cards.filter(c => c?.type === 'grail').length;
+        const totalSlots = 7;
+
+        if (cards.length < totalSlots) {
+          // Place grail on first empty spot
+          const newCards = [...cards, { type: 'grail', id: card.id }];
+          updates['games/' + currentRoom + '/quests/holyGrail/cards'] = newCards;
+          await fbDb.ref().update(updates);
+          const newGrailCount = grailCount + 1;
+          const newTotal = newCards.length;
+          await addLog('quest', getKnightDisplayName(myKnight) + ' placed a Grail card (' + newGrailCount + '/' + totalSlots + ')');
+          renderHand();
+          if (newGrailCount >= totalSlots) {
+            await resolveQuestVictory('holyGrail');
+          }
+        } else {
+          // All 7 slots filled — remove closest despair
+          const despairIdx = cards.findIndex(c => c?.type !== 'grail');
+          if (despairIdx >= 0) {
+            const newCards = cards.filter((_, i) => i !== despairIdx);
+            updates['games/' + currentRoom + '/quests/holyGrail/cards'] = newCards;
+            await fbDb.ref().update(updates);
+            await addLog('quest', getKnightDisplayName(myKnight) + ' removed a Despair card from the Holy Grail');
+            renderHand();
+          }
+        }
+        await completeHeroicAction('questAction');
+
+      } else if (loc === 'saxonWar' || loc === 'pictWar') {
+        const fightCards = [...(q.fightCards || []), { id: card.id, value: card.value }];
+        updates['games/' + currentRoom + '/quests/' + loc + '/fightCards'] = fightCards;
+        await fbDb.ref().update(updates);
+        await addLog('quest', getKnightDisplayName(myKnight) + ' played Fight ' + card.value + ' on ' + getLocationLabel(loc));
+        renderHand();
+        if (fightCards.length >= 5) {
+          await resolveQuestVictory(loc);
+        }
+        await completeHeroicAction('questAction');
+
+      } else if (loc === 'blackKnight' || loc === 'lancelot') {
+        const whiteCards = [...(q.whiteCards || []), { id: card.id, value: card.value }];
+        updates['games/' + currentRoom + '/quests/' + loc + '/whiteCards'] = whiteCards;
+        await fbDb.ref().update(updates);
+        await addLog('quest', getKnightDisplayName(myKnight) + ' played Fight ' + card.value + ' on ' + getLocationLabel(loc));
+        renderHand();
+        // Check completion
+        const maxWhite = loc === 'blackKnight' ? 4 : (q.phase === 'dragon' ? 9 : 5);
+        if (whiteCards.length >= maxWhite) {
+          await triggerCombatResolution(loc);
+        }
+        await completeHeroicAction('questAction');
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SECTION 13E: Heroic Actions — Combat Resolution
+    // ═══════════════════════════════════════════════════════════════════
+
+    async function triggerCombatResolution(questKey) {
+      const q = cachedQuests[questKey];
+      if (!q) return;
+      const whiteCards = q.whiteCards || [];
+      // Shuffle black cards for reveal
+      const blackCards = shuffle([...(q.blackCards || [])]);
+      const whiteSum = whiteCards.reduce((s, c) => s + (c.value || 0), 0);
+      const blackSum = blackCards.reduce((s, c) => {
+        if (questKey === 'lancelot' && q.phase === 'dragon') return s + (c.dragonValue || c.value || 0);
+        return s + (c.value || c.lancelotValue || 0);
+      }, 0);
+      const kayPresent = (q.knightsPresent || []).includes('kay') && cachedPlayers['kay']?.alive !== false;
+
+      await fbDb.ref('games/' + currentRoom + '/meta/combatResolution').set({
+        questKey, whiteCards, blackCards, whiteSum, blackSum,
+        kayPrompt: kayPresent, kayPlayed: false, winner: null,
+      });
+    }
+
+    function onCombatResolutionChanged() {
+      const resolution = roomData?.combatResolution;
+      const overlay = $('combat-overlay');
+      if (!resolution) { overlay.classList.add('hidden'); return; }
+      overlay.classList.remove('hidden');
+      renderCombatOverlay(resolution);
+    }
+
+    function renderCombatOverlay(res) {
+      const questLabel = getLocationLabel(res.questKey);
+      $('combat-title').textContent = questLabel + ' — Combat Resolution';
+
+      let html = '<p style="color:var(--text-dim);font-size:1rem;">White Cards (Knights)</p>' +
+        '<div class="combat-cards">';
+      for (const c of res.whiteCards) {
+        html += '<div class="combat-card white-side"><div class="cc-val">' + (c.value || '?') + '</div><div style="font-size:0.625rem;">Fight</div></div>';
+      }
+      html += '</div><p style="color:var(--gold);font-size:1.25rem;font-weight:700;">Total: ' + res.whiteSum + '</p>';
+
+      html += '<p style="color:var(--text-dim);font-size:1rem;margin-top:0.5rem;">Black Cards (Evil)</p>' +
+        '<div class="combat-cards">';
+      for (const c of res.blackCards) {
+        const val = res.questKey === 'lancelot' && cachedQuests?.lancelot?.phase === 'dragon'
+          ? (c.dragonValue || c.value) : (c.value || c.lancelotValue);
+        html += '<div class="combat-card black-side"><div class="cc-val">' + val + '</div><div style="font-size:0.625rem;">Fight</div></div>';
+      }
+      html += '</div><p style="color:var(--red-bright);font-size:1.25rem;font-weight:700;">Total: ' + res.blackSum + '</p>';
+
+      // Result
+      const winner = res.winner || (res.whiteSum > res.blackSum ? 'white' : 'black');
+      html += '<div class="combat-result ' + (winner === 'white' ? 'victory' : 'defeat') + '">' +
+        (winner === 'white' ? 'VICTORY!' : 'DEFEAT...') +
+        '</div><p style="color:var(--text-dim);font-size:0.875rem;">' +
+        (winner === 'white' ? 'Knights win!' : 'Ties go to Evil. Evil wins.') + '</p>';
+
+      $('combat-content').innerHTML = html;
+
+      // Actions — only active player can finalize
+      const actionsEl = $('combat-actions');
+      if (isMyTurn()) {
+        // Kay extra card prompt
+        if (res.kayPrompt && !res.kayPlayed && myKnight === 'kay') {
+          const hasFight = myHand.some(c => c.type === 'fight');
+          actionsEl.innerHTML =
+            '<p style="color:var(--gold);font-size:1rem;">Sir Kay — Play 1 extra Fight card?</p>' +
+            '<button class="btn btn-heroic" id="btn-kay-play"' + (hasFight ? '' : ' disabled') + '>Select Fight Card</button>' +
+            '<button class="btn btn-heroic" id="btn-kay-skip" style="margin-top:0.5rem;">Skip</button>';
+          const kayBtn = document.getElementById('btn-kay-play');
+          if (kayBtn) kayBtn.addEventListener('click', () => { heroicMode = 'kayExtra'; renderTurnActions(); });
+          document.getElementById('btn-kay-skip').addEventListener('click', async () => {
+            await fbDb.ref('games/' + currentRoom + '/meta/combatResolution/kayPlayed').set(true);
+          });
+        } else {
+          actionsEl.innerHTML = '<button class="btn btn-heroic" id="btn-finalize-combat">Continue</button>';
+          document.getElementById('btn-finalize-combat').addEventListener('click', () =>
+            finalizeCombatResult(res.questKey, winner));
+        }
+      } else if (res.kayPrompt && !res.kayPlayed && myKnight === 'kay') {
+        // Kay is not the active player but can still play extra card
+        const hasFight = myHand.some(c => c.type === 'fight');
+        actionsEl.innerHTML =
+          '<p style="color:var(--gold);font-size:1rem;">Sir Kay — Play 1 extra Fight card?</p>' +
+          '<button class="btn btn-heroic" id="btn-kay-play"' + (hasFight ? '' : ' disabled') + '>Select Fight Card</button>' +
+          '<button class="btn btn-heroic" id="btn-kay-skip" style="margin-top:0.5rem;">Skip</button>';
+        const kayBtn = document.getElementById('btn-kay-play');
+        if (kayBtn) kayBtn.addEventListener('click', startKayExtraCard);
+        document.getElementById('btn-kay-skip').addEventListener('click', async () => {
+          await fbDb.ref('games/' + currentRoom + '/meta/combatResolution/kayPlayed').set(true);
+        });
+      } else {
+        actionsEl.innerHTML = '<p class="waiting-text">Waiting for resolution...</p>';
+      }
+    }
+
+    function startKayExtraCard() {
+      heroicMode = 'kayExtra';
+      heroicSubState = {};
+      selectedCardId = null;
+      renderHand();
+      // Show card selection in combat actions
+      const actionsEl = $('combat-actions');
+      actionsEl.innerHTML = '<p style="color:var(--gold);font-size:1rem;">Select a Fight card from your hand</p>';
+    }
+
+    async function kayPlayCard(cardId) {
+      const card = myHand.find(c => c.id === cardId);
+      if (!card || card.type !== 'fight') { showToast('Select a Fight card!'); return; }
+
+      myHand = myHand.filter(c => c.id !== cardId);
+      await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
+
+      const res = roomData.combatResolution;
+      const newWhiteCards = [...res.whiteCards, { id: card.id, value: card.value }];
+      const newWhiteSum = res.whiteSum + card.value;
+      const newWinner = newWhiteSum > res.blackSum ? 'white' : 'black';
+
+      await fbDb.ref('games/' + currentRoom + '/meta/combatResolution').update({
+        whiteCards: newWhiteCards, whiteSum: newWhiteSum,
+        kayPlayed: true, winner: newWinner,
+      });
+
+      heroicMode = null;
+      selectedCardId = null;
+      renderHand();
+      await addLog('quest', 'Sir Kay played an extra Fight ' + card.value + '!');
+    }
+
+    async function finalizeCombatResult(questKey, winner) {
+      const q = cachedQuests[questKey];
+      if (!q) return;
+      const updates = {};
+      const knightsOnQuest = q.knightsPresent || [];
+
+      if (winner === 'white') {
+        // Victory
+        if (questKey === 'blackKnight') {
+          await addSword('white', 'blackKnight');
+          for (const kid of knightsOnQuest) {
+            const life = Math.min(6, (cachedPlayers[kid]?.life || 4) + 1);
+            updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
+            // Palamedes bonus
+            if (kid === 'palamedes') {
+              updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.min(6, life + 1);
+            }
+          }
+          await addLog('quest', 'Black Knight Tournament WON! 1 White Sword placed.');
+        } else if (questKey === 'lancelot' && q.phase === 'lancelot') {
+          await addSword('white', 'lancelot');
+          // Grant Lancelot's Armor to the knight on quest
+          if (knightsOnQuest.length > 0) {
+            updates['games/' + currentRoom + '/players/' + knightsOnQuest[0] + '/relics/lancelotArmor'] = true;
+          }
+          for (const kid of knightsOnQuest) {
+            if (kid === 'palamedes') {
+              updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.min(6, (cachedPlayers[kid]?.life || 4) + 1);
+            }
+          }
+          await addLog('quest', 'Quest for Lancelot WON! 1 White Sword + Lancelot\'s Armor.');
+        } else if (questKey === 'lancelot' && q.phase === 'dragon') {
+          await addSword('white', 'dragon');
+          for (const kid of knightsOnQuest) {
+            if (kid === 'palamedes') {
+              updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.min(6, (cachedPlayers[kid]?.life || 4) + 1);
+            }
+          }
+          await addLog('quest', "Dragon's Quest WON! 1 White Sword placed.");
+        }
+      } else {
+        // Defeat
+        if (questKey === 'blackKnight') {
+          await addSword('black', 'blackKnight');
+          for (const kid of knightsOnQuest) {
+            const life = Math.max(0, (cachedPlayers[kid]?.life || 4) - 1);
+            updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
+          }
+          await addLog('quest', 'Black Knight Tournament LOST! 1 Black Sword placed.');
+        } else if (questKey === 'lancelot' && q.phase === 'lancelot') {
+          await addSword('black', 'lancelot');
+          for (const kid of knightsOnQuest) {
+            const life = Math.max(0, (cachedPlayers[kid]?.life || 4) - 1);
+            updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
+          }
+          await addLog('quest', 'Quest for Lancelot LOST! 1 Black Sword placed.');
+        } else if (questKey === 'lancelot' && q.phase === 'dragon') {
+          await addSword('black', 'dragon');
+          for (const kid of knightsOnQuest) {
+            const life = Math.max(0, (cachedPlayers[kid]?.life || 4) - 1);
+            updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
+          }
+          // Dragon defeat also adds siege engine
+          updates['games/' + currentRoom + '/board/siegeEngines'] = (cachedBoard?.siegeEngines || 0) + 1;
+          await addLog('quest', "Dragon's Quest LOST! 1 Black Sword + 1 Siege Engine.");
+        }
+      }
+
+      // Return knights to Round Table
+      for (const kid of knightsOnQuest) {
+        updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
+      }
+
+      // Reset or transition quest
+      if (questKey === 'blackKnight') {
+        // Perpetual — reset
+        updates['games/' + currentRoom + '/quests/blackKnight'] = { status: 'active', whiteCards: [], blackCards: [], knightsPresent: [] };
+      } else if (questKey === 'lancelot') {
+        if (q.phase === 'lancelot') {
+          // Transition to dragon
+          updates['games/' + currentRoom + '/quests/lancelot'] = { status: 'active', phase: 'dragon', whiteCards: [], blackCards: [], knightsPresent: [] };
+        } else {
+          // Dragon completed — remove quest
+          updates['games/' + currentRoom + '/quests/lancelot/status'] = 'completed';
+          updates['games/' + currentRoom + '/quests/lancelot/whiteCards'] = [];
+          updates['games/' + currentRoom + '/quests/lancelot/blackCards'] = [];
+          updates['games/' + currentRoom + '/quests/lancelot/knightsPresent'] = [];
+        }
+      }
+
+      // Clear combat resolution
+      updates['games/' + currentRoom + '/meta/combatResolution'] = null;
+      await fbDb.ref().update(updates);
+      if (await checkGameEnd()) return;
+    }
+
+    async function addSword(color, source) {
+      const swords = cachedBoard?.swords || [];
+      swords.push({ color, source });
+      await fbDb.ref('games/' + currentRoom + '/board/swords').set(swords);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SECTION 13F: Non-Combat Quest Resolution
+    // ═══════════════════════════════════════════════════════════════════
+
+    async function resolveQuestVictory(questKey) {
+      const q = cachedQuests[questKey];
+      if (!q) return;
+      const knightsOnQuest = q.knightsPresent || [];
+      const updates = {};
+
+      if (questKey === 'excalibur') {
+        await addSword('white', 'excalibur');
+        // Grant Excalibur relic to completing knight (the one who played the card)
+        updates['games/' + currentRoom + '/players/' + myKnight + '/relics/excalibur'] = true;
+        for (const kid of knightsOnQuest) {
+          updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
+          if (kid === 'palamedes') {
+            updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.min(6, (cachedPlayers[kid]?.life || 4) + 1);
+          }
+        }
+        updates['games/' + currentRoom + '/quests/excalibur/status'] = 'won';
+        updates['games/' + currentRoom + '/quests/excalibur/knightsPresent'] = [];
+        await fbDb.ref().update(updates);
+        await addLog('quest', 'Quest for Excalibur WON! 1 White Sword + Excalibur relic to ' + getKnightDisplayName(myKnight));
+
+      } else if (questKey === 'holyGrail') {
+        for (let i = 0; i < 3; i++) await addSword('white', 'holyGrail');
+        updates['games/' + currentRoom + '/players/' + myKnight + '/relics/holyGrail'] = true;
+        for (const kid of knightsOnQuest) {
+          updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
+          if (kid === 'palamedes') {
+            updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.min(6, (cachedPlayers[kid]?.life || 4) + 1);
+          }
+        }
+        updates['games/' + currentRoom + '/quests/holyGrail/status'] = 'won';
+        updates['games/' + currentRoom + '/quests/holyGrail/knightsPresent'] = [];
+        await fbDb.ref().update(updates);
+        await addLog('quest', 'Quest for the Holy Grail WON! 3 White Swords + Holy Grail relic to ' + getKnightDisplayName(myKnight));
+
+      } else if (questKey === 'saxonWar' || questKey === 'pictWar') {
+        const warName = questKey === 'saxonWar' ? 'Saxon War' : 'Pict War';
+        await addSword('white', questKey);
+        for (const kid of knightsOnQuest) {
+          const life = Math.min(6, (cachedPlayers[kid]?.life || 4) + 1);
+          updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
+          updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
+          if (kid === 'palamedes') {
+            updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.min(6, life + 1);
+          }
+        }
+        // Reset perpetual quest
+        updates['games/' + currentRoom + '/quests/' + questKey] = { status: 'active', warriors: 0, fightCards: [], knightsPresent: [] };
+        await fbDb.ref().update(updates);
+
+        // Draw & share 3 White cards among knights present
+        if (knightsOnQuest.length > 0) {
+          // For simplicity, give cards to the active player for now (sharing is complex)
+          await requestCardDraw('white', 3);
+        }
+        await addLog('quest', warName + ' WON! 1 White Sword, +1 LP each, 3 cards drawn.');
+      }
+
+      await checkGameEnd();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SECTION 13G: Heroic Actions — Siege Engine Fight
+    // ═══════════════════════════════════════════════════════════════════
+
+    function startSiegeFight() {
+      heroicMode = 'fightSiege';
+      heroicSubState = { selectedCards: [] };
+      selectedCardId = null;
+      renderHand();
+      renderTurnActions();
+    }
+
+    function renderSiegeFightUI(area) {
+      const cards = heroicSubState.selectedCards || [];
+      const sum = cards.reduce((s, id) => {
+        const c = myHand.find(h => h.id === id);
+        return s + (c?.value || 0);
+      }, 0);
+      const hasExcalibur = cachedPlayers[myKnight]?.relics?.excalibur;
+      const totalSum = sum + (hasExcalibur ? 1 : 0);
+      const result = heroicSubState.rollResult;
+
+      let html = '<div class="siege-panel"><h3>Fight Siege Engine</h3>';
+
+      if (result !== undefined) {
+        // Show result
+        const won = totalSum > result;
+        html += '<p style="font-size:1rem;color:var(--text-dim);">Your cards: ' + sum +
+          (hasExcalibur ? ' + 1 (Excalibur)' : '') + ' = ' + totalSum + '</p>';
+        html += '<div class="d8-result ' + (won ? 'win' : 'lose') + '">d8 Roll: ' + result + '</div>';
+        html += '<p class="combat-result ' + (won ? 'victory' : 'defeat') + '">' +
+          (won ? 'VICTORY! Siege engine removed!' : 'DEFEAT... Lost 1 LP.') + '</p>';
+        html += '<button class="btn btn-heroic" id="btn-siege-done">Continue</button>';
+      } else {
+        html += '<p style="color:var(--text-dim);font-size:1rem;">Select Fight cards, then roll the d8</p>' +
+          '<div class="siege-total">Total: ' + totalSum + (hasExcalibur ? ' (incl. Excalibur +1)' : '') + '</div>' +
+          '<p style="color:var(--text-dim);font-size:0.875rem;">' + cards.length + ' card' + (cards.length !== 1 ? 's' : '') + ' selected</p>' +
+          '<button class="btn btn-heroic" id="btn-roll-d8"' + (cards.length === 0 ? ' disabled' : '') + '>Roll d8</button>' +
+          '<button class="btn btn-heroic" id="btn-cancel-siege" style="margin-top:0.5rem;opacity:0.7;">Cancel</button>';
+      }
+      html += '</div>';
+      area.innerHTML = html;
+
+      const rollBtn = document.getElementById('btn-roll-d8');
+      if (rollBtn) rollBtn.addEventListener('click', performSiegeRoll);
+      const cancelBtn = document.getElementById('btn-cancel-siege');
+      if (cancelBtn) cancelBtn.addEventListener('click', () => {
+        heroicMode = null; heroicSubState = {}; selectedCardId = null; renderHand(); renderTurnActions();
+      });
+      const doneBtn = document.getElementById('btn-siege-done');
+      if (doneBtn) doneBtn.addEventListener('click', () => { heroicMode = null; heroicSubState = {}; renderTurnActions(); });
+    }
+
+    function toggleSiegeFightCard(cardId) {
+      const card = myHand.find(c => c.id === cardId);
+      if (!card || card.type !== 'fight') return;
+      const sel = heroicSubState.selectedCards || [];
+      if (sel.includes(cardId)) {
+        heroicSubState.selectedCards = sel.filter(id => id !== cardId);
+      } else {
+        heroicSubState.selectedCards = [...sel, cardId];
+      }
+      renderHand();
+      renderTurnActions();
+    }
+
+    async function performSiegeRoll() {
+      const cards = heroicSubState.selectedCards || [];
+      const sum = cards.reduce((s, id) => {
+        const c = myHand.find(h => h.id === id);
+        return s + (c?.value || 0);
+      }, 0);
+      const hasExcalibur = cachedPlayers[myKnight]?.relics?.excalibur;
+      const totalSum = sum + (hasExcalibur ? 1 : 0);
+      const roll = Math.floor(Math.random() * 8) + 1;
+      const won = totalSum > roll;
+
+      // Remove cards from hand
+      myHand = myHand.filter(c => !cards.includes(c.id));
+      const updates = {};
+      updates['private/' + currentRoom + '/' + myKnight + '/hand'] = myHand;
+
+      if (won) {
+        updates['games/' + currentRoom + '/board/siegeEngines'] = Math.max(0, (cachedBoard?.siegeEngines || 0) - 1);
+        await addLog('quest', getKnightDisplayName(myKnight) + ' fought a siege engine (Fight ' + sum + (hasExcalibur ? '+1' : '') + ' vs d8=' + roll + ') — WON!');
+      } else {
+        const life = Math.max(0, (cachedPlayers[myKnight]?.life || 4) - 1);
+        updates['games/' + currentRoom + '/players/' + myKnight + '/life'] = life;
+        await addLog('quest', getKnightDisplayName(myKnight) + ' fought a siege engine (Fight ' + sum + (hasExcalibur ? '+1' : '') + ' vs d8=' + roll + ') — LOST!');
+      }
+
+      await fbDb.ref().update(updates);
+      heroicSubState.rollResult = roll;
+      renderHand();
+      renderTurnActions();
+      await completeHeroicAction('siegeFight');
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SECTION 13H: Heroic Actions — Heal
+    // ═══════════════════════════════════════════════════════════════════
+
+    function startHealAction() {
+      heroicMode = 'heal';
+      renderTurnActions();
+    }
+
+    function findHealSets() {
+      const groups = {};
+      for (const card of myHand) {
+        let key;
+        if (card.type === 'fight') key = 'fight_' + card.value;
+        else if (card.type === 'grail') key = 'grail';
+        else continue; // Special whites can't be used for healing
+        if (!groups[key]) groups[key] = { cards: [], label: card.type === 'grail' ? 'Grail' : 'Fight ' + card.value };
+        groups[key].cards.push(card);
+      }
+      return Object.values(groups).filter(g => g.cards.length >= 3);
+    }
+
+    function renderHealUI(area) {
+      const sets = findHealSets();
+      const life = cachedPlayers[myKnight]?.life || 4;
+      let html = '<div class="quest-play-panel"><h3>Heal</h3>' +
+        '<p style="color:var(--text-dim);font-size:1rem;">Discard 3 identical cards to gain 1 LP (current: ' + life + '/6)</p>';
+
+      if (life >= 6) {
+        html += '<p style="color:var(--text-dim);font-size:0.875rem;">Already at max life!</p>';
+      } else if (sets.length === 0) {
+        html += '<p style="color:var(--text-dim);font-size:0.875rem;">No matching sets of 3 in hand</p>';
+      } else {
+        for (const set of sets) {
+          html += '<div class="heal-option" data-type="' + set.cards[0].type + '" data-value="' + (set.cards[0].value || '') + '">' +
+            'Discard 3x ' + set.label + ' (' + set.cards.length + ' in hand)</div>';
+        }
+      }
+
+      html += '<button class="btn btn-heroic" id="btn-cancel-heal" style="margin-top:0.75rem;opacity:0.7;">Cancel</button></div>';
+      area.innerHTML = html;
+
+      document.querySelectorAll('.heal-option').forEach(el => {
+        el.addEventListener('click', () => performHeal(el.dataset.type, el.dataset.value));
+      });
+      document.getElementById('btn-cancel-heal').addEventListener('click', () => {
+        heroicMode = null; renderTurnActions();
+      });
+    }
+
+    async function performHeal(cardType, cardValue) {
+      const life = cachedPlayers[myKnight]?.life || 4;
+      if (life >= 6) { showToast('Already at max life!'); return; }
+
+      // Find 3 matching cards
+      let count = 0;
+      const toRemove = [];
+      for (const card of myHand) {
+        if (count >= 3) break;
+        if (cardType === 'grail' && card.type === 'grail') { toRemove.push(card.id); count++; }
+        else if (cardType === 'fight' && card.type === 'fight' && String(card.value) === String(cardValue)) { toRemove.push(card.id); count++; }
+      }
+      if (count < 3) { showToast('Not enough cards!'); return; }
+
+      myHand = myHand.filter(c => !toRemove.includes(c.id));
+      const updates = {};
+      updates['private/' + currentRoom + '/' + myKnight + '/hand'] = myHand;
+      updates['games/' + currentRoom + '/players/' + myKnight + '/life'] = Math.min(6, life + 1);
+      await fbDb.ref().update(updates);
+      renderHand();
+      await addLog('info', getKnightDisplayName(myKnight) + ' healed (+1 LP)');
+      await completeHeroicAction('heal');
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SECTION 13I: Heroic Actions — Sacrifice
+    // ═══════════════════════════════════════════════════════════════════
+
+    async function performSacrifice() {
+      const life = cachedPlayers[myKnight]?.life || 4;
+      if (life <= 1) { showToast('Not enough life to sacrifice!'); return; }
+
+      const updates = {};
+      updates['games/' + currentRoom + '/players/' + myKnight + '/life'] = life - 1;
+      updates['games/' + currentRoom + '/meta/sacrificeUsed'] = true;
+      updates['games/' + currentRoom + '/meta/heroicActionTaken'] = false;
+      await fbDb.ref().update(updates);
+      heroicMode = null;
+      heroicSubState = {};
+      selectedCardId = null;
+      await addLog('info', getKnightDisplayName(myKnight) + ' sacrificed 1 LP for another action');
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SECTION 13J: Heroic Actions — Special White Cards
+    // ═══════════════════════════════════════════════════════════════════
+
+    function startSpecialWhitePlay() {
+      heroicMode = 'specialWhite';
+      selectedCardId = null;
+      renderHand();
+      renderTurnActions();
+    }
+
+    function renderSpecialWhiteUI(area) {
+      const specials = myHand.filter(c => c.type === 'special' && c.name !== 'Merlin');
+      const selectedCard = selectedCardId ? myHand.find(c => c.id === selectedCardId) : null;
+      const validSelection = selectedCard && selectedCard.type === 'special' && selectedCard.name !== 'Merlin';
+
+      let html = '<div class="quest-play-panel"><h3>Play Special White Card</h3>';
+
+      if (specials.length === 0) {
+        html += '<p style="color:var(--text-dim);">No playable Special White cards in hand</p>';
+      } else if (validSelection) {
+        html += '<p style="color:var(--gold);font-size:1rem;">Selected: ' + selectedCard.name + '</p>' +
+          '<p style="color:var(--text-dim);font-size:0.875rem;">' + getSpecialWhiteDesc(selectedCard.name) + '</p>' +
+          '<button class="btn btn-heroic" id="btn-confirm-sw" style="margin-top:0.5rem;">Play Card</button>';
+      } else {
+        html += '<p style="color:var(--text-dim);font-size:1rem;">Select a Special White card from your hand</p>';
+      }
+
+      html += '<button class="btn btn-heroic" id="btn-cancel-sw" style="margin-top:0.5rem;opacity:0.7;">Cancel</button></div>';
+      area.innerHTML = html;
+
+      const confirmBtn = document.getElementById('btn-confirm-sw');
+      if (confirmBtn) confirmBtn.addEventListener('click', () => performSpecialWhitePlay(selectedCardId));
+      document.getElementById('btn-cancel-sw').addEventListener('click', () => {
+        heroicMode = null; selectedCardId = null; renderHand(); renderTurnActions();
+      });
+    }
+
+    function getSpecialWhiteDesc(name) {
+      const descs = {
+        'Piety': 'Gain 3 LP OR each other knight gains 1 LP',
+        'Reinforcements': 'Draw 4 White cards OR each other knight draws 1',
+        'Lady of the Lake': 'Move Excalibur 1 toward knights (or gain 2 LP if quest done)',
+        'Messenger': 'Pass 1-3 cards to a knight of your choice',
+        'Fate': 'Loyal: all draw 1 White. Traitor: reveal and opponents discard 2.',
+        'Heroism': 'Place on quest — adds 1 sword to outcome',
+        'Clairvoyance': 'View top 5 Black cards and reorder them',
+        'Convocation': 'All knights return to Camelot and draw/share cards',
+      };
+      return descs[name] || name;
+    }
+
+    async function performSpecialWhitePlay(cardId) {
+      const card = myHand.find(c => c.id === cardId);
+      if (!card || card.type !== 'special' || card.name === 'Merlin') return;
+
+      // Remove from hand
+      myHand = myHand.filter(c => c.id !== cardId);
+      await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
+      await fbDb.ref('games/' + currentRoom + '/meta/specialWhitePlayed').set(true);
+      renderHand();
+
+      const name = card.name;
+      await addLog('info', getKnightDisplayName(myKnight) + ' played ' + name);
+
+      if (name === 'Piety') {
+        // Show choice: gain 3 LP or each other gains 1
+        heroicMode = null;
+        const area = $('turn-action-area');
+        area.innerHTML = '<div class="quest-play-panel"><h3>Piety</h3>' +
+          '<button class="btn btn-heroic" id="btn-piety-self">Gain 3 LP</button>' +
+          '<button class="btn btn-heroic" id="btn-piety-others" style="margin-top:0.5rem;">Each other knight gains 1 LP</button></div>';
+        document.getElementById('btn-piety-self').addEventListener('click', async () => {
+          const life = Math.min(6, (cachedPlayers[myKnight]?.life || 4) + 3);
+          await fbDb.ref('games/' + currentRoom + '/players/' + myKnight + '/life').set(life);
+          await addLog('info', getKnightDisplayName(myKnight) + ' gained 3 LP from Piety');
+          await completeHeroicAction('specialWhite');
+        });
+        document.getElementById('btn-piety-others').addEventListener('click', async () => {
+          const updates = {};
+          const turnOrder = roomData?.turnOrder || [];
+          for (const kid of turnOrder) {
+            if (kid === myKnight) continue;
+            const p = cachedPlayers[kid];
+            if (p && p.alive !== false) {
+              updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.min(6, (p.life || 4) + 1);
+            }
+          }
+          await fbDb.ref().update(updates);
+          await addLog('info', 'Each knight gained 1 LP from Piety');
+          await completeHeroicAction('specialWhite');
+        });
+
+      } else if (name === 'Reinforcements') {
+        heroicMode = null;
+        const area = $('turn-action-area');
+        area.innerHTML = '<div class="quest-play-panel"><h3>Reinforcements</h3>' +
+          '<button class="btn btn-heroic" id="btn-reinf-self">Draw 4 White cards</button>' +
+          '<button class="btn btn-heroic" id="btn-reinf-others" style="margin-top:0.5rem;">Each other knight draws 1</button></div>';
+        document.getElementById('btn-reinf-self').addEventListener('click', async () => {
+          await requestCardDraw('white', 4);
+          await addLog('info', getKnightDisplayName(myKnight) + ' drew 4 cards from Reinforcements');
+          await completeHeroicAction('specialWhite');
+        });
+        document.getElementById('btn-reinf-others').addEventListener('click', async () => {
+          const turnOrder = roomData?.turnOrder || [];
+          for (const kid of turnOrder) {
+            if (kid === myKnight) continue;
+            const p = cachedPlayers[kid];
+            if (p && p.alive !== false) {
+              // Create draw result directly for each knight
+              const ref = fbDb.ref('games/' + currentRoom + '/drawRequests').push();
+              await ref.set({ knightId: kid, deckType: 'white', count: 1, timestamp: firebase.database.ServerValue.TIMESTAMP });
+            }
+          }
+          await addLog('info', 'Each knight drew 1 card from Reinforcements');
+          await completeHeroicAction('specialWhite');
+        });
+
+      } else if (name === 'Lady of the Lake') {
+        if (isQuestAvailable('excalibur')) {
+          const pos = (cachedQuests.excalibur?.position || 0) + 1;
+          await fbDb.ref('games/' + currentRoom + '/quests/excalibur/position').set(pos);
+          await addLog('quest', 'Lady of the Lake moved Excalibur toward the knights (position ' + pos + ')');
+          if (pos >= 5) await resolveQuestVictory('excalibur');
+        } else {
+          const life = Math.min(6, (cachedPlayers[myKnight]?.life || 4) + 2);
+          await fbDb.ref('games/' + currentRoom + '/players/' + myKnight + '/life').set(life);
+          await addLog('info', getKnightDisplayName(myKnight) + ' gained 2 LP from Lady of the Lake');
+        }
+        await completeHeroicAction('specialWhite');
+
+      } else if (name === 'Messenger') {
+        // Select cards to pass and target knight — simplified: pass selected card
+        heroicMode = 'messenger';
+        heroicSubState = { cardsToPass: [], step: 'selectCards' };
+        renderTurnActions();
+
+      } else {
+        // Deferred cards (Fate, Heroism, Clairvoyance, Convocation)
+        showToast(name + ' — coming in Phase 5');
+        await completeHeroicAction('specialWhite');
+      }
+    }
+
+    function renderMessengerUI(area) {
+      const sub = heroicSubState;
+      if (sub.step === 'selectCards') {
+        const count = sub.cardsToPass.length;
+        let html = '<div class="quest-play-panel"><h3>Messenger</h3>' +
+          '<p style="color:var(--text-dim);font-size:1rem;">Select 1-3 cards to pass (' + count + ' selected)</p>';
+        if (count > 0 && count <= 3) {
+          html += '<button class="btn btn-heroic" id="btn-messenger-next">Choose Recipient</button>';
+        }
+        html += '<button class="btn btn-heroic" id="btn-cancel-messenger" style="margin-top:0.5rem;opacity:0.7;">Cancel</button></div>';
+        area.innerHTML = html;
+        const nextBtn = document.getElementById('btn-messenger-next');
+        if (nextBtn) nextBtn.addEventListener('click', () => { heroicSubState.step = 'selectTarget'; renderTurnActions(); });
+        document.getElementById('btn-cancel-messenger').addEventListener('click', () => {
+          heroicMode = null; heroicSubState = {}; selectedCardId = null; renderHand(); renderTurnActions();
+        });
+      } else if (sub.step === 'selectTarget') {
+        const turnOrder = roomData?.turnOrder || [];
+        let html = '<div class="quest-play-panel"><h3>Messenger — Select Recipient</h3><div class="move-grid">';
+        for (const kid of turnOrder) {
+          if (kid === myKnight) continue;
+          const p = cachedPlayers[kid];
+          if (!p || p.alive === false) continue;
+          html += '<div class="move-dest" data-knight="' + kid + '"><div class="dest-name">' + (p.displayName || KNIGHTS[kid]?.name) + '</div></div>';
+        }
+        html += '</div><button class="btn btn-heroic" id="btn-cancel-messenger" style="margin-top:0.75rem;opacity:0.7;">Back</button></div>';
+        area.innerHTML = html;
+        document.querySelectorAll('.move-dest[data-knight]').forEach(el => {
+          el.addEventListener('click', () => performMessenger(el.dataset.knight));
+        });
+        document.getElementById('btn-cancel-messenger').addEventListener('click', () => { heroicSubState.step = 'selectCards'; renderTurnActions(); });
+      }
+    }
+
+    async function performMessenger(targetKnight) {
+      const cardIds = heroicSubState.cardsToPass || [];
+      if (cardIds.length === 0 || cardIds.length > 3) return;
+
+      const cardsToPass = myHand.filter(c => cardIds.includes(c.id));
+      myHand = myHand.filter(c => !cardIds.includes(c.id));
+      await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
+
+      // Send cards to target via drawResults
+      for (let i = 0; i < cardsToPass.length; i++) {
+        const updates = {};
+        updates['games/' + currentRoom + '/drawResults/messenger_' + targetKnight + '_' + Date.now() + '_' + i] = {
+          knightId: targetKnight, cards: [cardsToPass[i]],
+        };
+        await fbDb.ref().update(updates);
+      }
+
+      heroicMode = null;
+      heroicSubState = {};
+      selectedCardId = null;
+      renderHand();
+      await addLog('info', getKnightDisplayName(myKnight) + ' passed ' + cardsToPass.length + ' card(s) to ' + getKnightDisplayName(targetKnight) + ' via Messenger');
+      await completeHeroicAction('specialWhite');
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SECTION 13K: Heroic Card Tap Handler
+    // ═══════════════════════════════════════════════════════════════════
+
+    function handleHeroicCardTap(cardId) {
+      if (heroicMode === 'playCard') {
+        selectedCardId = (selectedCardId === cardId) ? null : cardId;
+        renderHand();
+        renderTurnActions();
+      } else if (heroicMode === 'fightSiege') {
+        toggleSiegeFightCard(cardId);
+      } else if (heroicMode === 'specialWhite') {
+        selectedCardId = (selectedCardId === cardId) ? null : cardId;
+        renderHand();
+        renderTurnActions();
+      } else if (heroicMode === 'kayExtra') {
+        const card = myHand.find(c => c.id === cardId);
+        if (card && card.type === 'fight') {
+          kayPlayCard(cardId);
+        }
+      } else if (heroicMode === 'messenger') {
+        const sub = heroicSubState;
+        if (sub.step === 'selectCards') {
+          if (sub.cardsToPass.includes(cardId)) {
+            sub.cardsToPass = sub.cardsToPass.filter(id => id !== cardId);
+          } else if (sub.cardsToPass.length < 3) {
+            sub.cardsToPass.push(cardId);
+          }
+          renderHand();
+          renderTurnActions();
+        }
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SECTION 14: Service Worker Registration
     // ═══════════════════════════════════════════════════════════════════
 
     if ('serviceWorker' in navigator) {
