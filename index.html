@@ -656,7 +656,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v7';
+    const APP_VERSION = 'shadows-v8';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -3059,7 +3059,10 @@
       const aliveKnights = turnOrder.filter(kid => cachedPlayers[kid]?.alive !== false);
       const responsesCount = Object.keys(interaction.responses || {}).length;
 
-      if (responsesCount >= aliveKnights.length) {
+      // Morgan 5 only requires the drawing knight's response (single-player choice)
+      const requiredCount = interaction.type === 'morgan5Choice' ? 1 : aliveKnights.length;
+
+      if (responsesCount >= requiredCount) {
         await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set(null);
         if (await checkGameEnd()) return;
         await advanceToHeroicPhase();
