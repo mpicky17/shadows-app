@@ -656,7 +656,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v6';
+    const APP_VERSION = 'shadows-v7';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1574,7 +1574,8 @@
         }
         const data = snap.val();
         myLoyalty = data.loyalty || null;
-        myHand = data.hand || [];
+        const rawHand = data.hand || [];
+        myHand = Array.isArray(rawHand) ? rawHand : Object.values(rawHand);
         renderLoyalty();
         renderHand();
       });
@@ -2826,8 +2827,21 @@
         if (await checkGameEnd()) return;
         await advanceToHeroicPhase();
       } else if (responsesCount >= aliveKnights.length) {
-        // All responded, not enough Merlins — apply effect
-        await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set(null);
+        // All responded, not enough Merlins — return offered Merlins and apply effect
+        const updates = {};
+        for (const [kid, resp] of Object.entries(interaction.responses || {})) {
+          if (resp.merlinsOffered > 0) {
+            for (let i = 0; i < resp.merlinsOffered; i++) {
+              updates['games/' + currentRoom + '/drawResults/merlinReturn_' + kid + '_' + i] = {
+                knightId: kid,
+                cards: [{ id: 'merlin_return_' + Date.now() + '_' + kid + '_' + i, type: 'special', name: 'Merlin' }]
+              };
+            }
+          }
+        }
+        updates['games/' + currentRoom + '/meta/pendingInteraction'] = null;
+        await fbDb.ref().update(updates);
+        await addLog('info', interaction.card.name + ' — not enough Merlins. Effect applied.');
         await applySpecialBlackCard(interaction.card);
       }
     }
