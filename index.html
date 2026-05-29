@@ -307,6 +307,136 @@
       pointer-events: none;
     }
     .toast.show { opacity: 1; }
+
+    /* ── Game Screen ────────────────────────────────────────────────── */
+    #game-screen { flex-direction: column; padding: 0; gap: 0; position: relative; }
+
+    .game-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0.75rem 1rem; background: var(--bg-card);
+      border-bottom: 1px solid var(--gold-dim);
+    }
+    .turn-info { font-size: 1rem; font-weight: 600; color: var(--gold); }
+    .deck-counts { display: flex; gap: 0.75rem; font-size: 0.875rem; }
+    .deck-count { padding: 0.125rem 0.5rem; border-radius: 4px; font-weight: 600; }
+    .white-count { background: rgba(245,240,225,0.15); color: var(--parchment); }
+    .black-count { background: rgba(0,0,0,0.3); color: #aaa; }
+
+    .game-body {
+      flex: 1; overflow-y: auto; padding: 0.75rem 1rem;
+      display: flex; flex-direction: column; gap: 0.75rem;
+      padding-bottom: 170px;
+    }
+
+    .board-status {
+      display: flex; gap: 1rem; padding: 0.75rem;
+      background: var(--bg-card); border-radius: var(--radius);
+    }
+    .status-item { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 0.25rem; }
+    .status-label { font-size: 0.75rem; color: var(--text-dim); text-transform: uppercase; }
+    .status-value { font-size: 1.125rem; font-weight: 700; }
+    .swords-display { display: flex; gap: 3px; flex-wrap: wrap; justify-content: center; }
+    .sword-pip { width: 14px; height: 14px; border-radius: 2px; }
+    .sword-pip.white { background: var(--parchment); }
+    .sword-pip.black { background: #333; border: 1px solid #555; }
+
+    .loyalty-badge {
+      text-align: center; padding: 0.5rem; border-radius: var(--radius);
+      font-size: 1rem; font-weight: 700;
+    }
+    .loyalty-loyal { background: rgba(46,125,50,0.2); color: #66BB6A; border: 1px solid rgba(46,125,50,0.3); }
+    .loyalty-traitor { background: rgba(198,40,40,0.2); color: #EF5350; border: 1px solid rgba(198,40,40,0.3); }
+
+    .game-players { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .gp-chip {
+      display: flex; align-items: center; gap: 0.375rem;
+      padding: 0.375rem 0.625rem; background: var(--bg-card);
+      border-radius: var(--radius); font-size: 0.875rem;
+      border: 2px solid transparent;
+    }
+    .gp-chip.current-turn { border-color: var(--gold); }
+    .gp-chip.me { background: rgba(212,168,67,0.1); }
+    .gp-chip.dead { opacity: 0.4; }
+    .gp-chip img { width: 24px; height: 24px; }
+    .gp-life { color: var(--red-bright); font-weight: 700; font-size: 0.875rem; }
+
+    .quest-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0.5rem;
+    }
+    .quest-chip {
+      padding: 0.5rem; background: var(--bg-card);
+      border-radius: var(--radius); text-align: center;
+    }
+    .quest-chip .qname { font-weight: 600; color: var(--gold); font-size: 0.75rem; margin-bottom: 0.25rem; }
+    .quest-chip .qinfo { font-size: 0.75rem; color: var(--text-dim); }
+
+    .game-log {
+      font-size: 0.8125rem; color: var(--text-dim);
+      max-height: 120px; overflow-y: auto;
+      background: var(--bg-card); border-radius: var(--radius); padding: 0.5rem;
+    }
+    .game-log p { padding: 0.125rem 0; border-bottom: 1px solid rgba(255,255,255,0.05); }
+
+    /* ── Hand Area ──────────────────────────────────────────────────── */
+    .hand-area {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      background: var(--bg-card); border-top: 2px solid var(--gold-dim);
+      padding: 0.5rem; z-index: 100;
+    }
+    .hand-label {
+      font-size: 0.75rem; color: var(--text-dim);
+      padding: 0 0.5rem 0.375rem; text-transform: uppercase;
+    }
+    .hand-cards {
+      display: flex; gap: 0.5rem; overflow-x: auto;
+      padding: 0.25rem 0.25rem 0.5rem;
+      -webkit-overflow-scrolling: touch; scrollbar-width: thin;
+    }
+    .hand-card {
+      flex-shrink: 0; width: 72px; min-height: 100px;
+      border-radius: 6px; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 0.25rem;
+      padding: 0.375rem; cursor: pointer;
+      transition: transform 0.15s, box-shadow 0.15s;
+      font-size: 0.75rem; text-align: center;
+      border: 2px solid transparent; user-select: none;
+    }
+    .hand-card:active { transform: translateY(-4px); }
+    .hand-card.selected {
+      border-color: var(--gold); transform: translateY(-8px);
+      box-shadow: 0 4px 12px rgba(212,168,67,0.4);
+    }
+    .hand-card.fight { background: linear-gradient(135deg, #F5F0E1, #E8DCC8); color: #333; }
+    .hand-card.grail { background: linear-gradient(135deg, #E8D5B7, #D4A843); color: #333; }
+    .hand-card.special-white { background: linear-gradient(135deg, #C5CAE9, #7986CB); color: #1A237E; }
+    .card-value { font-size: 1.25rem; font-weight: 700; }
+    .card-type { font-size: 0.625rem; text-transform: uppercase; opacity: 0.7; }
+    .card-name { font-size: 0.625rem; font-weight: 600; line-height: 1.1; }
+
+    /* ── Setup Overlay ──────────────────────────────────────────────── */
+    .setup-overlay {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 155px;
+      background: rgba(26,26,46,0.95); z-index: 90;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      padding: 1.5rem; gap: 1rem; text-align: center;
+      overflow-y: auto;
+    }
+    .setup-overlay.hidden { display: none; }
+    .setup-overlay h2 { color: var(--gold); font-size: 1.25rem; }
+    .setup-overlay p { color: var(--text-dim); font-size: 1rem; max-width: 400px; }
+    .setup-shared {
+      display: flex; gap: 0.75rem; flex-wrap: wrap; justify-content: center;
+      min-height: 60px;
+    }
+    .shared-slot {
+      width: 72px; min-height: 100px; border: 2px dashed var(--gold-dim);
+      border-radius: 6px; display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      padding: 0.375rem; font-size: 0.75rem; color: var(--text-dim);
+    }
+    .shared-slot.filled { border-style: solid; border-color: var(--gold); }
+    .setup-actions { display: flex; gap: 0.75rem; flex-wrap: wrap; justify-content: center; }
   </style>
 </head>
 <body>
@@ -366,11 +496,49 @@
     </div>
   </div>
 
-  <!-- ── Game Screen (Phase 2+) ──────────────────────────────────────── -->
+  <!-- ── Game Screen ──────────────────────────────────────────────────── -->
   <div id="game-screen" class="screen">
-    <h2>Game Starting...</h2>
-    <p>The quest begins! (Game board coming in Phase 2)</p>
-    <div id="game-players-info"></div>
+    <div class="game-header">
+      <div class="turn-info" id="turn-info">Setting up...</div>
+      <div class="deck-counts">
+        <span class="deck-count white-count" id="white-deck-count">W: --</span>
+        <span class="deck-count black-count" id="black-deck-count">B: --</span>
+      </div>
+    </div>
+
+    <div class="game-body" id="game-body">
+      <div class="board-status">
+        <div class="status-item">
+          <span class="status-label">Siege Engines</span>
+          <span class="status-value" id="siege-count">0 / 12</span>
+        </div>
+        <div class="status-item">
+          <span class="status-label">Swords</span>
+          <div class="swords-display" id="swords-display"><span class="status-value">0</span></div>
+        </div>
+      </div>
+
+      <div class="loyalty-badge" id="loyalty-display"></div>
+
+      <div class="game-players" id="game-players"></div>
+
+      <h3>Quests</h3>
+      <div class="quest-grid" id="quest-summary"></div>
+
+      <div class="game-log" id="game-log"></div>
+    </div>
+
+    <div class="hand-area" id="hand-area">
+      <div class="hand-label">Your Hand (<span id="hand-count">0</span>)</div>
+      <div class="hand-cards" id="hand-cards"></div>
+    </div>
+
+    <div class="setup-overlay" id="setup-overlay">
+      <h2>Card Sharing Phase</h2>
+      <p id="setup-message">Select 1 card from your hand to share with the Round Table, then tap "Share Card"</p>
+      <div class="setup-shared" id="setup-shared"></div>
+      <div class="setup-actions" id="setup-actions"></div>
+    </div>
   </div>
 
   <!-- Toast -->
@@ -381,7 +549,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v1';
+    const APP_VERSION = 'shadows-v2';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -399,6 +567,50 @@
     };
 
     const ROOM_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no I/O/0/1 to avoid confusion
+    const KNIGHT_ORDER = ['arthur', 'galahad', 'gawain', 'kay', 'palamedes', 'percival', 'tristan'];
+
+    // Card manifest — exact counts from rulebook
+    const CARD_MANIFEST = {
+      white: {
+        fight: [
+          { value: 1, count: 14 }, { value: 2, count: 12 }, { value: 3, count: 10 },
+          { value: 4, count: 8 },  { value: 5, count: 7 },
+        ],
+        grail: { count: 18 },
+        special: [
+          { name: 'Merlin', count: 7 },        { name: 'Fate', count: 1 },
+          { name: 'Piety', count: 1 },          { name: 'Heroism', count: 1 },
+          { name: 'Reinforcements', count: 1 }, { name: 'Clairvoyance', count: 1 },
+          { name: 'Messenger', count: 1 },      { name: 'Lady of the Lake', count: 1 },
+          { name: 'Convocation', count: 1 },
+        ],
+      },
+      black: {
+        blackKnight: [
+          { value: 1, count: 5 }, { value: 3, count: 3 },
+          { value: 5, count: 2 }, { value: 7, count: 1 },
+        ],
+        lancelotDragon: [
+          { lancelotValue: 1, dragonValue: 5, count: 4 },
+          { lancelotValue: 3, dragonValue: 7, count: 3 },
+          { lancelotValue: 5, dragonValue: 9, count: 3 },
+          { lancelotValue: 7, dragonValue: 11, count: 1 },
+        ],
+        excalibur: { count: 15 },
+        despair:   { count: 15 },
+        saxon:     { count: 4 },
+        pict:      { count: 4 },
+        mercenaries: { count: 4 },
+        special: [
+          { name: 'Morgan 1', count: 1 }, { name: 'Morgan 2', count: 1 },
+          { name: 'Morgan 3', count: 1 }, { name: 'Morgan 4', count: 1 },
+          { name: 'Morgan 5', count: 1 }, { name: 'Desolation', count: 2 },
+          { name: 'Dark Forest', count: 1 },  { name: 'Guinevere', count: 1 },
+          { name: 'Mist of Avalon', count: 1 }, { name: 'Mordred', count: 1 },
+          { name: 'Vivien', count: 1 },
+        ],
+      },
+    };
 
     // ═══════════════════════════════════════════════════════════════════
     //  SECTION 2: App State
@@ -412,6 +624,24 @@
     let gameListener = null;    // Firebase listener handle
     let playersListener = null;
     let roomData = null;        // cached room meta
+
+    // Game state (Phase 2+)
+    let inGameScreen = false;
+    let myLoyalty = null;
+    let myHand = [];
+    let selectedCardId = null;  // card selected in hand (for setup)
+    let mySetupShared = false;  // have I shared a card in setup?
+    let privateListener = null;
+    let boardListener = null;
+    let questsListener = null;
+    let decksListener = null;
+    let drawRequestListener = null;
+    let drawResultListener = null;
+    let setupListener = null;
+    let cachedBoard = null;
+    let cachedQuests = null;
+    let cachedDecks = null;
+    let cachedPlayers = {};
 
     // ═══════════════════════════════════════════════════════════════════
     //  SECTION 3: Firebase Setup
@@ -473,6 +703,78 @@
       el.textContent = state === 'connected' ? 'Connected' :
                        state === 'disconnected' ? 'Disconnected — reconnecting...' :
                        'Connecting...';
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SECTION 4B: Card Engine
+    // ═══════════════════════════════════════════════════════════════════
+
+    function createWhiteDeck() {
+      const deck = [];
+      let id = 0;
+      for (const f of CARD_MANIFEST.white.fight) {
+        for (let i = 0; i < f.count; i++) deck.push({ id: 'w' + (id++), type: 'fight', value: f.value });
+      }
+      for (let i = 0; i < CARD_MANIFEST.white.grail.count; i++) {
+        deck.push({ id: 'w' + (id++), type: 'grail' });
+      }
+      for (const s of CARD_MANIFEST.white.special) {
+        for (let i = 0; i < s.count; i++) deck.push({ id: 'w' + (id++), type: 'special', name: s.name });
+      }
+      return deck; // 84 cards total
+    }
+
+    function createBlackDeck() {
+      const deck = [];
+      let id = 0;
+      for (const bk of CARD_MANIFEST.black.blackKnight) {
+        for (let i = 0; i < bk.count; i++) deck.push({ id: 'b' + (id++), type: 'blackKnight', value: bk.value });
+      }
+      for (const ld of CARD_MANIFEST.black.lancelotDragon) {
+        for (let i = 0; i < ld.count; i++) {
+          deck.push({ id: 'b' + (id++), type: 'lancelotDragon', lancelotValue: ld.lancelotValue, dragonValue: ld.dragonValue });
+        }
+      }
+      for (let i = 0; i < CARD_MANIFEST.black.excalibur.count; i++) deck.push({ id: 'b' + (id++), type: 'excalibur' });
+      for (let i = 0; i < CARD_MANIFEST.black.despair.count; i++) deck.push({ id: 'b' + (id++), type: 'despair' });
+      for (let i = 0; i < CARD_MANIFEST.black.saxon.count; i++) deck.push({ id: 'b' + (id++), type: 'saxon' });
+      for (let i = 0; i < CARD_MANIFEST.black.pict.count; i++) deck.push({ id: 'b' + (id++), type: 'pict' });
+      for (let i = 0; i < CARD_MANIFEST.black.mercenaries.count; i++) deck.push({ id: 'b' + (id++), type: 'mercenaries' });
+      for (const s of CARD_MANIFEST.black.special) {
+        for (let i = 0; i < s.count; i++) deck.push({ id: 'b' + (id++), type: 'specialBlack', name: s.name });
+      }
+      return deck; // 76 cards total
+    }
+
+    function shuffle(arr) {
+      for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+      }
+      return arr;
+    }
+
+    function getCardDisplayName(card) {
+      if (card.type === 'fight') return 'Fight ' + card.value;
+      if (card.type === 'grail') return 'Grail';
+      if (card.type === 'special') return card.name;
+      if (card.type === 'blackKnight') return 'BK ' + card.value;
+      if (card.type === 'lancelotDragon') return 'L' + card.lancelotValue + '/D' + card.dragonValue;
+      if (card.type === 'specialBlack') return card.name;
+      return card.type.charAt(0).toUpperCase() + card.type.slice(1);
+    }
+
+    function getCardCSSClass(card) {
+      if (card.type === 'fight') return 'fight';
+      if (card.type === 'grail') return 'grail';
+      if (card.type === 'special') return 'special-white';
+      return '';
+    }
+
+    function getCardValueDisplay(card) {
+      if (card.type === 'fight') return card.value;
+      if (card.type === 'grail') return '\u2615'; // grail symbol
+      return '';
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -671,9 +973,13 @@
           toggle.classList.remove('on');
         }
 
-        // If game started, switch to game screen
-        if (roomData.status === 'playing') {
-          showScreen('game-screen');
+        // If game started or in setup, switch to game screen
+        if ((roomData.status === 'setup' || roomData.status === 'playing') && !inGameScreen) {
+          enterGameScreen();
+        }
+        // Update setup overlay visibility if already in game
+        if (inGameScreen) {
+          $('setup-overlay').classList.toggle('hidden', roomData.status !== 'setup');
         }
       });
 
@@ -749,7 +1055,7 @@
         } catch (e) { /* ignore */ }
       }
 
-      // Detach listeners
+      // Detach all listeners
       if (gameListener) {
         fbDb.ref('games/' + currentRoom + '/meta').off('value', gameListener);
         gameListener = null;
@@ -757,6 +1063,16 @@
       if (playersListener) {
         fbDb.ref('games/' + currentRoom + '/players').off('value', playersListener);
         playersListener = null;
+      }
+      // Game screen listeners
+      if (currentRoom) {
+        if (privateListener) { fbDb.ref('private/' + currentRoom + '/' + myKnight).off('value', privateListener); privateListener = null; }
+        if (boardListener) { fbDb.ref('games/' + currentRoom + '/board').off('value', boardListener); boardListener = null; }
+        if (questsListener) { fbDb.ref('games/' + currentRoom + '/quests').off('value', questsListener); questsListener = null; }
+        if (decksListener) { fbDb.ref('games/' + currentRoom + '/decks').off('value', decksListener); decksListener = null; }
+        if (drawRequestListener) { fbDb.ref('games/' + currentRoom + '/drawRequests').off('child_added', drawRequestListener); drawRequestListener = null; }
+        if (drawResultListener) { fbDb.ref('games/' + currentRoom + '/drawResults').off('child_added', drawResultListener); drawResultListener = null; }
+        if (setupListener) { fbDb.ref('games/' + currentRoom + '/setup').off('value', setupListener); setupListener = null; }
       }
 
       // If host and no other players, delete the room
@@ -769,10 +1085,20 @@
         } catch (e) { /* ignore */ }
       }
 
+      // Reset all state
       currentRoom = null;
       myKnight = null;
       isHost = false;
       roomData = null;
+      inGameScreen = false;
+      myLoyalty = null;
+      myHand = [];
+      selectedCardId = null;
+      mySetupShared = false;
+      cachedBoard = null;
+      cachedQuests = null;
+      cachedDecks = null;
+      cachedPlayers = {};
 
       showScreen('home-screen');
     }
@@ -782,14 +1108,113 @@
 
       const playersSnap = await fbDb.ref('games/' + currentRoom + '/players').once('value');
       const players = playersSnap.val() || {};
-      const count = Object.keys(players).length;
+      const playerIds = Object.keys(players);
+      const count = playerIds.length;
 
       if (count < 3) { showToast('Need at least 3 players.'); return; }
       if (count > 7) { showToast('Maximum 7 players.'); return; }
 
-      // Transition to playing state
-      await fbDb.ref('games/' + currentRoom + '/meta/status').set('playing');
-      showToast('Game started!');
+      $('btn-start').disabled = true;
+      $('btn-start').textContent = 'Starting...';
+
+      try {
+        // Determine turn order (active knights in standard order)
+        const turnOrder = KNIGHT_ORDER.filter(k => playerIds.includes(k));
+        const firstKnight = turnOrder[0];
+
+        // Create & shuffle loyalty deck
+        let loyaltyDeck;
+        if (roomData.includeTraitor) {
+          loyaltyDeck = Array(count - 1).fill('loyal');
+          loyaltyDeck.push('traitor');
+          shuffle(loyaltyDeck);
+        } else {
+          loyaltyDeck = Array(count).fill('loyal');
+        }
+
+        // Create white deck, separate Merlins
+        const whiteDeck = createWhiteDeck();
+        const merlins = whiteDeck.filter(c => c.type === 'special' && c.name === 'Merlin');
+        const nonMerlins = whiteDeck.filter(c => !(c.type === 'special' && c.name === 'Merlin'));
+        // Remaining Merlins (7 - playerCount) go back in deck
+        const extraMerlins = merlins.slice(count);
+        const mainWhiteDeck = shuffle([...nonMerlins, ...extraMerlins]);
+
+        // Deal 5 whites + 1 Merlin to each player
+        const playerHands = {};
+        for (let i = 0; i < turnOrder.length; i++) {
+          const kid = turnOrder[i];
+          const hand = [merlins[i]];
+          for (let j = 0; j < 5; j++) hand.push(mainWhiteDeck.pop());
+          playerHands[kid] = hand;
+        }
+
+        // Create & shuffle black deck
+        const blackDeck = shuffle(createBlackDeck());
+
+        // Build atomic Firebase update
+        const updates = {};
+        const gp = 'games/' + currentRoom + '/';
+        const pp = 'private/' + currentRoom + '/';
+
+        // Meta
+        updates[gp + 'meta/status'] = 'setup';
+        updates[gp + 'meta/currentTurnKnight'] = firstKnight;
+        updates[gp + 'meta/turnPhase'] = 'setup';
+        updates[gp + 'meta/turnNumber'] = 1;
+        updates[gp + 'meta/turnOrder'] = turnOrder;
+        updates[gp + 'meta/sacrificeUsed'] = false;
+        updates[gp + 'meta/heroicActionTaken'] = false;
+        updates[gp + 'meta/specialWhitePlayed'] = false;
+        updates[gp + 'meta/persistentEffects'] = {
+          darkForest: false, guinevere: false, mistOfAvalon: false,
+          mordred: false, vivien: false,
+        };
+
+        // Board
+        updates[gp + 'board/siegeEngines'] = 0;
+        updates[gp + 'board/swords'] = [];
+
+        // Quests
+        updates[gp + 'quests/holyGrail'] = { status: 'active', cards: [], knightsPresent: [] };
+        updates[gp + 'quests/excalibur'] = { status: 'active', position: 0, knightsPresent: [] };
+        updates[gp + 'quests/blackKnight'] = { status: 'active', whiteCards: [], blackCards: [], knightsPresent: [] };
+        updates[gp + 'quests/lancelot'] = { status: 'active', phase: 'lancelot', whiteCards: [], blackCards: [], knightsPresent: [] };
+        updates[gp + 'quests/saxonWar'] = { status: 'active', warriors: 0, fightCards: [], knightsPresent: [] };
+        updates[gp + 'quests/pictWar'] = { status: 'active', warriors: 0, fightCards: [], knightsPresent: [] };
+
+        // Deck counts (public)
+        updates[gp + 'decks/whiteDrawCount'] = mainWhiteDeck.length;
+        updates[gp + 'decks/blackDrawCount'] = blackDeck.length;
+
+        // Private data for each player (loyalty + hand)
+        for (let i = 0; i < turnOrder.length; i++) {
+          const kid = turnOrder[i];
+          const pdata = {
+            uid: players[kid].uid,
+            loyalty: loyaltyDeck[i],
+            hand: playerHands[kid],
+          };
+          // Host's knight also stores the decks
+          if (kid === myKnight) {
+            pdata.hostDecks = {
+              whiteDraw: mainWhiteDeck,
+              blackDraw: blackDeck,
+              whiteDiscard: [],
+              blackDiscard: [],
+            };
+          }
+          updates[pp + kid] = pdata;
+        }
+
+        await fbDb.ref().update(updates);
+        showToast('Cards dealt! Select a card to share.');
+      } catch (err) {
+        console.error('Start game error:', err);
+        showToast('Failed to start game: ' + err.message);
+        $('btn-start').disabled = false;
+        $('btn-start').textContent = 'Start Game (' + count + ' players)';
+      }
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -838,7 +1263,407 @@
     });
 
     // ═══════════════════════════════════════════════════════════════════
-    //  SECTION 8: Service Worker Registration
+    //  SECTION 8: Game Screen — Entry & Listeners
+    // ═══════════════════════════════════════════════════════════════════
+
+    function enterGameScreen() {
+      if (inGameScreen) return;
+      inGameScreen = true;
+      showScreen('game-screen');
+
+      // Listen to own private data (loyalty + hand)
+      listenToPrivateData();
+
+      // Listen to shared game state
+      listenToBoard();
+      listenToQuests();
+      listenToDecks();
+      listenToGamePlayers();
+
+      // Host: listen for draw requests
+      if (isHost) listenForDrawRequests();
+
+      // All: listen for draw results (cards dealt to me)
+      listenForDrawResults();
+
+      // Listen to setup selections
+      listenToSetupSelections();
+    }
+
+    function listenToPrivateData() {
+      if (privateListener) return;
+      const ref = fbDb.ref('private/' + currentRoom + '/' + myKnight);
+      privateListener = ref.on('value', snap => {
+        if (!snap.exists()) return;
+        const data = snap.val();
+        myLoyalty = data.loyalty || null;
+        myHand = data.hand || [];
+        renderLoyalty();
+        renderHand();
+      });
+    }
+
+    function listenToBoard() {
+      if (boardListener) return;
+      boardListener = fbDb.ref('games/' + currentRoom + '/board').on('value', snap => {
+        cachedBoard = snap.val() || { siegeEngines: 0, swords: [] };
+        renderBoard();
+      });
+    }
+
+    function listenToQuests() {
+      if (questsListener) return;
+      questsListener = fbDb.ref('games/' + currentRoom + '/quests').on('value', snap => {
+        cachedQuests = snap.val() || {};
+        renderQuests();
+      });
+    }
+
+    function listenToDecks() {
+      if (decksListener) return;
+      decksListener = fbDb.ref('games/' + currentRoom + '/decks').on('value', snap => {
+        cachedDecks = snap.val() || {};
+        $('white-deck-count').textContent = 'W: ' + (cachedDecks.whiteDrawCount ?? '--');
+        $('black-deck-count').textContent = 'B: ' + (cachedDecks.blackDrawCount ?? '--');
+      });
+    }
+
+    function listenToGamePlayers() {
+      // Reuse existing playersListener — it already updates cachedPlayers
+      // But we also need game-screen rendering from it
+      const ref = fbDb.ref('games/' + currentRoom + '/players');
+      ref.on('value', snap => {
+        cachedPlayers = snap.val() || {};
+        renderGamePlayers();
+      });
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SECTION 9: Game Screen — Rendering
+    // ═══════════════════════════════════════════════════════════════════
+
+    function renderLoyalty() {
+      const el = $('loyalty-display');
+      if (!myLoyalty) { el.style.display = 'none'; return; }
+      el.style.display = '';
+      if (myLoyalty === 'traitor') {
+        el.className = 'loyalty-badge loyalty-traitor';
+        el.textContent = 'You are the TRAITOR';
+      } else {
+        el.className = 'loyalty-badge loyalty-loyal';
+        el.textContent = 'You are LOYAL to Camelot';
+      }
+    }
+
+    function renderHand() {
+      const container = $('hand-cards');
+      $('hand-count').textContent = myHand.length;
+      container.innerHTML = '';
+      for (const card of myHand) {
+        const el = document.createElement('div');
+        el.className = 'hand-card ' + getCardCSSClass(card);
+        if (card.id === selectedCardId) el.classList.add('selected');
+
+        const val = getCardValueDisplay(card);
+        const name = getCardDisplayName(card);
+        let inner = '';
+        if (val) inner += '<div class="card-value">' + val + '</div>';
+        if (card.type === 'fight') {
+          inner += '<div class="card-type">Fight</div>';
+        } else if (card.type === 'grail') {
+          inner += '<div class="card-type">Grail</div>';
+        } else {
+          inner += '<div class="card-name">' + name + '</div>';
+        }
+        el.innerHTML = inner;
+        el.addEventListener('click', () => onCardTap(card.id));
+        container.appendChild(el);
+      }
+    }
+
+    function onCardTap(cardId) {
+      if (roomData && roomData.status === 'setup' && !mySetupShared) {
+        // Toggle selection for sharing
+        selectedCardId = (selectedCardId === cardId) ? null : cardId;
+        renderHand();
+        renderSetupActions();
+      }
+      // Phase 3+ will add card playing logic here
+    }
+
+    function renderBoard() {
+      if (!cachedBoard) return;
+      $('siege-count').textContent = cachedBoard.siegeEngines + ' / 12';
+      const swordsEl = $('swords-display');
+      const swords = cachedBoard.swords || [];
+      if (swords.length === 0) {
+        swordsEl.innerHTML = '<span class="status-value">0</span>';
+      } else {
+        swordsEl.innerHTML = swords.map(s =>
+          '<div class="sword-pip ' + (s.color || 'white') + '"></div>'
+        ).join('');
+      }
+    }
+
+    function renderQuests() {
+      if (!cachedQuests) return;
+      const el = $('quest-summary');
+      const questInfo = [
+        { key: 'holyGrail', name: 'Holy Grail', info: q => {
+          const gc = (q.cards || []).filter(c => c && c.type === 'grail').length;
+          const bc = (q.cards || []).filter(c => c && c.type !== 'grail').length;
+          return gc + ' grail, ' + bc + ' despair';
+        }},
+        { key: 'excalibur', name: 'Excalibur', info: q => 'Position: ' + (q.position || 0) },
+        { key: 'blackKnight', name: 'Black Knight', info: q =>
+          (q.whiteCards || []).length + '/4 W, ' + (q.blackCards || []).length + '/4 B'
+        },
+        { key: 'lancelot', name: 'Lancelot', info: q => {
+          const phase = q.phase === 'dragon' ? 'Dragon' : 'Lancelot';
+          const wMax = q.phase === 'dragon' ? 9 : 5;
+          const bMax = 5;
+          return phase + ' — ' + (q.whiteCards || []).length + '/' + wMax + ' W, ' + (q.blackCards || []).length + '/' + bMax + ' B';
+        }},
+        { key: 'saxonWar', name: 'Saxon War', info: q =>
+          (q.warriors || 0) + '/4 warriors, ' + (q.fightCards || []).length + '/5 fight'
+        },
+        { key: 'pictWar', name: 'Pict War', info: q =>
+          (q.warriors || 0) + '/4 warriors, ' + (q.fightCards || []).length + '/5 fight'
+        },
+      ];
+
+      el.innerHTML = questInfo.map(qi => {
+        const q = cachedQuests[qi.key];
+        if (!q || q.status === 'completed') return '';
+        return '<div class="quest-chip"><div class="qname">' + qi.name + '</div>' +
+               '<div class="qinfo">' + qi.info(q) + '</div></div>';
+      }).join('');
+    }
+
+    function renderGamePlayers() {
+      if (!cachedPlayers || !roomData) return;
+      const el = $('game-players');
+      const turnOrder = roomData.turnOrder || [];
+      el.innerHTML = turnOrder.map(kid => {
+        const p = cachedPlayers[kid];
+        if (!p) return '';
+        const knight = KNIGHTS[kid];
+        const isCurrent = roomData.currentTurnKnight === kid;
+        const isMe = p.uid === myUid;
+        let cls = 'gp-chip';
+        if (isCurrent) cls += ' current-turn';
+        if (isMe) cls += ' me';
+        if (!p.alive) cls += ' dead';
+        return '<div class="' + cls + '">' +
+          '<img src="' + knight.icon + '" alt="">' +
+          '<span>' + p.displayName + '</span>' +
+          '<span class="gp-life">' + '\u2665'.repeat(Math.max(0, p.life)) + '</span>' +
+          '</div>';
+      }).join('');
+
+      // Update turn info
+      const current = cachedPlayers[roomData.currentTurnKnight];
+      if (current && roomData.status === 'playing') {
+        const k = KNIGHTS[roomData.currentTurnKnight];
+        $('turn-info').textContent = (current.uid === myUid ? 'Your' : current.displayName + "'s") +
+          ' turn — ' + (roomData.turnPhase || 'evil');
+      } else if (roomData.status === 'setup') {
+        $('turn-info').textContent = 'Setup — Card Sharing';
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SECTION 10: Host-Mediated Card Drawing
+    // ═══════════════════════════════════════════════════════════════════
+
+    function listenForDrawRequests() {
+      if (drawRequestListener) return;
+      const ref = fbDb.ref('games/' + currentRoom + '/drawRequests');
+      drawRequestListener = ref.on('child_added', async snap => {
+        await processDrawRequest(snap.val(), snap.key);
+      });
+    }
+
+    async function processDrawRequest(request, requestId) {
+      const { knightId, deckType, count } = request;
+      const deckPath = 'private/' + currentRoom + '/' + myKnight + '/hostDecks/';
+      const drawKey = deckType === 'white' ? 'whiteDraw' : 'blackDraw';
+
+      const deckSnap = await fbDb.ref(deckPath + drawKey).once('value');
+      const drawPile = deckSnap.val() || [];
+
+      if (drawPile.length === 0) {
+        // TODO Phase 6: reshuffle both discard piles
+        console.warn('Draw pile empty for', deckType);
+        await fbDb.ref('games/' + currentRoom + '/drawRequests/' + requestId).remove();
+        return;
+      }
+
+      const drawnCards = [];
+      for (let i = 0; i < count && drawPile.length > 0; i++) {
+        drawnCards.push(drawPile.pop());
+      }
+
+      const updates = {};
+      updates['games/' + currentRoom + '/drawResults/' + requestId] = { knightId, cards: drawnCards };
+      updates[deckPath + drawKey] = drawPile;
+      updates['games/' + currentRoom + '/decks/' + (deckType === 'white' ? 'whiteDrawCount' : 'blackDrawCount')] = drawPile.length;
+      updates['games/' + currentRoom + '/drawRequests/' + requestId] = null;
+
+      await fbDb.ref().update(updates);
+    }
+
+    function listenForDrawResults() {
+      if (drawResultListener) return;
+      const ref = fbDb.ref('games/' + currentRoom + '/drawResults');
+      drawResultListener = ref.on('child_added', async snap => {
+        const result = snap.val();
+        if (!result || result.knightId !== myKnight) return;
+
+        // Add cards to my hand
+        const newCards = result.cards || [];
+        myHand = [...myHand, ...newCards];
+
+        // Write updated hand to my private path & remove the result
+        const updates = {};
+        updates['private/' + currentRoom + '/' + myKnight + '/hand'] = myHand;
+        updates['games/' + currentRoom + '/drawResults/' + snap.key] = null;
+        await fbDb.ref().update(updates);
+      });
+    }
+
+    async function requestCardDraw(deckType, count) {
+      const ref = fbDb.ref('games/' + currentRoom + '/drawRequests').push();
+      await ref.set({ knightId: myKnight, deckType, count, timestamp: firebase.database.ServerValue.TIMESTAMP });
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SECTION 11: Setup Phase — Card Sharing
+    // ═══════════════════════════════════════════════════════════════════
+
+    function listenToSetupSelections() {
+      if (setupListener) return;
+      const ref = fbDb.ref('games/' + currentRoom + '/setup');
+      setupListener = ref.on('value', snap => {
+        const selections = snap.val() || {};
+        renderSetupShared(selections);
+      });
+    }
+
+    function renderSetupShared(selections) {
+      const sharedEl = $('setup-shared');
+      const turnOrder = roomData?.turnOrder || [];
+      const allShared = turnOrder.length > 0 && turnOrder.every(kid => selections[kid]);
+
+      sharedEl.innerHTML = turnOrder.map(kid => {
+        const sel = selections[kid];
+        const knight = KNIGHTS[kid];
+        const playerData = cachedPlayers[kid];
+        const name = playerData?.displayName || knight?.name || kid;
+
+        if (!sel) {
+          return '<div class="shared-slot">' +
+            '<div class="card-name">' + name + '</div>' +
+            '<div class="card-type">waiting...</div></div>';
+        }
+
+        const card = sel.card;
+        return '<div class="shared-slot filled ' + getCardCSSClass(card) + '">' +
+          '<div class="card-name" style="font-size:0.625rem;opacity:0.7;">' + name + '</div>' +
+          (allShared
+            ? ('<div class="card-value">' + (getCardValueDisplay(card) || '') + '</div>' +
+               '<div class="card-name">' + getCardDisplayName(card) + '</div>')
+            : '<div class="card-type">shared</div>') +
+          '</div>';
+      }).join('');
+
+      renderSetupActions(allShared);
+
+      // Update message
+      if (mySetupShared && !allShared) {
+        $('setup-message').textContent = 'Waiting for other players to share...';
+      } else if (allShared) {
+        $('setup-message').textContent = 'All cards shared! ' +
+          (isHost ? 'Redistribute to begin the game.' : 'Waiting for host to redistribute.');
+      }
+    }
+
+    function renderSetupActions(allShared) {
+      const actionsEl = $('setup-actions');
+      let html = '';
+
+      if (!mySetupShared && selectedCardId) {
+        html += '<button class="btn btn-primary" id="btn-share-card">Share Selected Card</button>';
+      }
+      if (allShared && isHost) {
+        html += '<button class="btn btn-primary" id="btn-redistribute">Shuffle & Redistribute</button>';
+      }
+
+      actionsEl.innerHTML = html;
+
+      // Attach handlers
+      const shareBtn = document.getElementById('btn-share-card');
+      if (shareBtn) shareBtn.addEventListener('click', shareSelectedCard);
+      const redistBtn = document.getElementById('btn-redistribute');
+      if (redistBtn) redistBtn.addEventListener('click', redistributeCards);
+    }
+
+    async function shareSelectedCard() {
+      if (!selectedCardId || mySetupShared) return;
+      const card = myHand.find(c => c.id === selectedCardId);
+      if (!card) return;
+
+      mySetupShared = true;
+      selectedCardId = null;
+
+      // Remove card from hand
+      myHand = myHand.filter(c => c.id !== card.id);
+
+      // Write: update own hand + share the card publicly
+      const updates = {};
+      updates['private/' + currentRoom + '/' + myKnight + '/hand'] = myHand;
+      updates['games/' + currentRoom + '/setup/' + myKnight] = { card, displayName: myName };
+      await fbDb.ref().update(updates);
+
+      showToast('Card shared!');
+    }
+
+    async function redistributeCards() {
+      if (!isHost) return;
+
+      // Collect all shared cards
+      const setupSnap = await fbDb.ref('games/' + currentRoom + '/setup').once('value');
+      const selections = setupSnap.val() || {};
+      const turnOrder = roomData.turnOrder || [];
+
+      const sharedCards = turnOrder.map(kid => selections[kid]?.card).filter(Boolean);
+      if (sharedCards.length !== turnOrder.length) {
+        showToast('Not all players have shared yet.');
+        return;
+      }
+
+      // Shuffle and assign 1 to each player
+      shuffle(sharedCards);
+      const updates = {};
+      for (let i = 0; i < turnOrder.length; i++) {
+        const kid = turnOrder[i];
+        updates['games/' + currentRoom + '/drawResults/setup_' + kid] = {
+          knightId: kid,
+          cards: [sharedCards[i]],
+        };
+      }
+
+      // Clear setup data and transition to playing
+      updates['games/' + currentRoom + '/setup'] = null;
+      updates['games/' + currentRoom + '/meta/status'] = 'playing';
+      updates['games/' + currentRoom + '/meta/turnPhase'] = 'evil';
+
+      await fbDb.ref().update(updates);
+      showToast('Cards redistributed! Game begins!');
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SECTION 12: Service Worker Registration
     // ═══════════════════════════════════════════════════════════════════
 
     if ('serviceWorker' in navigator) {
@@ -848,7 +1673,7 @@
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    //  SECTION 9: Initialize
+    //  SECTION 13: Initialize
     // ═══════════════════════════════════════════════════════════════════
 
     initAuth();
