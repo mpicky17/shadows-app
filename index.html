@@ -448,6 +448,84 @@
     }
     .shared-slot.filled { border-style: solid; border-color: var(--gold); }
     .setup-actions { display: flex; gap: 0.75rem; flex-wrap: wrap; justify-content: center; }
+
+    /* ── Turn Action Panel ──────────────────────────────────────────── */
+    .turn-actions {
+      padding: 1rem; background: var(--bg-card);
+      border-radius: var(--radius); border: 1px solid var(--gold-dim);
+    }
+    .turn-actions h3 { color: var(--gold); font-size: 1rem; margin-bottom: 0.5rem; }
+    .action-buttons { display: flex; flex-direction: column; gap: 0.5rem; }
+    .btn-evil {
+      border-color: var(--red-bright); color: var(--red-bright);
+      font-size: 1rem; width: 100%;
+    }
+    .btn-evil:hover { background: var(--red-bright); color: white; }
+    .btn-heroic {
+      border-color: var(--gold); color: var(--gold);
+      font-size: 1rem; width: 100%;
+    }
+    .btn-heroic:hover { background: var(--gold); color: var(--bg-dark); }
+    .waiting-text {
+      color: var(--text-dim); font-size: 1rem; text-align: center; padding: 0.5rem;
+    }
+
+    /* ── Card Reveal Overlay ────────────────────────────────────────── */
+    .card-reveal-overlay {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.85); z-index: 200;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      padding: 1.5rem; gap: 1rem; text-align: center;
+    }
+    .card-reveal-overlay.hidden { display: none; }
+    .card-reveal-overlay h2 { color: var(--red-bright); font-size: 1.25rem; }
+    .revealed-card {
+      width: 160px; min-height: 220px;
+      background: linear-gradient(135deg, #1a1a1a, #2a1a1a);
+      border: 3px solid var(--red-bright); border-radius: 10px;
+      padding: 1rem; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 0.5rem;
+      color: var(--parchment);
+      box-shadow: 0 0 30px rgba(139,26,26,0.5);
+    }
+    .revealed-card .rc-type {
+      font-size: 0.875rem; text-transform: uppercase; color: var(--red-bright);
+    }
+    .revealed-card .rc-name { font-size: 1.25rem; font-weight: 700; }
+    .revealed-card .rc-value { font-size: 2rem; font-weight: 700; color: var(--gold); }
+    .revealed-card .rc-desc {
+      font-size: 0.875rem; color: var(--text-dim); line-height: 1.3;
+    }
+    .card-reveal-actions {
+      display: flex; gap: 0.75rem; flex-wrap: wrap; justify-content: center;
+    }
+
+    /* ── Interaction Panel ──────────────────────────────────────────── */
+    .interaction-panel {
+      padding: 1rem; background: var(--bg-card);
+      border-radius: var(--radius); border: 2px solid var(--red-bright);
+      text-align: center;
+    }
+    .interaction-panel h3 { color: var(--red-bright); font-size: 1rem; margin-bottom: 0.5rem; }
+    .interaction-panel p { color: var(--text-dim); font-size: 1rem; margin-bottom: 0.75rem; }
+    .btn-merlin { border-color: #7986CB; color: #7986CB; }
+    .btn-merlin:hover { background: #7986CB; color: var(--bg-dark); }
+
+    /* ── Game Log ───────────────────────────────────────────────────── */
+    .game-log {
+      max-height: 150px; overflow-y: auto; font-size: 0.875rem;
+      padding: 0.5rem; background: rgba(0,0,0,0.15); border-radius: var(--radius);
+    }
+    .game-log:empty { display: none; }
+    .log-entry {
+      padding: 0.25rem 0; border-bottom: 1px solid rgba(255,255,255,0.05);
+      font-size: 0.875rem;
+    }
+    .log-entry.evil { color: var(--red-bright); }
+    .log-entry.info { color: var(--text-dim); }
+    .log-entry.quest { color: var(--gold); }
+    .log-entry.system { color: var(--blue); }
   </style>
 </head>
 <body>
@@ -545,6 +623,8 @@
       <h3>Quests</h3>
       <div class="quest-grid" id="quest-summary"></div>
 
+      <div id="turn-action-area"></div>
+      <div id="interaction-area"></div>
       <div class="game-log" id="game-log"></div>
     </div>
 
@@ -559,6 +639,13 @@
       <div class="setup-shared" id="setup-shared"></div>
       <div class="setup-actions" id="setup-actions"></div>
     </div>
+
+    <div class="card-reveal-overlay hidden" id="card-reveal-overlay">
+      <h2 id="reveal-title">Black Card Drawn</h2>
+      <div class="revealed-card" id="revealed-card-display"></div>
+      <p id="reveal-effect-desc"></p>
+      <div class="card-reveal-actions" id="reveal-actions"></div>
+    </div>
   </div>
 
   <!-- Toast -->
@@ -569,7 +656,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v3';
+    const APP_VERSION = 'shadows-v4';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -662,6 +749,9 @@
     let cachedQuests = null;
     let cachedDecks = null;
     let cachedPlayers = {};
+    let logListener = null;
+    let discardMode = null;
+    let discardCount = 0;
 
     // ═══════════════════════════════════════════════════════════════════
     //  SECTION 3: Firebase Setup
@@ -1100,6 +1190,9 @@
         // Update setup overlay visibility if already in game
         if (inGameScreen) {
           $('setup-overlay').classList.toggle('hidden', roomData.status !== 'setup');
+          // Phase 3: handle revealed black card and pending interaction
+          onRevealedBlackCardChanged();
+          renderPendingInteraction();
         }
       });
 
@@ -1195,6 +1288,7 @@
         if (drawRequestListener) { fbDb.ref('games/' + currentRoom + '/drawRequests').off('child_added', drawRequestListener); drawRequestListener = null; }
         if (drawResultListener) { fbDb.ref('games/' + currentRoom + '/drawResults').off('child_added', drawResultListener); drawResultListener = null; }
         if (setupListener) { fbDb.ref('games/' + currentRoom + '/setup').off('value', setupListener); setupListener = null; }
+        if (logListener) { fbDb.ref('games/' + currentRoom + '/log').off('value', logListener); logListener = null; }
       }
 
       // If host and no other players, delete the room
@@ -1226,6 +1320,8 @@
       cachedQuests = null;
       cachedDecks = null;
       cachedPlayers = {};
+      discardMode = null;
+      discardCount = 0;
 
       showScreen('home-screen');
       updateHomeScreenForSession();
@@ -1458,6 +1554,9 @@
 
       // Listen to setup selections
       listenToSetupSelections();
+
+      // Listen to game log
+      listenToLog();
     }
 
     function listenToPrivateData() {
@@ -1563,8 +1662,42 @@
         selectedCardId = (selectedCardId === cardId) ? null : cardId;
         renderHand();
         renderSetupActions();
+        return;
       }
-      // Phase 3+ will add card playing logic here
+
+      // Discard mode for Morgan 1, Vivien, Morgan 5
+      if (discardMode) {
+        selectedCardId = (selectedCardId === cardId) ? null : cardId;
+        renderHand();
+
+        if (discardMode === 'morgan1') {
+          renderMorganDiscardPanel(roomData?.pendingInteraction);
+        } else if (discardMode === 'vivien') {
+          renderVivienDiscardPanel(roomData?.pendingInteraction);
+        } else if (discardMode === 'morgan5') {
+          // For Morgan 5, auto-discard on tap if counting down
+          if (selectedCardId) {
+            myHand = myHand.filter(c => c.id !== selectedCardId);
+            selectedCardId = null;
+            discardCount--;
+            fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
+            if (discardCount <= 0) {
+              discardMode = null;
+              fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
+                .set({ done: true });
+              addLog('evil', getKnightDisplayName(myKnight) + ' discarded 3 cards for Morgan 5');
+            } else {
+              renderMorgan5DiscardUI();
+            }
+            renderHand();
+          }
+        }
+        return;
+      }
+
+      // Normal card selection (for future heroic actions)
+      selectedCardId = (selectedCardId === cardId) ? null : cardId;
+      renderHand();
     }
 
     function renderBoard() {
@@ -1610,8 +1743,10 @@
 
       el.innerHTML = questInfo.map(qi => {
         const q = cachedQuests[qi.key];
-        if (!q || q.status === 'completed') return '';
-        return '<div class="quest-chip"><div class="qname">' + qi.name + '</div>' +
+        if (!q || q.status === 'completed' || q.status === 'won') return '';
+        const lostStyle = q.status === 'lost' ? ' style="opacity:0.5;border-color:var(--red-bright);"' : '';
+        const lostLabel = q.status === 'lost' ? ' (LOST)' : '';
+        return '<div class="quest-chip"' + lostStyle + '><div class="qname">' + qi.name + lostLabel + '</div>' +
                '<div class="qinfo">' + qi.info(q) + '</div></div>';
       }).join('');
     }
@@ -1645,7 +1780,12 @@
           ' turn — ' + (roomData.turnPhase || 'evil');
       } else if (roomData.status === 'setup') {
         $('turn-info').textContent = 'Setup — Card Sharing';
+      } else if (roomData.status === 'ended') {
+        $('turn-info').textContent = 'Game Over — ' + (roomData.winner === 'loyal' ? 'Loyal Knights Win!' : 'Evil Wins!');
       }
+
+      // Render turn actions (Phase 3)
+      renderTurnActions();
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1663,6 +1803,30 @@
     async function processDrawRequest(request, requestId) {
       const { knightId, deckType, count } = request;
       const deckPath = 'private/' + currentRoom + '/' + myKnight + '/hostDecks/';
+
+      // Black reveal: draw from black deck and reveal to all players
+      if (deckType === 'blackReveal') {
+        const deckSnap = await fbDb.ref(deckPath + 'blackDraw').once('value');
+        const drawPile = deckSnap.val() || [];
+        if (drawPile.length === 0) {
+          console.warn('Black draw pile empty');
+          await fbDb.ref('games/' + currentRoom + '/drawRequests/' + requestId).remove();
+          return;
+        }
+        const card = drawPile.pop();
+        const discardSnap = await fbDb.ref(deckPath + 'blackDiscard').once('value');
+        const discard = discardSnap.val() || [];
+        discard.push(card);
+        const updates = {};
+        updates[deckPath + 'blackDraw'] = drawPile;
+        updates[deckPath + 'blackDiscard'] = discard;
+        updates['games/' + currentRoom + '/decks/blackDrawCount'] = drawPile.length;
+        updates['games/' + currentRoom + '/meta/revealedBlackCard'] = { card, drawnBy: knightId, status: 'revealed' };
+        updates['games/' + currentRoom + '/drawRequests/' + requestId] = null;
+        await fbDb.ref().update(updates);
+        return;
+      }
+
       const drawKey = deckType === 'white' ? 'whiteDraw' : 'blackDraw';
 
       const deckSnap = await fbDb.ref(deckPath + drawKey).once('value');
@@ -1841,7 +2005,1151 @@
     }
 
     // ═══════════════════════════════════════════════════════════════════
-    //  SECTION 12: Service Worker Registration
+    //  SECTION 12A: Game Log
+    // ═══════════════════════════════════════════════════════════════════
+
+    async function addLog(type, message) {
+      if (!currentRoom) return;
+      try {
+        await fbDb.ref('games/' + currentRoom + '/log').push({
+          timestamp: firebase.database.ServerValue.TIMESTAMP,
+          type, knight: myKnight, message,
+        });
+      } catch (e) { console.warn('Log write failed:', e); }
+    }
+
+    function listenToLog() {
+      if (logListener) return;
+      const ref = fbDb.ref('games/' + currentRoom + '/log').orderByChild('timestamp').limitToLast(50);
+      logListener = ref.on('value', snap => {
+        const entries = [];
+        snap.forEach(child => entries.push(child.val()));
+        renderLog(entries);
+      });
+    }
+
+    function renderLog(entries) {
+      const el = $('game-log');
+      el.innerHTML = entries.map(e =>
+        '<div class="log-entry ' + (e.type || 'info') + '">' + e.message + '</div>'
+      ).join('');
+      el.scrollTop = el.scrollHeight;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SECTION 12B: Turn Actions — Rendering & Evil Phase
+    // ═══════════════════════════════════════════════════════════════════
+
+    function isMyTurn() {
+      return roomData && roomData.currentTurnKnight === myKnight;
+    }
+
+    function getKnightDisplayName(knightId) {
+      const p = cachedPlayers[knightId];
+      return p ? p.displayName : (KNIGHTS[knightId]?.name || knightId);
+    }
+
+    function renderTurnActions() {
+      const area = $('turn-action-area');
+      if (!roomData || roomData.status !== 'playing') { area.innerHTML = ''; return; }
+      // Don't show actions if a pending interaction is active
+      if (roomData.pendingInteraction && !roomData.pendingInteraction.resolved) { area.innerHTML = ''; return; }
+      // Don't show actions if a card is being revealed
+      if (roomData.revealedBlackCard) { area.innerHTML = ''; return; }
+
+      const currentName = getKnightDisplayName(roomData.currentTurnKnight);
+
+      if (roomData.turnPhase === 'evil') {
+        if (isMyTurn() && !roomData.evilActionTaken) {
+          area.innerHTML =
+            '<div class="turn-actions">' +
+            '<h3>Progression of Evil</h3>' +
+            '<p style="color:var(--text-dim);font-size:0.875rem;margin-bottom:0.5rem;">Choose one evil action:</p>' +
+            '<div class="action-buttons">' +
+            '<button class="btn btn-evil" id="btn-draw-black">Draw Black Card</button>' +
+            '<button class="btn btn-evil" id="btn-siege">Add Siege Engine</button>' +
+            '<button class="btn btn-evil" id="btn-lose-life">Lose 1 Life Point</button>' +
+            '</div></div>';
+          document.getElementById('btn-draw-black').addEventListener('click', () => performEvilAction('drawBlack'));
+          document.getElementById('btn-siege').addEventListener('click', () => performEvilAction('siegeEngine'));
+          document.getElementById('btn-lose-life').addEventListener('click', () => performEvilAction('loseLife'));
+        } else if (!isMyTurn()) {
+          area.innerHTML = '<div class="turn-actions"><p class="waiting-text">Waiting for ' + currentName + ' to choose an evil action...</p></div>';
+        } else {
+          area.innerHTML = '<div class="turn-actions"><p class="waiting-text">Resolving evil action...</p></div>';
+        }
+      } else if (roomData.turnPhase === 'heroic') {
+        if (isMyTurn()) {
+          area.innerHTML =
+            '<div class="turn-actions">' +
+            '<h3>Heroic Action</h3>' +
+            '<p style="color:var(--text-dim);font-size:0.875rem;margin-bottom:0.5rem;">Heroic actions coming in Phase 4. End your turn for now.</p>' +
+            '<div class="action-buttons">' +
+            '<button class="btn btn-heroic" id="btn-end-turn">End Turn</button>' +
+            '</div></div>';
+          document.getElementById('btn-end-turn').addEventListener('click', advanceTurn);
+        } else {
+          area.innerHTML = '<div class="turn-actions"><p class="waiting-text">Waiting for ' + currentName + '\'s heroic action...</p></div>';
+        }
+      } else {
+        area.innerHTML = '';
+      }
+    }
+
+    async function performEvilAction(actionType) {
+      // Disable buttons immediately to prevent double-tap
+      document.querySelectorAll('.btn-evil').forEach(b => b.disabled = true);
+      try {
+        if (actionType === 'drawBlack') await drawBlackCard();
+        else if (actionType === 'siegeEngine') await addSiegeEngineAction();
+        else if (actionType === 'loseLife') await loseOneLifeAction();
+      } catch (err) {
+        console.error('Evil action error:', err);
+        showToast('Error: ' + err.message);
+        document.querySelectorAll('.btn-evil').forEach(b => b.disabled = false);
+      }
+    }
+
+    async function addSiegeEngineAction() {
+      const current = cachedBoard ? cachedBoard.siegeEngines : 0;
+      const newCount = current + 1;
+      const updates = {};
+      updates['games/' + currentRoom + '/board/siegeEngines'] = newCount;
+      updates['games/' + currentRoom + '/meta/evilActionTaken'] = true;
+      await fbDb.ref().update(updates);
+
+      await addLog('evil', getKnightDisplayName(myKnight) + ' added a Siege Engine (' + newCount + '/12)');
+
+      if (await checkGameEnd()) return;
+      await advanceToHeroicPhase();
+    }
+
+    async function loseOneLifeAction() {
+      const currentLife = cachedPlayers[myKnight]?.life ?? 4;
+      const newLife = Math.max(0, currentLife - 1);
+      const updates = {};
+      updates['games/' + currentRoom + '/players/' + myKnight + '/life'] = newLife;
+      updates['games/' + currentRoom + '/meta/evilActionTaken'] = true;
+      await fbDb.ref().update(updates);
+
+      await addLog('evil', getKnightDisplayName(myKnight) + ' lost 1 Life Point (' + newLife + ' remaining)');
+      await advanceToHeroicPhase();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SECTION 12C: Draw Black Card & Reveal
+    // ═══════════════════════════════════════════════════════════════════
+
+    async function drawBlackCard() {
+      await fbDb.ref('games/' + currentRoom + '/meta/evilActionTaken').set(true);
+
+      if (isHost) {
+        // Host draws directly from own deck
+        const deckPath = 'private/' + currentRoom + '/' + myKnight + '/hostDecks/';
+        const deckSnap = await fbDb.ref(deckPath + 'blackDraw').once('value');
+        const drawPile = deckSnap.val() || [];
+
+        if (drawPile.length === 0) {
+          showToast('Black draw pile is empty!');
+          return;
+        }
+
+        const card = drawPile.pop();
+        const updates = {};
+        updates[deckPath + 'blackDraw'] = drawPile;
+        updates['games/' + currentRoom + '/decks/blackDrawCount'] = drawPile.length;
+
+        // Add to discard
+        const discardSnap = await fbDb.ref(deckPath + 'blackDiscard').once('value');
+        const discard = discardSnap.val() || [];
+        discard.push(card);
+        updates[deckPath + 'blackDiscard'] = discard;
+
+        // Reveal to all
+        updates['games/' + currentRoom + '/meta/revealedBlackCard'] = {
+          card, drawnBy: myKnight, status: 'revealed',
+        };
+        await fbDb.ref().update(updates);
+      } else {
+        // Non-host: request host to draw and reveal
+        await fbDb.ref('games/' + currentRoom + '/drawRequests').push({
+          knightId: myKnight, deckType: 'blackReveal', count: 1,
+          timestamp: firebase.database.ServerValue.TIMESTAMP,
+        });
+      }
+    }
+
+    function getBlackCardDescription(card) {
+      if (card.type === 'blackKnight') return 'Place on Black Knight quest (combat value ' + card.value + ')';
+      if (card.type === 'lancelotDragon') {
+        const phase = cachedQuests?.lancelot?.phase || 'lancelot';
+        const val = phase === 'dragon' ? card.dragonValue : card.lancelotValue;
+        return 'Place on ' + (phase === 'dragon' ? 'Dragon' : 'Lancelot') + ' quest (combat value ' + val + ')';
+      }
+      if (card.type === 'excalibur') return 'Move Excalibur 1 space toward Evil';
+      if (card.type === 'despair') return 'Place Despair on the Holy Grail quest';
+      if (card.type === 'saxon') return 'Add 1 Saxon warrior to Saxon War';
+      if (card.type === 'pict') return 'Add 1 Pict warrior to Pict War';
+      if (card.type === 'mercenaries') return 'Add 1 warrior to Saxon or Pict War (your choice)';
+      if (card.type === 'specialBlack') {
+        const descs = {
+          'Morgan 1': 'Each Knight must discard 1 White card',
+          'Morgan 2': 'Each Knight discards all Special White cards',
+          'Morgan 3': 'Add 1 Siege Engine to Camelot',
+          'Morgan 4': 'Each Knight loses 1 Life Point',
+          'Morgan 5': 'You lose 2 Life Points OR discard 3 White cards',
+          'Desolation': 'Place on the Holy Grail quest (Special — only Merlins can cancel)',
+          'Dark Forest': 'PERMANENT: Knights draw 1 fewer White card at Round Table (min 1)',
+          'Guinevere': 'PERMANENT: Any quest with 7+ Black cards is immediately lost',
+          'Mist of Avalon': 'PERMANENT: Special White cards can no longer be played',
+          'Mordred': 'PERMANENT: Merlin cards can no longer cancel Special Black cards',
+          'Vivien': 'PERMANENT: Hand limit reduced to 10 cards',
+        };
+        return descs[card.name] || card.name;
+      }
+      return '';
+    }
+
+    function getBlackCardDisplayName(card) {
+      if (card.type === 'blackKnight') return 'Black Knight';
+      if (card.type === 'lancelotDragon') {
+        const phase = cachedQuests?.lancelot?.phase || 'lancelot';
+        return phase === 'dragon' ? 'Dragon' : 'Lancelot';
+      }
+      if (card.type === 'specialBlack') return card.name;
+      // Simple types
+      const names = { excalibur: 'Excalibur', despair: 'Despair', saxon: 'Saxon', pict: 'Pict', mercenaries: 'Mercenaries' };
+      return names[card.type] || card.type;
+    }
+
+    function getBlackCardValue(card) {
+      if (card.type === 'blackKnight') return card.value;
+      if (card.type === 'lancelotDragon') {
+        const phase = cachedQuests?.lancelot?.phase || 'lancelot';
+        return phase === 'dragon' ? card.dragonValue : card.lancelotValue;
+      }
+      return null;
+    }
+
+    function renderCardRevealOverlay(data) {
+      if (!data || !data.card) {
+        $('card-reveal-overlay').classList.add('hidden');
+        return;
+      }
+
+      const card = data.card;
+      const overlay = $('card-reveal-overlay');
+      overlay.classList.remove('hidden');
+
+      const drawnByName = getKnightDisplayName(data.drawnBy);
+      $('reveal-title').textContent = drawnByName + ' drew a Black Card';
+
+      // Render card visual
+      const val = getBlackCardValue(card);
+      const name = getBlackCardDisplayName(card);
+      const typeLabel = card.type === 'specialBlack' ? 'Special Black' :
+                        (card.type === 'blackKnight' || card.type === 'lancelotDragon') ? 'Combat' : 'Quest';
+
+      let cardHtml = '<div class="rc-type">' + typeLabel + '</div>';
+      if (val !== null) cardHtml += '<div class="rc-value">' + val + '</div>';
+      cardHtml += '<div class="rc-name">' + name + '</div>';
+      $('revealed-card-display').innerHTML = cardHtml;
+
+      $('reveal-effect-desc').textContent = getBlackCardDescription(card);
+
+      // Render action buttons (only for active player)
+      renderRevealActions(data);
+    }
+
+    function renderRevealActions(data) {
+      const actionsEl = $('reveal-actions');
+      actionsEl.innerHTML = '';
+
+      // Only the active player gets action buttons
+      if (!isMyTurn() || data.drawnBy !== myKnight) return;
+
+      const card = data.card;
+
+      if (card.type === 'mercenaries') {
+        actionsEl.innerHTML =
+          '<button class="btn btn-evil" id="btn-merc-saxon">Add to Saxon War</button>' +
+          '<button class="btn btn-evil" id="btn-merc-pict">Add to Pict War</button>';
+        document.getElementById('btn-merc-saxon').addEventListener('click', () => resolveRevealedCard('mercenaries', 'saxonWar'));
+        document.getElementById('btn-merc-pict').addEventListener('click', () => resolveRevealedCard('mercenaries', 'pictWar'));
+      } else if ((card.type === 'blackKnight' || card.type === 'lancelotDragon') && isQuestActive(card.type)) {
+        actionsEl.innerHTML =
+          '<button class="btn btn-evil" id="btn-face-up">Place Face-Up</button>' +
+          '<button class="btn btn-evil" id="btn-face-down">Place Face-Down (+1 White)</button>';
+        document.getElementById('btn-face-up').addEventListener('click', () => resolveRevealedCard('combat', false));
+        document.getElementById('btn-face-down').addEventListener('click', () => resolveRevealedCard('combat', true));
+      } else if (card.type === 'specialBlack') {
+        // Special blacks are handled by Merlin cancel flow — active player initiates
+        if (!roomData.pendingInteraction) {
+          if (roomData.persistentEffects?.mordred) {
+            // Mordred prevents Merlin cancel — apply directly
+            actionsEl.innerHTML = '<button class="btn btn-evil" id="btn-apply-special">Apply Effect</button>';
+            document.getElementById('btn-apply-special').addEventListener('click', () => resolveRevealedCard('special'));
+          } else {
+            actionsEl.innerHTML = '<button class="btn btn-merlin" id="btn-start-merlin">Open Merlin Vote</button>';
+            document.getElementById('btn-start-merlin').addEventListener('click', () => initiateMerlinCancel(card));
+          }
+        }
+      } else {
+        actionsEl.innerHTML = '<button class="btn btn-evil" id="btn-apply-effect">Apply Effect</button>';
+        document.getElementById('btn-apply-effect').addEventListener('click', () => resolveRevealedCard('standard'));
+      }
+    }
+
+    function isQuestActive(cardType) {
+      if (cardType === 'blackKnight') return cachedQuests?.blackKnight?.status === 'active';
+      if (cardType === 'lancelotDragon') return cachedQuests?.lancelot?.status === 'active';
+      return false;
+    }
+
+    async function resolveRevealedCard(mode, extra) {
+      const data = roomData.revealedBlackCard;
+      if (!data) return;
+      const card = data.card;
+
+      // Disable buttons
+      $('reveal-actions').innerHTML = '<p class="waiting-text">Applying...</p>';
+
+      if (mode === 'standard') {
+        await applyBlackCardEffect(card);
+      } else if (mode === 'combat') {
+        const faceDown = extra;
+        if (card.type === 'blackKnight') await applyBlackKnightCard(card, faceDown);
+        else if (card.type === 'lancelotDragon') await applyLancelotDragonCard(card, faceDown);
+      } else if (mode === 'mercenaries') {
+        const targetWar = extra;
+        await applyMercenariesCard(card, targetWar);
+      } else if (mode === 'special') {
+        await applySpecialBlackCard(card);
+      }
+    }
+
+    function onRevealedBlackCardChanged() {
+      const data = roomData?.revealedBlackCard;
+      if (!data) {
+        $('card-reveal-overlay').classList.add('hidden');
+        return;
+      }
+      renderCardRevealOverlay(data);
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SECTION 12D: Standard Black Card Effects
+    // ═══════════════════════════════════════════════════════════════════
+
+    async function applyBlackCardEffect(card) {
+      switch (card.type) {
+        case 'blackKnight': await applyBlackKnightCard(card, false); break;
+        case 'lancelotDragon': await applyLancelotDragonCard(card, false); break;
+        case 'excalibur': await applyExcaliburCard(card); break;
+        case 'despair': await applyDespairCard(card); break;
+        case 'saxon': await applySaxonCard(card); break;
+        case 'pict': await applyPictCard(card); break;
+        case 'mercenaries': break; // handled via UI choice
+        case 'specialBlack': await applySpecialBlackCard(card); break;
+      }
+    }
+
+    async function applyBlackKnightCard(card, faceDown) {
+      const quest = cachedQuests?.blackKnight;
+      if (!quest || quest.status !== 'active') {
+        await addSiegeEngineFromCard('Black Knight (quest inactive)');
+        return;
+      }
+
+      const blackCards = quest.blackCards || [];
+      const entry = { ...card };
+      if (faceDown) entry.faceDown = true;
+      blackCards.push(entry);
+
+      const updates = {};
+      updates['games/' + currentRoom + '/quests/blackKnight/blackCards'] = blackCards;
+      updates['games/' + currentRoom + '/meta/revealedBlackCard'] = null;
+      await fbDb.ref().update(updates);
+
+      await addLog('quest', 'Black Knight card placed' + (faceDown ? ' face-down' : '') + ' (' + blackCards.length + '/4)');
+
+      if (faceDown) await requestCardDraw('white', 1);
+
+      if (blackCards.length >= 4) {
+        await addLog('quest', 'Black Knight quest ready for resolution!');
+        // Full combat resolution deferred to Phase 4
+      }
+
+      if (await checkGameEnd()) return;
+      await advanceToHeroicPhase();
+    }
+
+    async function applyLancelotDragonCard(card, faceDown) {
+      const quest = cachedQuests?.lancelot;
+      if (!quest || quest.status !== 'active') {
+        const phase = quest?.phase || 'lancelot';
+        await addSiegeEngineFromCard((phase === 'dragon' ? 'Dragon' : 'Lancelot') + ' (quest inactive)');
+        return;
+      }
+
+      const blackCards = quest.blackCards || [];
+      const entry = { ...card };
+      if (faceDown) entry.faceDown = true;
+      blackCards.push(entry);
+
+      const maxBlack = 5;
+      const updates = {};
+      updates['games/' + currentRoom + '/quests/lancelot/blackCards'] = blackCards;
+      updates['games/' + currentRoom + '/meta/revealedBlackCard'] = null;
+      await fbDb.ref().update(updates);
+
+      const phaseName = quest.phase === 'dragon' ? 'Dragon' : 'Lancelot';
+      await addLog('quest', phaseName + ' card placed' + (faceDown ? ' face-down' : '') + ' (' + blackCards.length + '/' + maxBlack + ')');
+
+      if (faceDown) await requestCardDraw('white', 1);
+
+      if (blackCards.length >= maxBlack) {
+        await addLog('quest', phaseName + ' quest ready for resolution!');
+      }
+
+      if (await checkGameEnd()) return;
+      await advanceToHeroicPhase();
+    }
+
+    async function applyExcaliburCard(card) {
+      const quest = cachedQuests?.excalibur;
+      if (!quest || quest.status !== 'active') {
+        await addSiegeEngineFromCard('Excalibur (quest inactive)');
+        return;
+      }
+
+      const newPos = (quest.position || 0) - 1;
+      const updates = {};
+      updates['games/' + currentRoom + '/quests/excalibur/position'] = newPos;
+      updates['games/' + currentRoom + '/meta/revealedBlackCard'] = null;
+
+      await addLog('quest', 'Excalibur moves toward Evil (position: ' + newPos + ')');
+
+      if (newPos <= -5) {
+        // Quest lost
+        updates['games/' + currentRoom + '/quests/excalibur/status'] = 'lost';
+        const swords = cachedBoard?.swords || [];
+        swords.push({ color: 'black', source: 'excalibur' });
+        swords.push({ color: 'black', source: 'excalibur' });
+        updates['games/' + currentRoom + '/board/swords'] = swords;
+
+        // Knights on quest return to Round Table
+        const knightsPresent = quest.knightsPresent || [];
+        for (const kid of knightsPresent) {
+          updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
+        }
+        updates['games/' + currentRoom + '/quests/excalibur/knightsPresent'] = [];
+
+        await fbDb.ref().update(updates);
+        await addLog('quest', 'Excalibur quest LOST! 2 Black Swords added. Excalibur removed from game.');
+      } else {
+        await fbDb.ref().update(updates);
+      }
+
+      if (await checkGameEnd()) return;
+      await advanceToHeroicPhase();
+    }
+
+    async function applyDespairCard(card) {
+      const quest = cachedQuests?.holyGrail;
+      if (!quest || quest.status !== 'active') {
+        await addSiegeEngineFromCard('Despair (quest inactive)');
+        return;
+      }
+
+      const cards = quest.cards || [];
+      cards.push({ type: 'despair', id: card.id });
+
+      const updates = {};
+      updates['games/' + currentRoom + '/quests/holyGrail/cards'] = cards;
+      updates['games/' + currentRoom + '/meta/revealedBlackCard'] = null;
+
+      // Check if all 7 slots filled with black cards (no grail cards)
+      const grailCount = cards.filter(c => c.type === 'grail').length;
+      const blackCount = cards.filter(c => c.type === 'despair' || c.type === 'desolation').length;
+
+      if (blackCount >= 7 && grailCount === 0) {
+        // Quest lost
+        updates['games/' + currentRoom + '/quests/holyGrail/status'] = 'lost';
+        const swords = cachedBoard?.swords || [];
+        for (let i = 0; i < 3; i++) swords.push({ color: 'black', source: 'holyGrail' });
+        updates['games/' + currentRoom + '/board/swords'] = swords;
+
+        const knightsPresent = quest.knightsPresent || [];
+        for (const kid of knightsPresent) {
+          updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
+        }
+        updates['games/' + currentRoom + '/quests/holyGrail/knightsPresent'] = [];
+
+        await fbDb.ref().update(updates);
+        await addLog('quest', 'Holy Grail quest LOST! 3 Black Swords added. Holy Grail removed from game.');
+      } else {
+        await fbDb.ref().update(updates);
+        await addLog('quest', 'Despair placed on Holy Grail (' + blackCount + ' black, ' + grailCount + ' grail)');
+      }
+
+      if (await checkGameEnd()) return;
+      await advanceToHeroicPhase();
+    }
+
+    async function applySaxonCard(card) {
+      await applyWarriorCard('saxonWar', 'Saxon');
+    }
+
+    async function applyPictCard(card) {
+      await applyWarriorCard('pictWar', 'Pict');
+    }
+
+    async function applyMercenariesCard(card, targetWar) {
+      const name = targetWar === 'saxonWar' ? 'Saxon' : 'Pict';
+      await applyWarriorCard(targetWar, name + ' (Mercenaries)');
+    }
+
+    async function applyWarriorCard(questKey, label) {
+      const quest = cachedQuests?.[questKey];
+      if (!quest || quest.status !== 'active') {
+        await addSiegeEngineFromCard(label + ' (quest inactive)');
+        return;
+      }
+
+      const newWarriors = (quest.warriors || 0) + 1;
+      const updates = {};
+      updates['games/' + currentRoom + '/quests/' + questKey + '/warriors'] = newWarriors;
+      updates['games/' + currentRoom + '/meta/revealedBlackCard'] = null;
+
+      if (newWarriors >= 4) {
+        // Quest lost immediately
+        updates['games/' + currentRoom + '/quests/' + questKey + '/status'] = 'lost';
+        const swords = cachedBoard?.swords || [];
+        swords.push({ color: 'black', source: questKey });
+        swords.push({ color: 'black', source: questKey });
+        updates['games/' + currentRoom + '/board/swords'] = swords;
+
+        // +1 siege engine
+        const siegeCount = (cachedBoard?.siegeEngines || 0) + 1;
+        updates['games/' + currentRoom + '/board/siegeEngines'] = siegeCount;
+
+        // Knights on quest lose 1 LP
+        const knightsPresent = quest.knightsPresent || [];
+        for (const kid of knightsPresent) {
+          const life = cachedPlayers[kid]?.life ?? 4;
+          updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.max(0, life - 1);
+          updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
+        }
+
+        // Reset quest for perpetual quests
+        updates['games/' + currentRoom + '/quests/' + questKey + '/warriors'] = 0;
+        updates['games/' + currentRoom + '/quests/' + questKey + '/fightCards'] = [];
+        updates['games/' + currentRoom + '/quests/' + questKey + '/knightsPresent'] = [];
+        updates['games/' + currentRoom + '/quests/' + questKey + '/status'] = 'active';
+
+        await fbDb.ref().update(updates);
+        await addLog('quest', label + ' War LOST! 4th warrior placed. 2 Black Swords + 1 Siege Engine. Quest resets.');
+      } else {
+        await fbDb.ref().update(updates);
+        await addLog('quest', label + ' warrior added (' + newWarriors + '/4)');
+      }
+
+      if (await checkGameEnd()) return;
+      await advanceToHeroicPhase();
+    }
+
+    async function addSiegeEngineFromCard(label) {
+      const current = cachedBoard?.siegeEngines || 0;
+      const newCount = current + 1;
+      const updates = {};
+      updates['games/' + currentRoom + '/board/siegeEngines'] = newCount;
+      updates['games/' + currentRoom + '/meta/revealedBlackCard'] = null;
+      await fbDb.ref().update(updates);
+
+      await addLog('evil', label + ' — quest not active, Siege Engine added (' + newCount + '/12)');
+      if (await checkGameEnd()) return;
+      await advanceToHeroicPhase();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SECTION 12E: Special Black Card Effects
+    // ═══════════════════════════════════════════════════════════════════
+
+    async function applySpecialBlackCard(card) {
+      const name = card.name;
+      await addLog('evil', 'Special Black card applied: ' + name);
+
+      if (name === 'Morgan 3') {
+        const current = cachedBoard?.siegeEngines || 0;
+        const newCount = current + 1;
+        await fbDb.ref('games/' + currentRoom + '/board/siegeEngines').set(newCount);
+        await fbDb.ref('games/' + currentRoom + '/meta/revealedBlackCard').set(null);
+        await addLog('evil', 'Morgan 3: Siege Engine added (' + newCount + '/12)');
+        if (await checkGameEnd()) return;
+        await advanceToHeroicPhase();
+
+      } else if (name === 'Morgan 4') {
+        const updates = {};
+        const turnOrder = roomData.turnOrder || [];
+        for (const kid of turnOrder) {
+          const p = cachedPlayers[kid];
+          if (p && p.alive !== false) {
+            updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.max(0, (p.life ?? 4) - 1);
+          }
+        }
+        updates['games/' + currentRoom + '/meta/revealedBlackCard'] = null;
+        await fbDb.ref().update(updates);
+        await addLog('evil', 'Morgan 4: All Knights lose 1 Life Point');
+        if (await checkGameEnd()) return;
+        await advanceToHeroicPhase();
+
+      } else if (name === 'Dark Forest' || name === 'Guinevere' || name === 'Mist of Avalon' || name === 'Mordred' || name === 'Vivien') {
+        const effectKey = {
+          'Dark Forest': 'darkForest', 'Guinevere': 'guinevere',
+          'Mist of Avalon': 'mistOfAvalon', 'Mordred': 'mordred', 'Vivien': 'vivien',
+        }[name];
+        const updates = {};
+        updates['games/' + currentRoom + '/meta/persistentEffects/' + effectKey] = true;
+        updates['games/' + currentRoom + '/meta/revealedBlackCard'] = null;
+        await fbDb.ref().update(updates);
+        await addLog('evil', name + ' is now in effect!');
+
+        // Vivien: check hand limits
+        if (name === 'Vivien') {
+          await handleVivienDiscard();
+          return;
+        }
+
+        // Guinevere: check existing quests for 7+ black cards
+        if (name === 'Guinevere') {
+          await handleGuinevereLossCheck();
+          return;
+        }
+
+        if (await checkGameEnd()) return;
+        await advanceToHeroicPhase();
+
+      } else if (name === 'Desolation') {
+        // Same as Despair but Special — place on Holy Grail quest
+        const quest = cachedQuests?.holyGrail;
+        if (!quest || quest.status !== 'active') {
+          await addSiegeEngineFromCard('Desolation (quest inactive)');
+          return;
+        }
+        const cards = quest.cards || [];
+        cards.push({ type: 'desolation', id: card.id });
+        const updates = {};
+        updates['games/' + currentRoom + '/quests/holyGrail/cards'] = cards;
+        updates['games/' + currentRoom + '/meta/revealedBlackCard'] = null;
+
+        const blackCount = cards.filter(c => c.type === 'despair' || c.type === 'desolation').length;
+        const grailCount = cards.filter(c => c.type === 'grail').length;
+
+        if (blackCount >= 7 && grailCount === 0) {
+          updates['games/' + currentRoom + '/quests/holyGrail/status'] = 'lost';
+          const swords = cachedBoard?.swords || [];
+          for (let i = 0; i < 3; i++) swords.push({ color: 'black', source: 'holyGrail' });
+          updates['games/' + currentRoom + '/board/swords'] = swords;
+          const knightsPresent = quest.knightsPresent || [];
+          for (const kid of knightsPresent) {
+            updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
+          }
+          updates['games/' + currentRoom + '/quests/holyGrail/knightsPresent'] = [];
+          await fbDb.ref().update(updates);
+          await addLog('quest', 'Holy Grail quest LOST! 3 Black Swords added.');
+        } else {
+          await fbDb.ref().update(updates);
+          await addLog('quest', 'Desolation placed on Holy Grail (' + blackCount + ' black, ' + grailCount + ' grail)');
+        }
+        if (await checkGameEnd()) return;
+        await advanceToHeroicPhase();
+
+      } else if (name === 'Morgan 1') {
+        // All players discard 1 card of choice — use pendingInteraction
+        await startPendingInteraction('morganDiscard', card);
+
+      } else if (name === 'Morgan 2') {
+        // All players discard Special White cards — auto-apply
+        await startPendingInteraction('morganSpecialDiscard', card);
+
+      } else if (name === 'Morgan 5') {
+        // Drawing knight chooses: lose 2 LP or discard 3 cards
+        await startPendingInteraction('morgan5Choice', card);
+      }
+    }
+
+    async function handleVivienDiscard() {
+      // Check if any player has >10 cards
+      // We can't see other players' hands — they'll handle their own discard via pendingInteraction
+      const turnOrder = roomData.turnOrder || [];
+      const interaction = {
+        type: 'vivienDiscard', card: { name: 'Vivien' },
+        responses: {}, resolved: false,
+      };
+      // Auto-complete for players we know can't have >10 cards
+      // (we can only know about our own hand here)
+      await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set(interaction);
+    }
+
+    async function handleGuinevereLossCheck() {
+      if (!cachedQuests) { await advanceToHeroicPhase(); return; }
+      const updates = {};
+      let questLost = false;
+
+      for (const [key, quest] of Object.entries(cachedQuests)) {
+        if (quest.status !== 'active') continue;
+        let blackCount = 0;
+        if (quest.blackCards) blackCount += quest.blackCards.length;
+        if (quest.cards) blackCount += quest.cards.filter(c => c.type !== 'grail').length;
+        if (key === 'saxonWar' || key === 'pictWar') continue; // warriors, not cards
+        if (blackCount >= 7) {
+          questLost = true;
+          await addLog('quest', 'Guinevere effect: ' + key + ' has 7+ black cards — quest LOST!');
+          // Apply defeat for the specific quest type would go here
+          // For now, mark as lost and add appropriate swords
+          updates['games/' + currentRoom + '/quests/' + key + '/status'] = 'lost';
+        }
+      }
+
+      if (Object.keys(updates).length > 0) {
+        await fbDb.ref().update(updates);
+      }
+      if (await checkGameEnd()) return;
+      await advanceToHeroicPhase();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SECTION 12F: Merlin Cancel Flow
+    // ═══════════════════════════════════════════════════════════════════
+
+    async function initiateMerlinCancel(card) {
+      $('reveal-actions').innerHTML = '<p class="waiting-text">Merlin vote started...</p>';
+      await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set({
+        type: 'merlinCancel', card,
+        totalMerlins: 0, responses: {}, cancelled: false, resolved: false,
+      });
+    }
+
+    function renderMerlinCancelPanel(interaction) {
+      const area = $('interaction-area');
+      const total = interaction.totalMerlins || 0;
+      const myResponse = interaction.responses?.[myKnight];
+      const hasMerlin = myHand.some(c => c.type === 'special' && c.name === 'Merlin');
+
+      let html = '<div class="interaction-panel">' +
+        '<h3>Merlin Cancellation Vote</h3>' +
+        '<p>3 Merlins needed to cancel "' + interaction.card.name + '"</p>' +
+        '<p style="font-size:1.25rem;font-weight:700;color:var(--gold);">' + total + ' / 3 Merlins offered</p>';
+
+      // Show player statuses
+      const turnOrder = roomData?.turnOrder || [];
+      html += '<div style="margin:0.5rem 0;font-size:0.875rem;">';
+      for (const kid of turnOrder) {
+        const p = cachedPlayers[kid];
+        if (!p || p.alive === false) continue;
+        const resp = interaction.responses?.[kid];
+        const name = p.displayName || KNIGHTS[kid]?.name || kid;
+        if (resp) {
+          const offered = resp.merlinsOffered || 0;
+          html += '<div style="color:' + (offered > 0 ? 'var(--gold)' : 'var(--text-dim)') + ';">' +
+            name + ': ' + (offered > 0 ? 'Offered ' + offered + ' Merlin' + (offered > 1 ? 's' : '') : 'Passed') + '</div>';
+        } else {
+          html += '<div style="color:var(--text-dim);">' + name + ': waiting...</div>';
+        }
+      }
+      html += '</div>';
+
+      if (!myResponse && total < 3) {
+        if (hasMerlin) {
+          html += '<button class="btn btn-merlin" id="btn-offer-merlin" style="margin-right:0.5rem;">Offer Merlin</button>';
+        }
+        html += '<button class="btn" id="btn-pass-merlin">Pass</button>';
+      } else if (total >= 3) {
+        html += '<p style="color:var(--green);font-weight:700;">CANCELLED!</p>';
+      }
+
+      html += '</div>';
+      area.innerHTML = html;
+
+      const offerBtn = document.getElementById('btn-offer-merlin');
+      if (offerBtn) offerBtn.addEventListener('click', offerMerlin);
+      const passBtn = document.getElementById('btn-pass-merlin');
+      if (passBtn) passBtn.addEventListener('click', passMerlinOffer);
+    }
+
+    async function offerMerlin() {
+      const merlinCard = myHand.find(c => c.type === 'special' && c.name === 'Merlin');
+      if (!merlinCard) { showToast('No Merlin card in hand!'); return; }
+
+      // Remove from hand
+      myHand = myHand.filter(c => c.id !== merlinCard.id);
+      await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
+
+      // Increment totalMerlins atomically
+      await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/totalMerlins')
+        .transaction(current => (current || 0) + 1);
+
+      // Write response
+      const prev = roomData.pendingInteraction?.responses?.[myKnight];
+      const prevOffered = prev?.merlinsOffered || 0;
+      await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
+        .set({ done: true, merlinsOffered: prevOffered + 1 });
+
+      showToast('Merlin offered!');
+    }
+
+    async function passMerlinOffer() {
+      await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
+        .set({ done: true, merlinsOffered: 0 });
+    }
+
+    async function checkMerlinResolution(interaction) {
+      if (!isMyTurn()) return; // Only active player resolves
+
+      const total = interaction.totalMerlins || 0;
+      const turnOrder = roomData?.turnOrder || [];
+      const aliveKnights = turnOrder.filter(kid => cachedPlayers[kid]?.alive !== false);
+      const responsesCount = Object.keys(interaction.responses || {}).length;
+
+      if (total >= 3) {
+        // Cancelled!
+        await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set(null);
+        await fbDb.ref('games/' + currentRoom + '/meta/revealedBlackCard').set(null);
+        await addLog('info', interaction.card.name + ' was cancelled by Merlin!');
+        if (await checkGameEnd()) return;
+        await advanceToHeroicPhase();
+      } else if (responsesCount >= aliveKnights.length) {
+        // All responded, not enough Merlins — apply effect
+        await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set(null);
+        await applySpecialBlackCard(interaction.card);
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SECTION 12G: Multi-Player Interactions (Morgan, Vivien)
+    // ═══════════════════════════════════════════════════════════════════
+
+    async function startPendingInteraction(type, card) {
+      await fbDb.ref('games/' + currentRoom + '/meta/revealedBlackCard').set(null);
+      await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set({
+        type, card, responses: {}, resolved: false,
+      });
+    }
+
+    function renderPendingInteraction() {
+      const interaction = roomData?.pendingInteraction;
+      const area = $('interaction-area');
+
+      if (!interaction || interaction.resolved) {
+        area.innerHTML = '';
+        discardMode = null;
+        discardCount = 0;
+        return;
+      }
+
+      if (interaction.type === 'merlinCancel') {
+        renderMerlinCancelPanel(interaction);
+        checkMerlinResolution(interaction);
+        return;
+      }
+
+      if (interaction.type === 'morganDiscard') {
+        renderMorganDiscardPanel(interaction);
+        return;
+      }
+
+      if (interaction.type === 'morganSpecialDiscard') {
+        handleMorganSpecialDiscard(interaction);
+        return;
+      }
+
+      if (interaction.type === 'morgan5Choice') {
+        renderMorgan5Panel(interaction);
+        return;
+      }
+
+      if (interaction.type === 'vivienDiscard') {
+        renderVivienDiscardPanel(interaction);
+        return;
+      }
+
+      area.innerHTML = '';
+    }
+
+    function renderMorganDiscardPanel(interaction) {
+      const area = $('interaction-area');
+      const myResponse = interaction.responses?.[myKnight];
+
+      if (myResponse) {
+        area.innerHTML = '<div class="interaction-panel"><h3>Morgan 1</h3>' +
+          '<p>You have discarded a card. Waiting for other players...</p></div>';
+        checkInteractionResolution(interaction);
+        return;
+      }
+
+      if (myHand.length === 0) {
+        // Auto-respond if no cards
+        fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
+          .set({ done: true });
+        return;
+      }
+
+      discardMode = 'morgan1';
+      area.innerHTML = '<div class="interaction-panel"><h3>Morgan 1</h3>' +
+        '<p>Select 1 card from your hand to discard, then tap "Confirm Discard"</p>' +
+        (selectedCardId
+          ? '<button class="btn btn-danger" id="btn-confirm-discard">Confirm Discard</button>'
+          : '<p style="color:var(--text-dim);font-size:0.875rem;">Tap a card below to select it</p>') +
+        '</div>';
+
+      const btn = document.getElementById('btn-confirm-discard');
+      if (btn) btn.addEventListener('click', confirmMorganDiscard);
+    }
+
+    async function confirmMorganDiscard() {
+      if (!selectedCardId) return;
+      const card = myHand.find(c => c.id === selectedCardId);
+      if (!card) return;
+
+      myHand = myHand.filter(c => c.id !== selectedCardId);
+      selectedCardId = null;
+      discardMode = null;
+      await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
+      await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
+        .set({ done: true });
+      showToast('Card discarded.');
+    }
+
+    async function handleMorganSpecialDiscard(interaction) {
+      const area = $('interaction-area');
+      const myResponse = interaction.responses?.[myKnight];
+
+      if (myResponse) {
+        area.innerHTML = '<div class="interaction-panel"><h3>Morgan 2</h3>' +
+          '<p>Special White cards discarded. Waiting for other players...</p></div>';
+        checkInteractionResolution(interaction);
+        return;
+      }
+
+      // Auto-remove all Special White cards from hand
+      const specials = myHand.filter(c => c.type === 'special');
+      if (specials.length > 0) {
+        myHand = myHand.filter(c => c.type !== 'special');
+        await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
+        showToast(specials.length + ' Special White card' + (specials.length > 1 ? 's' : '') + ' discarded.');
+      }
+      await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
+        .set({ done: true });
+    }
+
+    function renderMorgan5Panel(interaction) {
+      const area = $('interaction-area');
+      const myResponse = interaction.responses?.[myKnight];
+      const drawnBy = roomData?.revealedBlackCard?.drawnBy || interaction.drawnBy || roomData?.currentTurnKnight;
+
+      if (myResponse || myKnight !== drawnBy) {
+        area.innerHTML = '<div class="interaction-panel"><h3>Morgan 5</h3>' +
+          '<p>' + (myResponse ? 'Choice made.' : 'Waiting for ' + getKnightDisplayName(drawnBy) + ' to choose...') + '</p></div>';
+        checkInteractionResolution(interaction);
+        return;
+      }
+
+      const canDiscard = myHand.length >= 3;
+      area.innerHTML = '<div class="interaction-panel"><h3>Morgan 5</h3>' +
+        '<p>Choose your penalty:</p>' +
+        '<button class="btn btn-danger" id="btn-m5-life" style="margin-right:0.5rem;">Lose 2 Life Points</button>' +
+        '<button class="btn btn-danger" id="btn-m5-cards"' + (canDiscard ? '' : ' disabled') + '>Discard 3 Cards</button>' +
+        '</div>';
+
+      document.getElementById('btn-m5-life').addEventListener('click', async () => {
+        const life = cachedPlayers[myKnight]?.life ?? 4;
+        await fbDb.ref('games/' + currentRoom + '/players/' + myKnight + '/life').set(Math.max(0, life - 2));
+        await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight).set({ done: true });
+        await addLog('evil', getKnightDisplayName(myKnight) + ' lost 2 Life Points from Morgan 5');
+      });
+
+      if (canDiscard) {
+        document.getElementById('btn-m5-cards').addEventListener('click', () => {
+          discardMode = 'morgan5';
+          discardCount = 3;
+          selectedCardId = null;
+          renderMorgan5DiscardUI();
+        });
+      }
+    }
+
+    function renderMorgan5DiscardUI() {
+      const area = $('interaction-area');
+      area.innerHTML = '<div class="interaction-panel"><h3>Morgan 5</h3>' +
+        '<p>Select ' + discardCount + ' more card' + (discardCount > 1 ? 's' : '') + ' to discard</p>' +
+        '</div>';
+    }
+
+    function renderVivienDiscardPanel(interaction) {
+      const area = $('interaction-area');
+      const myResponse = interaction.responses?.[myKnight];
+
+      if (myResponse) {
+        area.innerHTML = '<div class="interaction-panel"><h3>Vivien</h3>' +
+          '<p>Hand adjusted. Waiting for other players...</p></div>';
+        checkInteractionResolution(interaction);
+        return;
+      }
+
+      if (myHand.length <= 10) {
+        // Auto-respond
+        fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight).set({ done: true });
+        return;
+      }
+
+      const excess = myHand.length - 10;
+      discardMode = 'vivien';
+      discardCount = excess;
+      area.innerHTML = '<div class="interaction-panel"><h3>Vivien</h3>' +
+        '<p>Hand limit is now 10. Discard ' + excess + ' card' + (excess > 1 ? 's' : '') + '.</p>' +
+        (selectedCardId
+          ? '<button class="btn btn-danger" id="btn-vivien-discard">Discard Selected Card</button>'
+          : '<p style="color:var(--text-dim);font-size:0.875rem;">Tap a card to select it</p>') +
+        '</div>';
+
+      const btn = document.getElementById('btn-vivien-discard');
+      if (btn) btn.addEventListener('click', confirmVivienDiscard);
+    }
+
+    async function confirmVivienDiscard() {
+      if (!selectedCardId) return;
+      myHand = myHand.filter(c => c.id !== selectedCardId);
+      selectedCardId = null;
+      discardCount--;
+      await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
+
+      if (discardCount <= 0 || myHand.length <= 10) {
+        discardMode = null;
+        discardCount = 0;
+        await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight).set({ done: true });
+        showToast('Hand adjusted to limit.');
+      }
+      renderHand();
+    }
+
+    async function checkInteractionResolution(interaction) {
+      if (!isMyTurn()) return;
+      const turnOrder = roomData?.turnOrder || [];
+      const aliveKnights = turnOrder.filter(kid => cachedPlayers[kid]?.alive !== false);
+      const responsesCount = Object.keys(interaction.responses || {}).length;
+
+      if (responsesCount >= aliveKnights.length) {
+        await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set(null);
+        if (await checkGameEnd()) return;
+        await advanceToHeroicPhase();
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SECTION 12H: Game End Checks & Turn Advancement
+    // ═══════════════════════════════════════════════════════════════════
+
+    async function checkGameEnd() {
+      if (!cachedBoard) return false;
+
+      // 12 siege engines
+      if (cachedBoard.siegeEngines >= 12) {
+        await fbDb.ref('games/' + currentRoom + '/meta').update({
+          status: 'ended', winner: 'evil', endReason: 'siege',
+        });
+        await addLog('system', 'GAME OVER: 12 Siege Engines surround Camelot! Evil wins!');
+        showToast('Game Over! Evil wins — 12 Siege Engines!');
+        return true;
+      }
+
+      // 7+ black swords
+      const swords = cachedBoard.swords || [];
+      const blackSwords = swords.filter(s => s.color === 'black').length;
+      if (blackSwords >= 7) {
+        await fbDb.ref('games/' + currentRoom + '/meta').update({
+          status: 'ended', winner: 'evil', endReason: 'blackSwords',
+        });
+        await addLog('system', 'GAME OVER: 7+ Black Swords on the Round Table! Evil wins!');
+        showToast('Game Over! Evil wins — too many Black Swords!');
+        return true;
+      }
+
+      // 12+ total swords — final scoring
+      if (swords.length >= 12) {
+        const whiteSwords = swords.filter(s => s.color === 'white').length;
+        const winner = whiteSwords > blackSwords ? 'loyal' : 'evil';
+        await fbDb.ref('games/' + currentRoom + '/meta').update({
+          status: 'ended', winner, endReason: 'swordCount',
+        });
+        const msg = winner === 'loyal'
+          ? 'GAME OVER: Loyal Knights prevail! (' + whiteSwords + ' White vs ' + blackSwords + ' Black)'
+          : 'GAME OVER: Evil wins! (' + blackSwords + ' Black vs ' + whiteSwords + ' White)';
+        await addLog('system', msg);
+        showToast(msg);
+        return true;
+      }
+
+      return false;
+    }
+
+    async function advanceToHeroicPhase() {
+      const updates = {};
+      updates['games/' + currentRoom + '/meta/turnPhase'] = 'heroic';
+      updates['games/' + currentRoom + '/meta/revealedBlackCard'] = null;
+      updates['games/' + currentRoom + '/meta/pendingInteraction'] = null;
+      updates['games/' + currentRoom + '/meta/evilActionTaken'] = false;
+      await fbDb.ref().update(updates);
+    }
+
+    async function advanceTurn() {
+      // Check if current knight has 0 LP
+      const currentKnight = roomData.currentTurnKnight;
+      const currentPlayer = cachedPlayers[currentKnight];
+      if (currentPlayer && currentPlayer.life <= 0) {
+        await fbDb.ref('games/' + currentRoom + '/players/' + currentKnight + '/alive').set(false);
+        await addLog('system', getKnightDisplayName(currentKnight) + ' has fallen!');
+      }
+
+      const nextKnight = getNextAliveKnight(currentKnight);
+      if (!nextKnight) {
+        // All dead — game over
+        await fbDb.ref('games/' + currentRoom + '/meta').update({
+          status: 'ended', winner: 'evil', endReason: 'allDead',
+        });
+        await addLog('system', 'GAME OVER: All Knights have fallen! Evil wins!');
+        showToast('Game Over! All Knights have fallen!');
+        return;
+      }
+
+      const updates = {};
+      updates['games/' + currentRoom + '/meta/currentTurnKnight'] = nextKnight;
+      updates['games/' + currentRoom + '/meta/turnPhase'] = 'evil';
+      updates['games/' + currentRoom + '/meta/turnNumber'] = (roomData.turnNumber || 1) + 1;
+      updates['games/' + currentRoom + '/meta/evilActionTaken'] = false;
+      updates['games/' + currentRoom + '/meta/heroicActionTaken'] = false;
+      updates['games/' + currentRoom + '/meta/sacrificeUsed'] = false;
+      updates['games/' + currentRoom + '/meta/specialWhitePlayed'] = false;
+      await fbDb.ref().update(updates);
+
+      await addLog('info', 'Turn ' + ((roomData.turnNumber || 1) + 1) + ': ' + getKnightDisplayName(nextKnight) + '\'s turn');
+    }
+
+    function getNextAliveKnight(currentKnight) {
+      const turnOrder = roomData?.turnOrder || [];
+      if (turnOrder.length === 0) return null;
+      const currentIdx = turnOrder.indexOf(currentKnight);
+      for (let i = 1; i <= turnOrder.length; i++) {
+        const idx = (currentIdx + i) % turnOrder.length;
+        const kid = turnOrder[idx];
+        const p = cachedPlayers[kid];
+        if (p && p.alive !== false) return kid;
+      }
+      return null;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SECTION 13: Service Worker Registration
     // ═══════════════════════════════════════════════════════════════════
 
     if ('serviceWorker' in navigator) {
