@@ -146,6 +146,16 @@
       letter-spacing: 0.2em;
       font-weight: 700;
     }
+    .home-recovery {
+      width: 100%; max-width: 320px;
+    }
+    .recovery-card {
+      background: var(--bg-card); border: 1px solid var(--gold-dim);
+      border-radius: var(--radius); padding: 1.25rem;
+      text-align: center; display: flex; flex-direction: column; gap: 0.75rem;
+    }
+    .recovery-card h3 { color: var(--gold); font-size: 1.125rem; }
+    .recovery-card p { color: var(--text-dim); font-size: 1rem; }
     .home-shield {
       width: 120px; height: 120px;
       margin: 0 auto;
@@ -321,6 +331,7 @@
     .deck-count { padding: 0.125rem 0.5rem; border-radius: 4px; font-weight: 600; }
     .white-count { background: rgba(245,240,225,0.15); color: var(--parchment); }
     .black-count { background: rgba(0,0,0,0.3); color: #aaa; }
+    .btn-leave-game { font-size: 0.75rem; padding: 0.25rem 0.5rem; min-width: auto; }
 
     .game-body {
       flex: 1; overflow-y: auto; padding: 0.75rem 1rem;
@@ -449,11 +460,19 @@
     <img src="assets/knight-arthur.svg" alt="Shield" class="home-shield">
     <h1 class="home-title">Shadows Over<br>Camelot</h1>
     <p class="home-subtitle">A cooperative board game of Knights, Quests, and hidden treachery. 3–7 players.</p>
-    <div class="home-actions">
+    <div class="home-actions" id="home-actions">
       <button class="btn btn-primary" id="btn-create">Create Game</button>
       <div class="home-join-row">
         <input class="input" id="join-code" type="text" placeholder="ROOM CODE" maxlength="6" autocomplete="off" autocapitalize="characters" spellcheck="false">
         <button class="btn" id="btn-join">Join</button>
+      </div>
+    </div>
+    <div class="home-recovery" id="home-recovery" style="display:none;">
+      <div class="recovery-card">
+        <h3>Active Game Found</h3>
+        <p id="recovery-info">Room: ---- | Knight: ----</p>
+        <button class="btn btn-primary" id="btn-return-game">Return to Game</button>
+        <button class="btn btn-danger" id="btn-start-fresh">Start Fresh</button>
       </div>
     </div>
   </div>
@@ -504,6 +523,7 @@
         <span class="deck-count white-count" id="white-deck-count">W: --</span>
         <span class="deck-count black-count" id="black-deck-count">B: --</span>
       </div>
+      <button class="btn btn-danger btn-leave-game" id="btn-leave-game">Leave</button>
     </div>
 
     <div class="game-body" id="game-body">
@@ -549,7 +569,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v2';
+    const APP_VERSION = 'shadows-v3';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -705,6 +725,88 @@
                        'Connecting...';
     }
 
+    function saveSession() {
+      if (currentRoom && myKnight) {
+        localStorage.setItem('shadows-room-code', currentRoom);
+        localStorage.setItem('shadows-knight-id', myKnight);
+        localStorage.setItem('shadows-is-host', isHost ? 'true' : 'false');
+      }
+    }
+
+    function clearSession() {
+      localStorage.removeItem('shadows-room-code');
+      localStorage.removeItem('shadows-knight-id');
+      localStorage.removeItem('shadows-is-host');
+    }
+
+    async function tryReconnect() {
+      const savedRoom = localStorage.getItem('shadows-room-code');
+      const savedKnight = localStorage.getItem('shadows-knight-id');
+      const savedHost = localStorage.getItem('shadows-is-host');
+      if (!savedRoom || !savedKnight || !myUid) return false;
+
+      try {
+        // Validate room still exists
+        const metaSnap = await fbDb.ref('games/' + savedRoom + '/meta').once('value');
+        if (!metaSnap.exists()) {
+          console.log('Reconnect: room', savedRoom, 'no longer exists');
+          clearSession();
+          return false;
+        }
+        const meta = metaSnap.val();
+
+        // If game ended, clear session
+        if (meta.status === 'ended') {
+          console.log('Reconnect: game ended');
+          clearSession();
+          return false;
+        }
+
+        // Validate our knight entry still exists and belongs to us
+        const knightSnap = await fbDb.ref('games/' + savedRoom + '/players/' + savedKnight).once('value');
+        if (!knightSnap.exists() || knightSnap.val().uid !== myUid) {
+          console.log('Reconnect: knight entry missing or uid mismatch');
+          clearSession();
+          return false;
+        }
+
+        // Restore state
+        currentRoom = savedRoom;
+        myKnight = savedKnight;
+        isHost = savedHost === 'true';
+        roomData = meta;
+
+        console.log('Reconnecting to room', savedRoom, 'as', savedKnight, isHost ? '(host)' : '');
+
+        if (meta.status === 'lobby') {
+          showScreen('lobby-screen');
+          enterLobby();
+        } else {
+          // setup or playing — listenToRoom will trigger enterGameScreen
+          listenToRoom();
+        }
+        return true;
+      } catch (err) {
+        console.error('Reconnect failed:', err);
+        clearSession();
+        return false;
+      }
+    }
+
+    function updateHomeScreenForSession() {
+      const savedRoom = localStorage.getItem('shadows-room-code');
+      const savedKnight = localStorage.getItem('shadows-knight-id');
+      const hasSession = !!(savedRoom && savedKnight);
+
+      $('home-actions').style.display = hasSession ? 'none' : '';
+      $('home-recovery').style.display = hasSession ? '' : 'none';
+
+      if (hasSession) {
+        const knightName = KNIGHTS[savedKnight]?.name || savedKnight;
+        $('recovery-info').textContent = 'Room: ' + savedRoom + ' | ' + knightName;
+      }
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     //  SECTION 4B: Card Engine
     // ═══════════════════════════════════════════════════════════════════
@@ -802,6 +904,12 @@
         fbDb.ref('.info/connected').on('value', snap => {
           setConnectionStatus(snap.val() ? 'connected' : 'disconnected');
         });
+
+        // Try to reconnect to a saved session
+        const reconnected = await tryReconnect();
+        if (!reconnected) {
+          updateHomeScreenForSession();
+        }
 
       } catch (err) {
         console.error('Auth error:', err);
@@ -931,10 +1039,14 @@
         }
       }
 
-      // Remove old selection if switching knights
-      if (myKnight && myKnight !== knightId) {
-        await fbDb.ref('games/' + currentRoom + '/players/' + myKnight).remove();
+      // Remove ALL old entries for this uid (handles ghost entries from app suspension)
+      const removals = [];
+      for (const [kid, data] of Object.entries(players)) {
+        if (data.uid === myUid && kid !== knightId) {
+          removals.push(fbDb.ref('games/' + currentRoom + '/players/' + kid).remove());
+        }
       }
+      if (removals.length > 0) await Promise.all(removals);
 
       myKnight = knightId;
 
@@ -949,18 +1061,26 @@
         relics: { excalibur: false, holyGrail: false, lancelotArmor: false },
         isRevealed: false,
       });
+
+      saveSession();
     }
 
     function listenToRoom() {
-      if (gameListener) gameListener();
-      if (playersListener) playersListener();
+      if (gameListener) {
+        fbDb.ref('games/' + currentRoom + '/meta').off('value', gameListener);
+        gameListener = null;
+      }
+      if (playersListener) {
+        fbDb.ref('games/' + currentRoom + '/players').off('value', playersListener);
+        playersListener = null;
+      }
 
       // Listen to meta
       const metaRef = fbDb.ref('games/' + currentRoom + '/meta');
       gameListener = metaRef.on('value', snap => {
         if (!snap.exists()) {
           showToast('Room was closed.');
-          leaveRoom();
+          leaveRoom(true);
           return;
         }
         roomData = snap.val();
@@ -1047,9 +1167,12 @@
       }
     }
 
-    async function leaveRoom() {
-      // Remove our player entry
-      if (currentRoom && myKnight && myUid) {
+    async function leaveRoom(abandon = true) {
+      const inLobby = !roomData || roomData.status === 'lobby';
+      const shouldRemovePlayer = inLobby || abandon;
+
+      // Remove player entry from Firebase only if in lobby or abandoning
+      if (shouldRemovePlayer && currentRoom && myKnight && myUid) {
         try {
           await fbDb.ref('games/' + currentRoom + '/players/' + myKnight).remove();
         } catch (e) { /* ignore */ }
@@ -1064,7 +1187,6 @@
         fbDb.ref('games/' + currentRoom + '/players').off('value', playersListener);
         playersListener = null;
       }
-      // Game screen listeners
       if (currentRoom) {
         if (privateListener) { fbDb.ref('private/' + currentRoom + '/' + myKnight).off('value', privateListener); privateListener = null; }
         if (boardListener) { fbDb.ref('games/' + currentRoom + '/board').off('value', boardListener); boardListener = null; }
@@ -1085,6 +1207,11 @@
         } catch (e) { /* ignore */ }
       }
 
+      // Clear or preserve session
+      if (shouldRemovePlayer) {
+        clearSession();
+      }
+
       // Reset all state
       currentRoom = null;
       myKnight = null;
@@ -1101,6 +1228,7 @@
       cachedPlayers = {};
 
       showScreen('home-screen');
+      updateHomeScreenForSession();
     }
 
     async function startGame() {
@@ -1109,8 +1237,22 @@
       const playersSnap = await fbDb.ref('games/' + currentRoom + '/players').once('value');
       const players = playersSnap.val() || {};
       const playerIds = Object.keys(players);
-      const count = playerIds.length;
 
+      // Validate: deduplicate by uid (remove ghost entries)
+      const uidMap = {};
+      const validPlayerIds = [];
+      for (const kid of playerIds) {
+        const uid = players[kid].uid;
+        if (uidMap[uid]) {
+          console.warn('Ghost knight removed:', kid, '(duplicate uid with', uidMap[uid] + ')');
+          fbDb.ref('games/' + currentRoom + '/players/' + kid).remove();
+          continue;
+        }
+        uidMap[uid] = kid;
+        validPlayerIds.push(kid);
+      }
+
+      const count = validPlayerIds.length;
       if (count < 3) { showToast('Need at least 3 players.'); return; }
       if (count > 7) { showToast('Maximum 7 players.'); return; }
 
@@ -1119,7 +1261,7 @@
 
       try {
         // Determine turn order (active knights in standard order)
-        const turnOrder = KNIGHT_ORDER.filter(k => playerIds.includes(k));
+        const turnOrder = KNIGHT_ORDER.filter(k => validPlayerIds.includes(k));
         const firstKnight = turnOrder[0];
 
         // Create & shuffle loyalty deck
@@ -1207,6 +1349,12 @@
           updates[pp + kid] = pdata;
         }
 
+        console.log('Game init:', {
+          turnOrder, loyalty: loyaltyDeck,
+          hands: Object.fromEntries(turnOrder.map(k => [k, playerHands[k].length])),
+          whiteDraw: mainWhiteDeck.length, blackDraw: blackDeck.length,
+        });
+
         await fbDb.ref().update(updates);
         showToast('Cards dealt! Select a card to share.');
       } catch (err) {
@@ -1223,6 +1371,23 @@
 
     $('btn-create').addEventListener('click', createRoom);
     $('btn-join').addEventListener('click', joinRoom);
+    $('btn-return-game').addEventListener('click', async () => {
+      const ok = await tryReconnect();
+      if (!ok) {
+        showToast('Game no longer available.');
+        updateHomeScreenForSession();
+      }
+    });
+    $('btn-start-fresh').addEventListener('click', async () => {
+      // Remove player from Firebase before clearing session
+      const savedRoom = localStorage.getItem('shadows-room-code');
+      const savedKnight = localStorage.getItem('shadows-knight-id');
+      if (savedRoom && savedKnight && myUid) {
+        try { await fbDb.ref('games/' + savedRoom + '/players/' + savedKnight).remove(); } catch (e) { /* ignore */ }
+      }
+      clearSession();
+      updateHomeScreenForSession();
+    });
 
     // Allow Enter key on join code input
     $('join-code').addEventListener('keydown', e => {
@@ -1243,7 +1408,12 @@
       showScreen('home-screen');
     });
 
-    $('btn-leave').addEventListener('click', leaveRoom);
+    $('btn-leave').addEventListener('click', () => leaveRoom(true));
+    $('btn-leave-game').addEventListener('click', () => {
+      if (confirm('Leave this game? You can return later from the home screen.')) {
+        leaveRoom(false);
+      }
+    });
     $('btn-start').addEventListener('click', startGame);
 
     // Traitor toggle
@@ -1294,7 +1464,13 @@
       if (privateListener) return;
       const ref = fbDb.ref('private/' + currentRoom + '/' + myKnight);
       privateListener = ref.on('value', snap => {
-        if (!snap.exists()) return;
+        if (!snap.exists()) {
+          console.warn('No private data for', myKnight, 'in room', currentRoom);
+          $('hand-count').textContent = '0';
+          $('hand-cards').innerHTML = '<div style="color:var(--text-dim);padding:1rem;font-size:0.875rem;">Waiting for cards...</div>';
+          $('loyalty-display').style.display = 'none';
+          return;
+        }
         const data = snap.val();
         myLoyalty = data.loyalty || null;
         myHand = data.hand || [];
@@ -1546,6 +1722,8 @@
       const ref = fbDb.ref('games/' + currentRoom + '/setup');
       setupListener = ref.on('value', snap => {
         const selections = snap.val() || {};
+        // Restore shared flag on reconnect
+        if (selections[myKnight]) mySetupShared = true;
         renderSetupShared(selections);
       });
     }
