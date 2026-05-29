@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Sir Tristan: Harp on purple shield -->
+  <path d="M32 4L8 24v20l24 16 24-16V24L32 4z" fill="#4A148C" stroke="#D4A843" stroke-width="2"/>
+  <path d="M26 20c0 0-4 8-4 18" stroke="#D4A843" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+  <path d="M26 20c6 0 12 6 12 14" stroke="#D4A843" stroke-width="2.5" stroke-linecap="round" fill="none"/>
+  <line x1="24" y1="26" x2="36" y2="28" stroke="#D4A843" stroke-width="1"/>
+  <line x1="23" y1="30" x2="37" y2="31" stroke="#D4A843" stroke-width="1"/>
+  <line x1="22" y1="34" x2="38" y2="34" stroke="#D4A843" stroke-width="1"/>
+</svg>

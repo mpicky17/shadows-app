@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 64" fill="none">
+  <!-- Holy Grail: golden chalice -->
+  <ellipse cx="24" cy="12" rx="16" ry="6" fill="none" stroke="#D4A843" stroke-width="2"/>
+  <path d="M8 12c0 0 2 20 8 28h16c6-8 8-28 8-28" fill="#D4A843" stroke="#B8860B" stroke-width="1"/>
+  <ellipse cx="24" cy="12" rx="14" ry="4" fill="#F0C040"/>
+  <rect x="20" y="40" width="8" height="8" rx="1" fill="#D4A843"/>
+  <ellipse cx="24" cy="52" rx="10" ry="4" fill="#D4A843" stroke="#B8860B" stroke-width="1"/>
+  <path d="M18 24c2-2 4 0 6-2s4 0 6 2" stroke="#B8860B" stroke-width="1" fill="none"/>
+</svg>

@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Sir Gawain: Green shield with eagle -->
+  <path d="M32 4L8 24v20l24 16 24-16V24L32 4z" fill="#1B5E20" stroke="#D4A843" stroke-width="2"/>
+  <path d="M32 18l-8 12h5v12h6V30h5L32 18z" fill="#D4A843"/>
+  <path d="M24 30c-3-2-5-1-6 0M40 30c3-2 5-1 6 0" stroke="#D4A843" stroke-width="2" stroke-linecap="round"/>
+</svg>

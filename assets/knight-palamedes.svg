@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Sir Palamedes: Checkered black/white on dark shield -->
+  <path d="M32 4L8 24v20l24 16 24-16V24L32 4z" fill="#2D1B4E" stroke="#D4A843" stroke-width="2"/>
+  <rect x="20" y="20" width="8" height="8" fill="#F5F0E1"/>
+  <rect x="28" y="20" width="8" height="8" fill="#1A1A2E"/>
+  <rect x="36" y="20" width="8" height="8" fill="#F5F0E1"/>
+  <rect x="20" y="28" width="8" height="8" fill="#1A1A2E"/>
+  <rect x="28" y="28" width="8" height="8" fill="#F5F0E1"/>
+  <rect x="36" y="28" width="8" height="8" fill="#1A1A2E"/>
+  <rect x="20" y="36" width="8" height="8" fill="#F5F0E1"/>
+  <rect x="28" y="36" width="8" height="8" fill="#1A1A2E"/>
+  <rect x="36" y="36" width="8" height="8" fill="#F5F0E1"/>
+</svg>

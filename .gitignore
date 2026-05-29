@@ -1,0 +1,17 @@
+# Source reference materials (not part of the app)
+*.pdf
+*.jpg
+*.webp
+*.docx
+*.tmp
+rules_text.txt
+Traitor.jpg
+~$*
+~WRL*
+
+# Node
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db

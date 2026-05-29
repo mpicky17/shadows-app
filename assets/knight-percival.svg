@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Sir Percival: Heart on silver shield -->
+  <path d="M32 4L8 24v20l24 16 24-16V24L32 4z" fill="#616161" stroke="#C0C0C0" stroke-width="2"/>
+  <path d="M32 44c-12-10-16-16-16-22a8 8 0 0116 0 8 8 0 0116 0c0 6-4 12-16 22z" fill="#C62828" stroke="#F5F0E1" stroke-width="1"/>
+</svg>
