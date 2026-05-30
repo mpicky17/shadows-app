@@ -213,7 +213,7 @@ Moving between Round Table and Siege Area is free (no Heroic Action cost).
 - **Sir Kay:** may play 1 extra Fight card after Black cards are revealed.
 
 ### Dragon's Quest
-- **Type:** Solo, Combat Quest (replaces Lancelot after Lancelot's Quest ends)
+- **Type:** Group, Combat Quest (replaces Lancelot after Lancelot's Quest ends)
 - **White card pattern:** 3 three-of-a-kinds — 9 cards on Knights' side
 - **Progression of Evil:** Dragon card drawn → placed on quest. 5th Dragon card ends the quest.
 - **Heroic Action:** Play 1 White Fight card on empty Knights' side spot. 9th White card → quest ends.

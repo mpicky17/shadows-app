@@ -732,7 +732,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v13';
+    const APP_VERSION = 'shadows-v14';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -3037,11 +3037,28 @@
       }
 
       const cards = quest.cards || [];
-      cards.push({ type: 'despair', id: card.id });
-
       const updates = {};
-      updates['games/' + currentRoom + '/quests/holyGrail/cards'] = cards;
       updates['games/' + currentRoom + '/meta/revealedBlackCard'] = null;
+
+      // If board is full, Despair cancels the closest Grail card (both discarded)
+      if (cards.length >= 7) {
+        const grailIdx = cards.findIndex(c => c?.type === 'grail');
+        if (grailIdx >= 0) {
+          cards.splice(grailIdx, 1);
+          updates['games/' + currentRoom + '/quests/holyGrail/cards'] = cards;
+          await fbDb.ref().update(updates);
+          const blackCount = cards.filter(c => c.type === 'despair' || c.type === 'desolation').length;
+          const grailCount = cards.filter(c => c.type === 'grail').length;
+          await addLog('quest', 'Despair cancelled a Grail card on Holy Grail (' + blackCount + ' black, ' + grailCount + ' grail)');
+          if (await checkGameEnd()) return;
+          await advanceToHeroicPhase();
+          return;
+        }
+        // No Grail cards left — all 7 are black, quest already lost by previous placement
+      }
+
+      cards.push({ type: 'despair', id: card.id });
+      updates['games/' + currentRoom + '/quests/holyGrail/cards'] = cards;
 
       // Check if all 7 slots filled with black cards (no grail cards)
       const grailCount = cards.filter(c => c.type === 'grail').length;
@@ -3267,10 +3284,43 @@
           return;
         }
         const cards = quest.cards || [];
-        cards.push({ type: 'desolation', id: card.id });
         const updates = {};
-        updates['games/' + currentRoom + '/quests/holyGrail/cards'] = cards;
         updates['games/' + currentRoom + '/meta/revealedBlackCard'] = null;
+
+        // If board is full, Desolation replaces the closest Grail card
+        if (cards.length >= 7) {
+          const grailIdx = cards.findIndex(c => c?.type === 'grail');
+          if (grailIdx >= 0) {
+            cards[grailIdx] = { type: 'desolation', id: card.id };
+            updates['games/' + currentRoom + '/quests/holyGrail/cards'] = cards;
+            const blackCount = cards.filter(c => c.type === 'despair' || c.type === 'desolation').length;
+            const grailCount = cards.filter(c => c.type === 'grail').length;
+            if (blackCount >= 7 && grailCount === 0) {
+              updates['games/' + currentRoom + '/quests/holyGrail/status'] = 'lost';
+              const swords = cachedBoard?.swords || [];
+              for (let i = 0; i < 3; i++) swords.push({ color: 'black', source: 'holyGrail' });
+              if (roomData?.persistentEffects?.mistOfAvalon) swords.push({ color: 'black', source: 'mistOfAvalon' });
+              updates['games/' + currentRoom + '/board/swords'] = swords;
+              const knightsPresent = quest.knightsPresent || [];
+              for (const kid of knightsPresent) {
+                updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
+              }
+              updates['games/' + currentRoom + '/quests/holyGrail/knightsPresent'] = [];
+              await fbDb.ref().update(updates);
+              await addLog('quest', 'Holy Grail quest LOST! 3 Black Swords added.');
+            } else {
+              await fbDb.ref().update(updates);
+              await addLog('quest', 'Desolation replaced a Grail card on Holy Grail (' + blackCount + ' black, ' + grailCount + ' grail)');
+            }
+            if (await checkGameEnd()) return;
+            await advanceToHeroicPhase();
+            return;
+          }
+          // No Grail cards left — all 7 are black, quest already lost
+        }
+
+        cards.push({ type: 'desolation', id: card.id });
+        updates['games/' + currentRoom + '/quests/holyGrail/cards'] = cards;
 
         const blackCount = cards.filter(c => c.type === 'despair' || c.type === 'desolation').length;
         const grailCount = cards.filter(c => c.type === 'grail').length;
@@ -4497,7 +4547,7 @@
 
     function getHandLimit() { return 12; }
 
-    function isSoloQuest(qk) { return qk === 'blackKnight' || qk === 'lancelot'; }
+    function isSoloQuest(qk) { return qk === 'blackKnight' || (qk === 'lancelot' && cachedQuests?.lancelot?.phase === 'lancelot'); }
 
     function isSoloQuestOccupied(qk) {
       const q = cachedQuests?.[qk];
