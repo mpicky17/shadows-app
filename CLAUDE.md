@@ -395,17 +395,17 @@ Applied immediately when drawn. Can be cancelled by 3 Merlin cards played collec
 
 | Card | Count | Effect |
 |------|-------|--------|
-| Morgan 1 | x1 | Each Knight must discard 1 White card of their choice. |
-| Morgan 2 | x1 | Each Knight must discard all Special White cards from their hand. |
-| Morgan 3 | x1 | Add 1 Siege Engine to Camelot. |
+| Morgan 1 | x1 | Any knight may volunteer to discard 3 cards. If nobody does, each knight discards 1. |
+| Morgan 2 | x1 | Drawing player draws and applies the next 3 Black cards immediately. |
+| Morgan 3 | x1 | Add 2 Siege Engines to Camelot. |
 | Morgan 4 | x1 | Each Knight loses 1 Life point. |
 | Morgan 5 | x1 | Any Knight may volunteer to lose 2 Life points. If nobody volunteers, ALL Knights discard 1 White card each (if they have at least one). |
 | Desolation | x2 | Place on Holy Grail quest (same as Despair but Special — cannot be countered by quest action, only by 3 Merlins). |
-| Dark Forest | x1 | Remains in play for rest of game. From now on, when any player draws White cards at the Round Table, draw 1 fewer card (minimum 1). |
-| Guinevere | x1 | Remains in play for rest of game. If there are 7+ Black cards on any single quest, that quest is immediately lost. |
-| Mist of Avalon | x1 | Remains in play for rest of game. Special White cards can no longer be played. |
-| Mordred | x1 | Remains in play for rest of game. It is no longer possible to use 3 Merlin cards to cancel Special Black cards. |
-| Vivien | x1 | Remains in play for rest of game. Each Knight's hand limit is reduced to 10 cards (was 12). Knights with more than 10 must immediately discard down to 10. |
+| Dark Forest | x1 | No Grail cards may be played until a quest is won. If Holy Grail quest inactive, add siege engine. |
+| Guinevere | x1 | All knights return to Camelot. Solo quest white cards removed. Drawing player's turn ends immediately. |
+| Mist of Avalon | x1 | Permanent. Each quest lost adds 1 extra Black Sword. |
+| Mordred | x1 | Player adds 1 warrior to Saxon or Pict War and attaches Mordred. That war needs an extra Fight 5 to win. Removed on win/loss. |
+| Vivien | x1 | No Merlin cards may be played until a quest is won. Can be cancelled by 3 Merlins when drawn. |
 
 ### Loyalty Cards (8 total)
 | Card | Count |
@@ -465,7 +465,8 @@ meta/
   roomCode, createdAt, hostUid, status (lobby|setup|playing|ended)
   currentTurnKnight, turnPhase, turnNumber, winner, includeTraitor
   sacrificeUsed, heroicActionTaken, specialWhitePlayed
-  persistentEffects: { darkForest, guinevere, mistOfAvalon, mordred, vivien }
+  persistentEffects: { darkForest, mistOfAvalon, mordred: null|'saxonWar'|'pictWar', vivien }
+  morgan2Remaining: number|null
 board/
   siegeEngines: number (0-12)
   swords: [{color, source}]

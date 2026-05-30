@@ -732,7 +732,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v12';
+    const APP_VERSION = 'shadows-v13';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1490,8 +1490,8 @@
         updates[gp + 'meta/heroicActionTaken'] = false;
         updates[gp + 'meta/specialWhitePlayed'] = false;
         updates[gp + 'meta/persistentEffects'] = {
-          darkForest: false, guinevere: false, mistOfAvalon: false,
-          mordred: false, vivien: false,
+          darkForest: false, mistOfAvalon: false,
+          mordred: null, vivien: false,
         };
 
         // Board
@@ -1771,15 +1771,13 @@
         return;
       }
 
-      // Discard mode for Morgan 1, Vivien, Morgan 5
+      // Discard mode for Morgan 1, Morgan 5
       if (discardMode) {
         selectedCardId = (selectedCardId === cardId) ? null : cardId;
         renderHand();
 
         if (discardMode === 'morgan1') {
           renderMorganDiscardPanel(roomData?.pendingInteraction);
-        } else if (discardMode === 'vivien') {
-          renderVivienDiscardPanel(roomData?.pendingInteraction);
         } else if (discardMode === 'morgan5' || discardMode === 'fateDiscard') {
           // Auto-discard on tap
           if (selectedCardId) {
@@ -1797,6 +1795,23 @@
               renderMorgan5DiscardUI();
             } else {
               renderFateDiscardPanel(roomData?.pendingInteraction);
+            }
+            renderHand();
+          }
+        } else if (discardMode === 'morgan1volunteer') {
+          // Auto-discard on tap for Morgan 1 volunteer (3 cards)
+          if (selectedCardId) {
+            myHand = myHand.filter(c => c.id !== selectedCardId);
+            selectedCardId = null;
+            discardCount--;
+            fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
+            if (discardCount <= 0) {
+              discardMode = null;
+              fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
+                .set({ volunteered: true, done: true });
+              addLog('evil', getKnightDisplayName(myKnight) + ' volunteered to discard 3 cards for Morgan 1!');
+            } else {
+              renderMorgan1DiscardUI();
             }
             renderHand();
           }
@@ -2555,6 +2570,58 @@
       }
     }
 
+    async function triggerMorgan2Draw() {
+      // Same as drawBlackCard but without setting evilActionTaken
+      const currentKnight = roomData?.currentTurnKnight;
+      if (myKnight !== currentKnight) return; // Only current turn player draws
+      const hasArmor = cachedPlayers[myKnight]?.relics?.lancelotArmor;
+
+      if (isHost) {
+        const deckPath = 'private/' + currentRoom + '/' + myKnight + '/hostDecks/';
+        const deckSnap = await fbDb.ref(deckPath + 'blackDraw').once('value');
+        const drawPile = deckSnap.val() || [];
+
+        if (drawPile.length === 0) {
+          showToast('Black draw pile is empty!');
+          await fbDb.ref('games/' + currentRoom + '/meta/morgan2Remaining').set(0);
+          await advanceToHeroicPhase();
+          return;
+        }
+
+        if (hasArmor && drawPile.length >= 2) {
+          const card1 = drawPile.pop();
+          const card2 = drawPile.pop();
+          const updates = {};
+          updates[deckPath + 'blackDraw'] = drawPile;
+          updates['games/' + currentRoom + '/decks/blackDrawCount'] = drawPile.length;
+          updates['games/' + currentRoom + '/meta/armorChoice'] = { cards: [card1, card2], forKnight: myKnight };
+          await fbDb.ref().update(updates);
+          return;
+        }
+
+        const card = drawPile.pop();
+        const updates = {};
+        updates[deckPath + 'blackDraw'] = drawPile;
+        updates['games/' + currentRoom + '/decks/blackDrawCount'] = drawPile.length;
+
+        const discardSnap = await fbDb.ref(deckPath + 'blackDiscard').once('value');
+        const discard = discardSnap.val() || [];
+        discard.push(card);
+        updates[deckPath + 'blackDiscard'] = discard;
+
+        updates['games/' + currentRoom + '/meta/revealedBlackCard'] = {
+          card, drawnBy: myKnight, status: 'revealed',
+        };
+        await fbDb.ref().update(updates);
+      } else {
+        const reqType = hasArmor ? 'armorReveal' : 'blackReveal';
+        await fbDb.ref('games/' + currentRoom + '/drawRequests').push({
+          knightId: myKnight, deckType: reqType, count: hasArmor ? 2 : 1,
+          timestamp: firebase.database.ServerValue.TIMESTAMP,
+        });
+      }
+    }
+
     function renderArmorChoiceOverlay(area) {
       const choice = roomData.armorChoice;
       if (!choice) return;
@@ -2633,17 +2700,17 @@
       if (card.type === 'mercenaries') return 'Add 1 warrior to Saxon or Pict War (your choice)';
       if (card.type === 'specialBlack') {
         const descs = {
-          'Morgan 1': 'Each Knight must discard 1 White card',
-          'Morgan 2': 'Each Knight discards all Special White cards',
-          'Morgan 3': 'Add 1 Siege Engine to Camelot',
+          'Morgan 1': 'Any knight may volunteer to discard 3 cards. Otherwise, each knight discards 1.',
+          'Morgan 2': 'Drawing player draws and applies the next 3 Black cards immediately',
+          'Morgan 3': 'Add 2 Siege Engines to Camelot',
           'Morgan 4': 'Each Knight loses 1 Life Point',
           'Morgan 5': 'You lose 2 Life Points OR discard 3 White cards',
           'Desolation': 'Place on the Holy Grail quest (Special — only Merlins can cancel)',
-          'Dark Forest': 'PERMANENT: Knights draw 1 fewer White card at Round Table (min 1)',
-          'Guinevere': 'PERMANENT: Any quest with 7+ Black cards is immediately lost',
-          'Mist of Avalon': 'PERMANENT: Special White cards can no longer be played',
-          'Mordred': 'PERMANENT: Merlin cards can no longer cancel Special Black cards',
-          'Vivien': 'PERMANENT: Hand limit reduced to 10 cards',
+          'Dark Forest': 'No Grail cards may be played until a quest is won. If Holy Grail inactive, add siege engine.',
+          'Guinevere': 'All knights return to Camelot. Solo quest white cards removed. Turn ends immediately.',
+          'Mist of Avalon': 'PERMANENT: Each quest lost adds 1 extra Black Sword',
+          'Mordred': 'Add 1 warrior to Saxon or Pict War. Requires extra Fight 5 to win. Removed on win/loss.',
+          'Vivien': 'No Merlin cards may be played until a quest is won. Can be cancelled by 3 Merlins.',
         };
         return descs[card.name] || card.name;
       }
@@ -2764,8 +2831,10 @@
         document.getElementById('btn-face-down').addEventListener('click', () => resolveRevealedCard('combat', true));
       } else if (card.type === 'specialBlack') {
         if (!roomData.pendingInteraction) {
-          if (roomData.persistentEffects?.mordred) {
-            actionsEl.innerHTML = '<button class="btn btn-evil" id="btn-apply-special">Apply Effect</button>';
+          // Vivien blocks Merlin cancels (except Vivien itself can always be cancelled)
+          const vivienBlocks = roomData.persistentEffects?.vivien && card.name !== 'Vivien';
+          if (vivienBlocks) {
+            actionsEl.innerHTML = '<button class="btn btn-evil" id="btn-apply-special">Apply Effect (Merlins blocked by Vivien)</button>';
             document.getElementById('btn-apply-special').addEventListener('click', () => resolveRevealedCard('special'));
           } else {
             actionsEl.innerHTML = '<button class="btn btn-merlin" id="btn-start-merlin">Open Merlin Vote</button>';
@@ -2938,6 +3007,7 @@
         const swords = cachedBoard?.swords || [];
         swords.push({ color: 'black', source: 'excalibur' });
         swords.push({ color: 'black', source: 'excalibur' });
+        if (roomData?.persistentEffects?.mistOfAvalon) swords.push({ color: 'black', source: 'mistOfAvalon' });
         updates['games/' + currentRoom + '/board/swords'] = swords;
 
         // Knights on quest lose 1 LP and return to Round Table
@@ -2982,6 +3052,7 @@
         updates['games/' + currentRoom + '/quests/holyGrail/status'] = 'lost';
         const swords = cachedBoard?.swords || [];
         for (let i = 0; i < 3; i++) swords.push({ color: 'black', source: 'holyGrail' });
+        if (roomData?.persistentEffects?.mistOfAvalon) swords.push({ color: 'black', source: 'mistOfAvalon' });
         updates['games/' + currentRoom + '/board/swords'] = swords;
 
         const knightsPresent = quest.knightsPresent || [];
@@ -3033,6 +3104,7 @@
         updates['games/' + currentRoom + '/quests/' + questKey + '/status'] = 'lost';
         const swords = cachedBoard?.swords || [];
         swords.push({ color: 'black', source: questKey });
+        if (roomData?.persistentEffects?.mistOfAvalon) swords.push({ color: 'black', source: 'mistOfAvalon' });
         updates['games/' + currentRoom + '/board/swords'] = swords;
 
         // +2 siege engines
@@ -3052,6 +3124,10 @@
         updates['games/' + currentRoom + '/quests/' + questKey + '/fightCards'] = [];
         updates['games/' + currentRoom + '/quests/' + questKey + '/knightsPresent'] = [];
         updates['games/' + currentRoom + '/quests/' + questKey + '/status'] = 'active';
+        // Clear Mordred if attached to this quest
+        if (roomData?.persistentEffects?.mordred === questKey) {
+          updates['games/' + currentRoom + '/meta/persistentEffects/mordred'] = null;
+        }
 
         await fbDb.ref().update(updates);
         await addLog('quest', label + ' War LOST! 4th warrior placed. 1 Black Sword + 2 Siege Engines. Quest resets.');
@@ -3088,10 +3164,10 @@
 
       if (name === 'Morgan 3') {
         const current = cachedBoard?.siegeEngines || 0;
-        const newCount = current + 1;
+        const newCount = current + 2;
         await fbDb.ref('games/' + currentRoom + '/board/siegeEngines').set(newCount);
         await fbDb.ref('games/' + currentRoom + '/meta/revealedBlackCard').set(null);
-        await addLog('evil', 'Morgan 3: Siege Engine added (' + newCount + '/12)');
+        await addLog('evil', 'Morgan 3: 2 Siege Engines added (' + newCount + '/12)');
         if (await checkGameEnd()) return;
         await advanceToHeroicPhase();
 
@@ -3110,29 +3186,76 @@
         if (await checkGameEnd()) return;
         await advanceToHeroicPhase();
 
-      } else if (name === 'Dark Forest' || name === 'Guinevere' || name === 'Mist of Avalon' || name === 'Mordred' || name === 'Vivien') {
-        const effectKey = {
-          'Dark Forest': 'darkForest', 'Guinevere': 'guinevere',
-          'Mist of Avalon': 'mistOfAvalon', 'Mordred': 'mordred', 'Vivien': 'vivien',
-        }[name];
+      } else if (name === 'Guinevere') {
+        // Immediate one-shot: all knights to Camelot, clear solo quests, end turn
         const updates = {};
-        updates['games/' + currentRoom + '/meta/persistentEffects/' + effectKey] = true;
+        updates['games/' + currentRoom + '/meta/revealedBlackCard'] = null;
+        const turnOrder = roomData?.turnOrder || [];
+        for (const kid of turnOrder) {
+          const p = cachedPlayers[kid];
+          if (!p || p.alive === false || p.isRevealed) continue;
+          updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
+        }
+        // Solo quests: remove white cards when knights forced to abandon
+        for (const qk of ['blackKnight', 'lancelot']) {
+          const q = cachedQuests?.[qk];
+          if (q && q.status === 'active' && (q.whiteCards || []).length > 0) {
+            updates['games/' + currentRoom + '/quests/' + qk + '/whiteCards'] = [];
+            await addLog('quest', getLocationLabel(qk) + ': white cards removed (Guinevere).');
+          }
+          if (q && q.status === 'active') {
+            updates['games/' + currentRoom + '/quests/' + qk + '/knightsPresent'] = [];
+          }
+        }
+        // Group quests: just clear knightsPresent
+        for (const qk of ['excalibur', 'holyGrail', 'saxonWar', 'pictWar']) {
+          const q = cachedQuests?.[qk];
+          if (q && q.status === 'active' && (q.knightsPresent || []).length > 0) {
+            updates['games/' + currentRoom + '/quests/' + qk + '/knightsPresent'] = [];
+          }
+        }
+        await fbDb.ref().update(updates);
+        await addLog('evil', 'Guinevere: All knights recalled to Camelot! Turn ends immediately.');
+        if (await checkGameEnd()) return;
+        await advanceTurn(); // Skip heroic phase
+
+      } else if (name === 'Mist of Avalon') {
+        const updates = {};
+        updates['games/' + currentRoom + '/meta/persistentEffects/mistOfAvalon'] = true;
         updates['games/' + currentRoom + '/meta/revealedBlackCard'] = null;
         await fbDb.ref().update(updates);
-        await addLog('evil', name + ' is now in effect!');
+        await addLog('evil', 'Mist of Avalon active — each quest loss adds 1 extra Black Sword!');
+        if (await checkGameEnd()) return;
+        await advanceToHeroicPhase();
 
-        // Vivien: check hand limits
-        if (name === 'Vivien') {
-          await handleVivienDiscard();
+      } else if (name === 'Dark Forest') {
+        const grailQuest = cachedQuests?.holyGrail;
+        if (!grailQuest || grailQuest.status !== 'active') {
+          await addSiegeEngineFromCard('Dark Forest (Holy Grail quest not active)');
           return;
         }
+        const updates = {};
+        updates['games/' + currentRoom + '/meta/persistentEffects/darkForest'] = true;
+        updates['games/' + currentRoom + '/meta/revealedBlackCard'] = null;
+        await fbDb.ref().update(updates);
+        await addLog('evil', 'Dark Forest active — no Grail cards may be played until a quest is won!');
+        if (await checkGameEnd()) return;
+        await advanceToHeroicPhase();
 
-        // Guinevere: check existing quests for 7+ black cards
-        if (name === 'Guinevere') {
-          await handleGuinevereLossCheck();
-          return;
-        }
+      } else if (name === 'Mordred') {
+        // Player chooses Pict or Saxon War to attach Mordred
+        await fbDb.ref('games/' + currentRoom + '/meta/revealedBlackCard').set(null);
+        await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set({
+          type: 'mordredChoice', card, drawnBy: roomData?.currentTurnKnight,
+          responses: {}, resolved: false,
+        });
 
+      } else if (name === 'Vivien') {
+        const updates = {};
+        updates['games/' + currentRoom + '/meta/persistentEffects/vivien'] = true;
+        updates['games/' + currentRoom + '/meta/revealedBlackCard'] = null;
+        await fbDb.ref().update(updates);
+        await addLog('evil', 'Vivien active — Merlin cards cannot be played until a quest is won!');
         if (await checkGameEnd()) return;
         await advanceToHeroicPhase();
 
@@ -3156,6 +3279,7 @@
           updates['games/' + currentRoom + '/quests/holyGrail/status'] = 'lost';
           const swords = cachedBoard?.swords || [];
           for (let i = 0; i < 3; i++) swords.push({ color: 'black', source: 'holyGrail' });
+          if (roomData?.persistentEffects?.mistOfAvalon) swords.push({ color: 'black', source: 'mistOfAvalon' });
           updates['games/' + currentRoom + '/board/swords'] = swords;
           const knightsPresent = quest.knightsPresent || [];
           for (const kid of knightsPresent) {
@@ -3172,12 +3296,14 @@
         await advanceToHeroicPhase();
 
       } else if (name === 'Morgan 1') {
-        // All players discard 1 card of choice — use pendingInteraction
-        await startPendingInteraction('morganDiscard', card);
+        // Volunteer phase first; if all decline, fall back to morganDiscard
+        await startPendingInteraction('morgan1Volunteer', card);
 
       } else if (name === 'Morgan 2') {
-        // All players discard Special White cards — auto-apply
-        await startPendingInteraction('morganSpecialDiscard', card);
+        // Drawing player draws 3 more black cards immediately
+        await fbDb.ref('games/' + currentRoom + '/meta/morgan2Remaining').set(3);
+        await addLog('evil', 'Morgan 2: 3 additional Black cards will be drawn!');
+        await triggerMorgan2Draw();
 
       } else if (name === 'Morgan 5') {
         // Any player can volunteer 2 LP; if all decline, everyone discards 1 white card
@@ -3185,45 +3311,6 @@
       }
     }
 
-    async function handleVivienDiscard() {
-      // Check if any player has >10 cards
-      // We can't see other players' hands — they'll handle their own discard via pendingInteraction
-      const turnOrder = roomData.turnOrder || [];
-      const interaction = {
-        type: 'vivienDiscard', card: { name: 'Vivien' },
-        responses: {}, resolved: false,
-      };
-      // Auto-complete for players we know can't have >10 cards
-      // (we can only know about our own hand here)
-      await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set(interaction);
-    }
-
-    async function handleGuinevereLossCheck() {
-      if (!cachedQuests) { await advanceToHeroicPhase(); return; }
-      const updates = {};
-      let questLost = false;
-
-      for (const [key, quest] of Object.entries(cachedQuests)) {
-        if (quest.status !== 'active') continue;
-        let blackCount = 0;
-        if (quest.blackCards) blackCount += quest.blackCards.length;
-        if (quest.cards) blackCount += quest.cards.filter(c => c.type !== 'grail').length;
-        if (key === 'saxonWar' || key === 'pictWar') continue; // warriors, not cards
-        if (blackCount >= 7) {
-          questLost = true;
-          await addLog('quest', 'Guinevere effect: ' + key + ' has 7+ black cards — quest LOST!');
-          // Apply defeat for the specific quest type would go here
-          // For now, mark as lost and add appropriate swords
-          updates['games/' + currentRoom + '/quests/' + key + '/status'] = 'lost';
-        }
-      }
-
-      if (Object.keys(updates).length > 0) {
-        await fbDb.ref().update(updates);
-      }
-      if (await checkGameEnd()) return;
-      await advanceToHeroicPhase();
-    }
 
     // ═══════════════════════════════════════════════════════════════════
     //  SECTION 12F: Merlin Cancel Flow
@@ -3242,9 +3329,17 @@
       const overlayVisible = roomData?.revealedBlackCard;
       const area = overlayVisible ? $('reveal-actions') : $('interaction-area');
 
+      // If we're in merlin selection phase, render that instead
+      if (interaction.merlinSelection) {
+        renderMerlinSelectionPanel(interaction);
+        return;
+      }
+
       const total = interaction.totalMerlins || 0;
       const myResponse = interaction.responses?.[myKnight];
-      const hasMerlin = myHand.some(c => c.type === 'special' && c.name === 'Merlin');
+      const myDone = myResponse?.done;
+      const myOffered = myResponse?.merlinsOffered || 0;
+      const merlinCount = myHand.filter(c => c.type === 'special' && c.name === 'Merlin').length;
 
       let html = '';
       if (!overlayVisible) html += '<div class="interaction-panel">';
@@ -3254,29 +3349,35 @@
 
       // Show player statuses
       const turnOrder = roomData?.turnOrder || [];
-      html += '<div style="margin:0.5rem 0;font-size:0.875rem;">';
+      html += '<div style="margin:0.5rem 0;font-size:1rem;">';
       for (const kid of turnOrder) {
         const p = cachedPlayers[kid];
         if (!p || p.alive === false) continue;
         const resp = interaction.responses?.[kid];
         const name = p.displayName || KNIGHTS[kid]?.name || kid;
-        if (resp) {
+        if (resp?.done) {
           const offered = resp.merlinsOffered || 0;
           html += '<div style="color:' + (offered > 0 ? 'var(--gold)' : 'var(--text-dim)') + ';">' +
             name + ': ' + (offered > 0 ? 'Offered ' + offered + ' Merlin' + (offered > 1 ? 's' : '') : 'Passed') + '</div>';
+        } else if (resp) {
+          const offered = resp.merlinsOffered || 0;
+          html += '<div style="color:var(--gold);">' + name + ': offering ' + offered + ' Merlin' + (offered > 1 ? 's' : '') + '...</div>';
         } else {
           html += '<div style="color:var(--text-dim);">' + name + ': waiting...</div>';
         }
       }
       html += '</div>';
 
-      if (!myResponse && total < 3) {
-        if (hasMerlin) {
-          html += '<button class="btn btn-merlin" id="btn-offer-merlin" style="margin-right:0.5rem;">Offer Merlin</button>';
+      if (!myDone) {
+        if (merlinCount > 0) {
+          html += '<button class="btn btn-merlin" id="btn-offer-merlin" style="margin-right:0.5rem;">Offer Merlin (' + merlinCount + ' left)</button>';
         }
-        html += '<button class="btn" id="btn-pass-merlin">Pass</button>';
-      } else if (total >= 3) {
-        html += '<p style="color:var(--green);font-weight:700;">CANCELLED!</p>';
+        if (myOffered > 0) {
+          html += '<button class="btn btn-confirm" id="btn-done-merlin" style="margin-right:0.5rem;">Done Offering (' + myOffered + ')</button>';
+        }
+        html += '<button class="btn" id="btn-pass-merlin">' + (myOffered > 0 ? 'Undo & Pass' : 'Pass') + '</button>';
+      } else {
+        html += '<p style="color:var(--text-dim);font-size:1rem;">Waiting for other players...</p>';
       }
 
       if (!overlayVisible) html += '</div>';
@@ -3284,6 +3385,8 @@
 
       const offerBtn = document.getElementById('btn-offer-merlin');
       if (offerBtn) offerBtn.addEventListener('click', offerMerlin);
+      const doneBtn = document.getElementById('btn-done-merlin');
+      if (doneBtn) doneBtn.addEventListener('click', confirmMerlinDone);
       const passBtn = document.getElementById('btn-pass-merlin');
       if (passBtn) passBtn.addEventListener('click', passMerlinOffer);
     }
@@ -3300,16 +3403,37 @@
       await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/totalMerlins')
         .transaction(current => (current || 0) + 1);
 
-      // Write response
+      // Update response (NOT done yet — player can offer more)
       const prev = roomData.pendingInteraction?.responses?.[myKnight];
       const prevOffered = prev?.merlinsOffered || 0;
       await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
-        .set({ done: true, merlinsOffered: prevOffered + 1 });
+        .set({ merlinsOffered: prevOffered + 1 });
 
-      showToast('Merlin offered!');
+      showToast('Merlin offered! You can offer more or confirm done.');
+    }
+
+    async function confirmMerlinDone() {
+      const prev = roomData.pendingInteraction?.responses?.[myKnight];
+      const offered = prev?.merlinsOffered || 0;
+      await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
+        .set({ done: true, merlinsOffered: offered });
     }
 
     async function passMerlinOffer() {
+      const prev = roomData.pendingInteraction?.responses?.[myKnight];
+      const prevOffered = prev?.merlinsOffered || 0;
+      // If they offered some, return those Merlins first
+      if (prevOffered > 0) {
+        // Decrement totalMerlins
+        await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/totalMerlins')
+          .transaction(current => Math.max(0, (current || 0) - prevOffered));
+        // Return Merlin cards to hand
+        for (let i = 0; i < prevOffered; i++) {
+          myHand.push({ id: 'merlin_undo_' + Date.now() + '_' + i, type: 'special', name: 'Merlin' });
+        }
+        await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
+        renderHand();
+      }
       await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
         .set({ done: true, merlinsOffered: 0 });
     }
@@ -3320,19 +3444,36 @@
       const total = interaction.totalMerlins || 0;
       const turnOrder = roomData?.turnOrder || [];
       const aliveKnights = turnOrder.filter(kid => cachedPlayers[kid]?.alive !== false);
-      const responsesCount = Object.keys(interaction.responses || {}).length;
+      const responses = interaction.responses || {};
+      const allDone = aliveKnights.every(kid => responses[kid]?.done);
 
-      if (total >= 3) {
-        // Cancelled!
+      if (!allDone) return;
+
+      if (total === 3) {
+        // Exactly 3 — cancelled!
         await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set(null);
         await fbDb.ref('games/' + currentRoom + '/meta/revealedBlackCard').set(null);
         await addLog('info', interaction.card.name + ' was cancelled by Merlin!');
         if (await checkGameEnd()) return;
         await advanceToHeroicPhase();
-      } else if (responsesCount >= aliveKnights.length) {
-        // All responded, not enough Merlins — return offered Merlins and apply effect
+      } else if (total > 3) {
+        // More than 3 — drawing player selects which 3 to use
+        // Build contributors list
+        const contributors = {};
+        for (const [kid, resp] of Object.entries(responses)) {
+          if (resp.merlinsOffered > 0) {
+            contributors[kid] = { offered: resp.merlinsOffered, selected: 0 };
+          }
+        }
+        await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/merlinSelection').set({
+          contributors,
+          totalSelected: 0,
+          drawnBy: roomData.currentTurnKnight,
+        });
+      } else {
+        // Less than 3 — not enough, return Merlins and apply effect
         const updates = {};
-        for (const [kid, resp] of Object.entries(interaction.responses || {})) {
+        for (const [kid, resp] of Object.entries(responses)) {
           if (resp.merlinsOffered > 0) {
             for (let i = 0; i < resp.merlinsOffered; i++) {
               updates['games/' + currentRoom + '/drawResults/merlinReturn_' + kid + '_' + i] = {
@@ -3349,8 +3490,100 @@
       }
     }
 
+    function renderMerlinSelectionPanel(interaction) {
+      const overlayVisible = roomData?.revealedBlackCard;
+      const area = overlayVisible ? $('reveal-actions') : $('interaction-area');
+      const sel = interaction.merlinSelection;
+      const isSelector = myKnight === sel.drawnBy;
+
+      let html = '';
+      if (!overlayVisible) html += '<div class="interaction-panel">';
+      html += '<h3 style="color:var(--gold);font-size:1rem;margin-bottom:0.5rem;">Merlin Selection</h3>';
+
+      if (isSelector) {
+        html += '<p style="color:var(--text-dim);font-size:1rem;">More than 3 Merlins offered. Select exactly 3 to use.</p>';
+        const totalSelected = Object.values(sel.contributors).reduce((sum, c) => sum + (c.selected || 0), 0);
+        html += '<p style="font-size:1.25rem;font-weight:700;color:var(--gold);margin:0.5rem 0;">' + totalSelected + ' / 3 selected</p>';
+
+        for (const [kid, contrib] of Object.entries(sel.contributors)) {
+          const p = cachedPlayers[kid];
+          const name = p?.displayName || KNIGHTS[kid]?.name || kid;
+          html += '<div style="display:flex;align-items:center;justify-content:space-between;margin:0.5rem 0;font-size:1rem;">' +
+            '<span>' + name + ' (offered ' + contrib.offered + ')</span>' +
+            '<div>' +
+            '<button class="btn btn-sm merlin-minus" data-kid="' + kid + '" style="min-width:2rem;font-size:1rem;"' +
+              ((contrib.selected || 0) <= 0 ? ' disabled' : '') + '>&minus;</button>' +
+            '<span style="margin:0 0.5rem;font-weight:700;font-size:1rem;">' + (contrib.selected || 0) + '</span>' +
+            '<button class="btn btn-sm merlin-plus" data-kid="' + kid + '" style="min-width:2rem;font-size:1rem;"' +
+              ((contrib.selected || 0) >= contrib.offered || totalSelected >= 3 ? ' disabled' : '') + '>+</button>' +
+            '</div></div>';
+        }
+
+        html += '<button class="btn btn-confirm" id="btn-confirm-merlin-sel" style="margin-top:0.5rem;"' +
+          (totalSelected !== 3 ? ' disabled' : '') + '>Confirm Selection</button>';
+      } else {
+        html += '<p style="color:var(--text-dim);font-size:1rem;">More than 3 Merlins offered. ' +
+          (cachedPlayers[sel.drawnBy]?.displayName || 'Drawing player') + ' is selecting which 3 to use...</p>';
+      }
+
+      if (!overlayVisible) html += '</div>';
+      area.innerHTML = html;
+
+      if (isSelector) {
+        area.querySelectorAll('.merlin-minus').forEach(btn => {
+          btn.addEventListener('click', () => adjustMerlinSelection(btn.dataset.kid, -1));
+        });
+        area.querySelectorAll('.merlin-plus').forEach(btn => {
+          btn.addEventListener('click', () => adjustMerlinSelection(btn.dataset.kid, 1));
+        });
+        const confirmBtn = document.getElementById('btn-confirm-merlin-sel');
+        if (confirmBtn) confirmBtn.addEventListener('click', confirmMerlinSelection);
+      }
+    }
+
+    async function adjustMerlinSelection(kid, delta) {
+      const sel = roomData?.pendingInteraction?.merlinSelection;
+      if (!sel) return;
+      const contrib = sel.contributors[kid];
+      if (!contrib) return;
+      const newVal = Math.max(0, Math.min(contrib.offered, (contrib.selected || 0) + delta));
+      const totalOthers = Object.entries(sel.contributors)
+        .filter(([k]) => k !== kid)
+        .reduce((sum, [, c]) => sum + (c.selected || 0), 0);
+      if (newVal + totalOthers > 3) return;
+      await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/merlinSelection/contributors/' + kid + '/selected').set(newVal);
+    }
+
+    async function confirmMerlinSelection() {
+      const sel = roomData?.pendingInteraction?.merlinSelection;
+      if (!sel) return;
+      const totalSelected = Object.values(sel.contributors).reduce((sum, c) => sum + (c.selected || 0), 0);
+      if (totalSelected !== 3) { showToast('Select exactly 3 Merlins.'); return; }
+
+      // Return unused Merlins to their owners
+      const updates = {};
+      for (const [kid, contrib] of Object.entries(sel.contributors)) {
+        const unused = contrib.offered - (contrib.selected || 0);
+        if (unused > 0) {
+          for (let i = 0; i < unused; i++) {
+            updates['games/' + currentRoom + '/drawResults/merlinReturn_' + kid + '_' + i] = {
+              knightId: kid,
+              cards: [{ id: 'merlin_return_' + Date.now() + '_' + kid + '_' + i, type: 'special', name: 'Merlin' }]
+            };
+          }
+        }
+      }
+      updates['games/' + currentRoom + '/meta/pendingInteraction'] = null;
+      updates['games/' + currentRoom + '/meta/revealedBlackCard'] = null;
+      await fbDb.ref().update(updates);
+      const card = roomData?.pendingInteraction?.card;
+      await addLog('info', (card?.name || 'Special Black card') + ' was cancelled by Merlin!');
+      if (await checkGameEnd()) return;
+      await advanceToHeroicPhase();
+    }
+
     // ═══════════════════════════════════════════════════════════════════
-    //  SECTION 12G: Multi-Player Interactions (Morgan, Vivien)
+    //  SECTION 12G: Multi-Player Interactions (Morgan)
     // ═══════════════════════════════════════════════════════════════════
 
     async function startPendingInteraction(type, card) {
@@ -3377,23 +3610,19 @@
         return;
       }
 
+      if (interaction.type === 'morgan1Volunteer') {
+        renderMorgan1VolunteerPanel(interaction);
+        return;
+      }
+
       if (interaction.type === 'morganDiscard') {
         renderMorganDiscardPanel(interaction);
         return;
       }
 
-      if (interaction.type === 'morganSpecialDiscard') {
-        handleMorganSpecialDiscard(interaction);
-        return;
-      }
 
       if (interaction.type === 'morgan5Choice' || interaction.type === 'morgan5Volunteer') {
         renderMorgan5Panel(interaction);
-        return;
-      }
-
-      if (interaction.type === 'vivienDiscard') {
-        renderVivienDiscardPanel(interaction);
         return;
       }
 
@@ -3409,6 +3638,11 @@
 
       if (interaction.type === 'convocationChoice') {
         renderConvocationChoicePanel(interaction);
+        return;
+      }
+
+      if (interaction.type === 'mordredChoice') {
+        renderMordredChoicePanel(interaction);
         return;
       }
 
@@ -3555,28 +3789,6 @@
       showToast('Card discarded.');
     }
 
-    async function handleMorganSpecialDiscard(interaction) {
-      const area = $('interaction-area');
-      const myResponse = interaction.responses?.[myKnight];
-
-      if (myResponse) {
-        area.innerHTML = '<div class="interaction-panel"><h3>Morgan 2</h3>' +
-          '<p>Special White cards discarded. Waiting for other players...</p></div>';
-        checkInteractionResolution(interaction);
-        return;
-      }
-
-      // Auto-remove all Special White cards from hand
-      const specials = myHand.filter(c => c.type === 'special');
-      if (specials.length > 0) {
-        myHand = myHand.filter(c => c.type !== 'special');
-        await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
-        showToast(specials.length + ' Special White card' + (specials.length > 1 ? 's' : '') + ' discarded.');
-      }
-      await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
-        .set({ done: true });
-    }
-
     function renderMorgan5Panel(interaction) {
       const area = $('interaction-area');
       const myResponse = interaction.responses?.[myKnight];
@@ -3692,6 +3904,145 @@
         '</div>';
     }
 
+    // ── Morgan 1 Volunteer Panel ──────────────────────────────────────
+    function renderMorgan1VolunteerPanel(interaction) {
+      const area = $('interaction-area');
+      const myResponse = interaction.responses?.[myKnight];
+      const responses = interaction.responses || {};
+
+      // Check if someone already volunteered
+      const volunteer = Object.entries(responses).find(([k, v]) => v.volunteered);
+      if (volunteer) {
+        area.innerHTML = '<div class="interaction-panel"><h3>Morgan 1</h3>' +
+          '<p>' + getKnightDisplayName(volunteer[0]) + ' volunteered to discard 3 cards!</p></div>';
+        checkMorgan1VolunteerResolution(interaction);
+        return;
+      }
+
+      const myPlayer = cachedPlayers[myKnight];
+      if (!myPlayer || myPlayer.alive === false || myPlayer.isRevealed) {
+        area.innerHTML = '<div class="interaction-panel"><h3>Morgan 1</h3>' +
+          '<p>Waiting for knights to decide...</p></div>';
+        checkMorgan1VolunteerResolution(interaction);
+        return;
+      }
+
+      if (myResponse) {
+        area.innerHTML = '<div class="interaction-panel"><h3>Morgan 1</h3>' +
+          '<p>You declined. Waiting for other knights...</p></div>';
+        checkMorgan1VolunteerResolution(interaction);
+        return;
+      }
+
+      const canVolunteer = myHand.length >= 3;
+      area.innerHTML = '<div class="interaction-panel"><h3>Morgan 1</h3>' +
+        '<p>Any knight may volunteer to discard 3 White cards. Otherwise, each knight discards 1.</p>' +
+        '<button class="btn btn-danger" id="btn-m1-volunteer"' + (canVolunteer ? '' : ' disabled') + '>Volunteer (Discard 3)</button>' +
+        '<button class="btn btn-heroic" id="btn-m1-decline" style="margin-top:0.5rem;">Decline</button></div>';
+
+      if (canVolunteer) {
+        document.getElementById('btn-m1-volunteer').addEventListener('click', () => {
+          discardMode = 'morgan1volunteer'; discardCount = 3; selectedCardId = null; renderMorgan1DiscardUI();
+        });
+      }
+      document.getElementById('btn-m1-decline').addEventListener('click', async () => {
+        await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight).set({ declined: true, done: true });
+      });
+    }
+
+    function renderMorgan1DiscardUI() {
+      const area = $('interaction-area');
+      area.innerHTML = '<div class="interaction-panel"><h3>Morgan 1 — Volunteer</h3>' +
+        '<p>Select ' + discardCount + ' more card' + (discardCount > 1 ? 's' : '') + ' to discard</p>' +
+        '</div>';
+    }
+
+    async function checkMorgan1VolunteerResolution(interaction) {
+      if (!isMyTurn()) return;
+      const responses = interaction.responses || {};
+      const turnOrder = roomData?.turnOrder || [];
+      const aliveKnights = turnOrder.filter(kid => {
+        const p = cachedPlayers[kid];
+        return p && p.alive !== false && !p.isRevealed;
+      });
+
+      // If someone volunteered, resolve immediately
+      const volunteer = Object.entries(responses).find(([k, v]) => v.volunteered);
+      if (volunteer) {
+        await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set(null);
+        if (await checkGameEnd()) return;
+        await advanceToHeroicPhase();
+        return;
+      }
+
+      // Check if all alive knights have responded
+      const allResponded = aliveKnights.every(kid => responses[kid]);
+      if (!allResponded) return;
+
+      // All declined — fall back to everyone discards 1
+      await addLog('evil', 'No one volunteered for Morgan 1 — all knights must discard 1 White card!');
+      await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set({
+        type: 'morganDiscard', card: { name: 'Morgan 1 (all discard)' },
+        responses: {}, resolved: false,
+      });
+    }
+
+    // ── Mordred Choice Panel ──────────────────────────────────────────
+    function renderMordredChoicePanel(interaction) {
+      const area = $('interaction-area');
+      const drawnBy = interaction.drawnBy;
+
+      if (myKnight !== drawnBy) {
+        area.innerHTML = '<div class="interaction-panel"><h3>Mordred</h3>' +
+          '<p>Waiting for ' + getKnightDisplayName(drawnBy) + ' to choose a war...</p></div>';
+        return;
+      }
+
+      area.innerHTML = '<div class="interaction-panel"><h3>Mordred</h3>' +
+        '<p>Choose which war Mordred attaches to (adds 1 warrior + requires extra Fight 5 to win):</p>' +
+        '<button class="btn btn-evil" id="btn-mordred-saxon">Saxon War</button>' +
+        '<button class="btn btn-evil" id="btn-mordred-pict" style="margin-top:0.5rem;">Pict War</button></div>';
+      document.getElementById('btn-mordred-saxon').addEventListener('click', () => resolveMordredChoice('saxonWar'));
+      document.getElementById('btn-mordred-pict').addEventListener('click', () => resolveMordredChoice('pictWar'));
+    }
+
+    async function resolveMordredChoice(questKey) {
+      const warName = questKey === 'saxonWar' ? 'Saxon War' : 'Pict War';
+      const quest = cachedQuests?.[questKey];
+      const newWarriors = (quest?.warriors || 0) + 1;
+      const updates = {};
+      updates['games/' + currentRoom + '/meta/persistentEffects/mordred'] = questKey;
+      updates['games/' + currentRoom + '/meta/pendingInteraction'] = null;
+      updates['games/' + currentRoom + '/quests/' + questKey + '/warriors'] = newWarriors;
+      await fbDb.ref().update(updates);
+      await addLog('evil', 'Mordred attached to ' + warName + '! 1 warrior added. Extra Fight 5 required to win.');
+
+      // Check if 4th warrior causes quest loss
+      if (newWarriors >= 4) {
+        const swords = cachedBoard?.swords || [];
+        swords.push({ color: 'black', source: questKey });
+        if (roomData?.persistentEffects?.mistOfAvalon) swords.push({ color: 'black', source: 'mistOfAvalon' });
+        const lossUpdates = {};
+        lossUpdates['games/' + currentRoom + '/board/swords'] = swords;
+        const siegeCount = (cachedBoard?.siegeEngines || 0) + 2;
+        lossUpdates['games/' + currentRoom + '/board/siegeEngines'] = siegeCount;
+        const knightsPresent = quest?.knightsPresent || [];
+        for (const kid of knightsPresent) {
+          lossUpdates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.max(0, (cachedPlayers[kid]?.life ?? 4) - 1);
+          lossUpdates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
+        }
+        lossUpdates['games/' + currentRoom + '/quests/' + questKey] = { status: 'active', warriors: 0, fightCards: [], knightsPresent: [] };
+        // Mordred is detached on quest loss
+        lossUpdates['games/' + currentRoom + '/meta/persistentEffects/mordred'] = null;
+        await fbDb.ref().update(lossUpdates);
+        await addLog('quest', warName + ' LOST! 4th warrior placed. 1 Black Sword + 2 Siege Engines.');
+        await applyHeroismSword(questKey, 'black');
+      }
+
+      if (await checkGameEnd()) return;
+      await advanceToHeroicPhase();
+    }
+
     // ── Convocation Choice Panel ──────────────────────────────────────
     function renderConvocationChoicePanel(interaction) {
       const area = $('interaction-area');
@@ -3767,53 +4118,6 @@
       }
       await addLog('info', returners.length + ' knight(s) returned to Camelot via Convocation, ' + returners.length + ' cards distributed');
       await completeSWAction();
-    }
-
-    function renderVivienDiscardPanel(interaction) {
-      const area = $('interaction-area');
-      const myResponse = interaction.responses?.[myKnight];
-
-      if (myResponse) {
-        area.innerHTML = '<div class="interaction-panel"><h3>Vivien</h3>' +
-          '<p>Hand adjusted. Waiting for other players...</p></div>';
-        checkInteractionResolution(interaction);
-        return;
-      }
-
-      if (myHand.length <= 10) {
-        // Auto-respond
-        fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight).set({ done: true });
-        return;
-      }
-
-      const excess = myHand.length - 10;
-      discardMode = 'vivien';
-      discardCount = excess;
-      area.innerHTML = '<div class="interaction-panel"><h3>Vivien</h3>' +
-        '<p>Hand limit is now 10. Discard ' + excess + ' card' + (excess > 1 ? 's' : '') + '.</p>' +
-        (selectedCardId
-          ? '<button class="btn btn-danger" id="btn-vivien-discard">Discard Selected Card</button>'
-          : '<p style="color:var(--text-dim);font-size:0.875rem;">Tap a card to select it</p>') +
-        '</div>';
-
-      const btn = document.getElementById('btn-vivien-discard');
-      if (btn) btn.addEventListener('click', confirmVivienDiscard);
-    }
-
-    async function confirmVivienDiscard() {
-      if (!selectedCardId) return;
-      myHand = myHand.filter(c => c.id !== selectedCardId);
-      selectedCardId = null;
-      discardCount--;
-      await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
-
-      if (discardCount <= 0 || myHand.length <= 10) {
-        discardMode = null;
-        discardCount = 0;
-        await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight).set({ done: true });
-        showToast('Hand adjusted to limit.');
-      }
-      renderHand();
     }
 
     async function checkInteractionResolution(interaction) {
@@ -3996,6 +4300,16 @@
     }
 
     async function advanceToHeroicPhase() {
+      // Morgan 2: if more black cards remain to draw, draw next one instead of advancing
+      const m2 = roomData?.morgan2Remaining || 0;
+      if (m2 > 0 && isMyTurn()) {
+        await fbDb.ref('games/' + currentRoom + '/meta/morgan2Remaining').set(m2 - 1);
+        const cardNum = 4 - m2;
+        await addLog('evil', 'Morgan 2: Drawing black card ' + cardNum + ' of 3...');
+        await triggerMorgan2Draw();
+        return;
+      }
+
       // Revealed traitor has no heroic phase — advance turn instead
       const currentKnightData = cachedPlayers?.[roomData?.currentTurnKnight];
       if (currentKnightData?.isRevealed) {
@@ -4008,6 +4322,7 @@
       updates['games/' + currentRoom + '/meta/revealedBlackCard'] = null;
       updates['games/' + currentRoom + '/meta/pendingInteraction'] = null;
       updates['games/' + currentRoom + '/meta/evilActionTaken'] = false;
+      updates['games/' + currentRoom + '/meta/morgan2Remaining'] = null;
       await fbDb.ref().update(updates);
     }
 
@@ -4136,6 +4451,7 @@
       updates['games/' + currentRoom + '/meta/arthurExchange'] = null;
       updates['games/' + currentRoom + '/meta/galahadPowerUsed'] = null;
       updates['games/' + currentRoom + '/meta/traitorPhase'] = null;
+      updates['games/' + currentRoom + '/meta/morgan2Remaining'] = null;
       updates['games/' + currentRoom + '/meta/clairvoyance'] = null;
       await fbDb.ref().update(updates);
 
@@ -4179,7 +4495,7 @@
       return LOCATION_LABELS[loc] || loc;
     }
 
-    function getHandLimit() { return roomData?.persistentEffects?.vivien ? 10 : 12; }
+    function getHandLimit() { return 12; }
 
     function isSoloQuest(qk) { return qk === 'blackKnight' || qk === 'lancelot'; }
 
@@ -4252,7 +4568,6 @@
       const locLabel = getLocationLabel(loc);
       const handLimit = getHandLimit();
       const atLimit = myHand.length >= handLimit;
-      const mistActive = roomData?.persistentEffects?.mistOfAvalon;
       const hasSpecialWhite = myHand.some(c => c.type === 'special' && c.name !== 'Merlin');
       const siegeEngines = cachedBoard?.siegeEngines || 0;
 
@@ -4287,7 +4602,7 @@
       const moveBlocked = lastHeroicAction === 'move';
       html += '<button class="btn btn-heroic" id="btn-move"' + (moveBlocked ? ' disabled' : '') + '>Move to a Quest</button>';
 
-      if (hasSpecialWhite && !mistActive && !roomData.specialWhitePlayed) {
+      if (hasSpecialWhite && !roomData.specialWhitePlayed) {
         const swBlocked = lastHeroicAction === 'specialWhite';
         html += '<button class="btn btn-heroic" id="btn-special-white"' + (swBlocked ? ' disabled' : '') + '>Play Special White Card</button>';
       }
@@ -4339,10 +4654,9 @@
 
     function renderKnightPowerButtons() {
       let html = '';
-      const mistActive = roomData?.persistentEffects?.mistOfAvalon;
       // Galahad: free Special White
       if (myKnight === 'galahad' && !roomData.galahadPowerUsed) {
-        const hasGalahadSW = myHand.some(c => c.type === 'special') && !mistActive;
+        const hasGalahadSW = myHand.some(c => c.type === 'special');
         if (hasGalahadSW) {
           html += '<button class="btn btn-heroic" id="btn-galahad-sw" style="border-color:var(--gold);">Galahad: Free Special White</button>';
         }
@@ -4616,12 +4930,14 @@
     }
 
     function getQuestActionLabel(loc) {
-      if (loc === 'holyGrail') return 'Play Grail Card';
+      if (loc === 'holyGrail') return roomData?.persistentEffects?.darkForest ? 'Grail Cards Blocked (Dark Forest)' : 'Play Grail Card';
       if (loc === 'excalibur') return 'Discard Card for Excalibur';
       if (loc === 'saxonWar' || loc === 'pictWar') {
         const q = cachedQuests?.[loc];
-        const next = (q?.fightCards || []).length + 1;
-        return 'Play Fight ' + next + ' Card';
+        const mordredAttached = roomData?.persistentEffects?.mordred === loc;
+        const fightCount = (q?.fightCards || []).length;
+        const next = (fightCount >= 5 && mordredAttached) ? 5 : fightCount + 1;
+        return 'Play Fight ' + next + ' Card' + (fightCount >= 5 && mordredAttached ? ' (Mordred)' : '');
       }
       return 'Play Fight Card';
     }
@@ -4629,10 +4945,12 @@
     function canPlayCardOnQuest(loc) {
       const q = cachedQuests?.[loc];
       if (!q || q.status !== 'active') return false;
-      if (loc === 'holyGrail') return myHand.some(c => c.type === 'grail');
+      if (loc === 'holyGrail') return !roomData?.persistentEffects?.darkForest && myHand.some(c => c.type === 'grail');
       if (loc === 'excalibur') return myHand.length > 0;
       if (loc === 'saxonWar' || loc === 'pictWar') {
-        const next = (q.fightCards || []).length + 1;
+        const mordredAttached = roomData?.persistentEffects?.mordred === loc;
+        const fightCount = (q.fightCards || []).length;
+        const next = (fightCount >= 5 && mordredAttached) ? 5 : fightCount + 1;
         return myHand.some(c => c.type === 'fight' && c.value === next);
       }
       // Combat quests
@@ -4769,7 +5087,6 @@
       if (myHand.length >= handLimit) { showToast('Hand is full!'); return; }
 
       let count = myKnight === 'gawain' ? 3 : 2;
-      if (roomData?.persistentEffects?.darkForest) count = Math.max(1, count - 1);
       // Cap so we don't exceed hand limit
       count = Math.min(count, handLimit - myHand.length);
 
@@ -4834,10 +5151,12 @@
     function validateCardForQuest(card, questKey) {
       const q = cachedQuests?.[questKey];
       if (!q || q.status !== 'active') return false;
-      if (questKey === 'holyGrail') return card.type === 'grail';
+      if (questKey === 'holyGrail') return card.type === 'grail' && !roomData?.persistentEffects?.darkForest;
       if (questKey === 'excalibur') return true; // Any white card
       if (questKey === 'saxonWar' || questKey === 'pictWar') {
-        const next = (q.fightCards || []).length + 1;
+        const mordredAttached = roomData?.persistentEffects?.mordred === questKey;
+        const fightCount = (q.fightCards || []).length;
+        const next = (fightCount >= 5 && mordredAttached) ? 5 : fightCount + 1;
         return card.type === 'fight' && card.value === next;
       }
       if (questKey === 'blackKnight') return card.type === 'fight' && (q.whiteCards || []).length < 4;
@@ -4910,7 +5229,9 @@
         await fbDb.ref().update(updates);
         await addLog('quest', getKnightDisplayName(myKnight) + ' played Fight ' + card.value + ' on ' + getLocationLabel(loc));
         renderHand();
-        if (fightCards.length >= 5) {
+        const mordredAttached = roomData?.persistentEffects?.mordred === loc;
+        const winThreshold = mordredAttached ? 6 : 5;
+        if (fightCards.length >= winThreshold) {
           await resolveQuestVictory(loc);
         }
         await completeHeroicAction('questAction');
@@ -5131,6 +5452,11 @@
           }
           await addLog('quest', "Dragon's Quest LOST! 2 Black Swords, -2 LP.");
         }
+        // Mist of Avalon: extra black sword on any quest loss
+        if (roomData?.persistentEffects?.mistOfAvalon) {
+          await addSword('black', 'mistOfAvalon');
+          await addLog('evil', 'Mist of Avalon: extra Black Sword from quest loss!');
+        }
       }
 
       // Return knights to Round Table
@@ -5155,6 +5481,8 @@
         }
       }
 
+      // Clear effects that end on quest victory
+      if (winner === 'white') await clearQuestVictoryEffects(questKey);
       // Heroism extra sword
       await applyHeroismSword(questKey, winner === 'white' ? 'white' : 'black');
 
@@ -5164,6 +5492,25 @@
       await fbDb.ref().update(updates);
       if (await checkGameEnd()) return;
       if (wasFromEvil) await advanceToHeroicPhase();
+    }
+
+    async function clearQuestVictoryEffects(questKey) {
+      const pe = roomData?.persistentEffects;
+      if (!pe) return;
+      const updates = {};
+      if (pe.darkForest) {
+        updates['games/' + currentRoom + '/meta/persistentEffects/darkForest'] = false;
+        await addLog('system', 'Dark Forest lifted — Grail cards may be played again.');
+      }
+      if (pe.vivien) {
+        updates['games/' + currentRoom + '/meta/persistentEffects/vivien'] = false;
+        await addLog('system', 'Vivien effect lifted — Merlin cards may be played again.');
+      }
+      if (pe.mordred && pe.mordred === questKey) {
+        updates['games/' + currentRoom + '/meta/persistentEffects/mordred'] = null;
+        await addLog('system', 'Mordred detached from ' + getLocationLabel(questKey) + '.');
+      }
+      if (Object.keys(updates).length > 0) await fbDb.ref().update(updates);
     }
 
     async function addSword(color, source) {
@@ -5235,6 +5582,8 @@
         await addLog('quest', warName + ' WON! 1 White Sword, +1 LP each, 4 cards drawn.');
       }
 
+      // Clear effects that end on quest victory
+      await clearQuestVictoryEffects(questKey);
       // Heroism extra sword
       await applyHeroismSword(questKey, 'white');
       await checkGameEnd();
@@ -5568,6 +5917,13 @@
     async function performSpecialWhitePlay(cardId) {
       const card = myHand.find(c => c.id === cardId);
       if (!card || card.type !== 'special') return;
+
+      // Vivien blocks Merlin heroic plays
+      if (card.name === 'Merlin' && roomData?.persistentEffects?.vivien) {
+        showToast('Merlin cards cannot be played while Vivien is active.');
+        heroicMode = null; selectedCardId = null; renderHand(); renderTurnActions();
+        return;
+      }
 
       const isGalahadFree = heroicMode === 'galahadFreeSpecial';
       heroicSubState = { galahadFree: isGalahadFree };
