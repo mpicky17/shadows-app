@@ -68,7 +68,7 @@ Each Knight starts with 4 Life Points (max 6, dead at 0).
 | King Arthur | Son of Uther Pendragon | Once per turn, exchange 1 White card face-down with another Knight (regardless of location). Recipient must return 1 card. Both exchanges face-down, unknown to other players. | Heroic Action phase (before, after, or between actions) |
 | Sir Galahad | Son of Lancelot | Once per turn, play 1 Special White card for free (must still take a different mandatory Heroic Action — cannot play a 2nd Special White as that mandatory action). | Heroic Action phase |
 | Sir Gawain | Son of King Lot | When drawing White cards at the Round Table, draw 3 instead of 2. Still subject to 12-card hand limit. | During Round Table draw action |
-| Sir Kay | Seneschal of King Arthur | When on a Quest where Combat ends, may play 1 additional White Fight card after the Black cards have been revealed. | At combat quest resolution |
+| Sir Kay | Seneschal of King Arthur | When on a Quest where Combat ends, or when fighting a Siege Engine, may play 1 additional White Fight card after the Black cards/die have been revealed. | At combat quest resolution and siege engine fights |
 | Sir Palamedes | Saracen Knight | For each victorious Quest he is on when it ends, gains 1 additional Life point (beyond quest victory spoils). Max 6 LP. | At quest victory |
 | Sir Percival | Son of Pellinore | During Progression of Evil, may peek at the top Black card before deciding whether to draw it or select another Evil Action. | Progression of Evil phase |
 | Sir Tristan | of Lyonesse | Departing from the Round Table is a free Move (doesn't cost his Heroic Action). Gets another Heroic Action to perform. | Heroic Action phase, when at Round Table |
@@ -399,7 +399,7 @@ Applied immediately when drawn. Can be cancelled by 3 Merlin cards played collec
 | Morgan 2 | x1 | Each Knight must discard all Special White cards from their hand. |
 | Morgan 3 | x1 | Add 1 Siege Engine to Camelot. |
 | Morgan 4 | x1 | Each Knight loses 1 Life point. |
-| Morgan 5 | x1 | The drawing Knight loses 2 Life points or discards 3 White cards. |
+| Morgan 5 | x1 | Any Knight may volunteer to lose 2 Life points. If nobody volunteers, ALL Knights discard 1 White card each (if they have at least one). |
 | Desolation | x2 | Place on Holy Grail quest (same as Despair but Special — cannot be countered by quest action, only by 3 Merlins). |
 | Dark Forest | x1 | Remains in play for rest of game. From now on, when any player draws White cards at the Round Table, draw 1 fewer card (minimum 1). |
 | Guinevere | x1 | Remains in play for rest of game. If there are 7+ Black cards on any single quest, that quest is immediately lost. |
