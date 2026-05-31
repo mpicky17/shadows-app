@@ -732,7 +732,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v19';
+    const APP_VERSION = 'shadows-v20';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1644,6 +1644,17 @@
           renderGamePlayers();
           onRevealedBlackCardChanged();
           renderPendingInteraction();
+          // Host: catch up on any draw requests missed while backgrounded
+          if (isHost) {
+            fbDb.ref('games/' + currentRoom + '/drawRequests').once('value', snap => {
+              if (!snap.exists()) return;
+              snap.forEach(child => {
+                drawRequestQueue = drawRequestQueue
+                  .then(() => processDrawRequest(child.val(), child.key))
+                  .catch(e => console.error('Catch-up draw request error:', e));
+              });
+            });
+          }
         }
       });
 
@@ -1963,6 +1974,10 @@
     }
 
     async function processDrawRequest(request, requestId) {
+      // Idempotency: skip if already processed (removed from Firebase)
+      const reqCheck = await fbDb.ref('games/' + currentRoom + '/drawRequests/' + requestId).once('value');
+      if (!reqCheck.exists()) return;
+
       const { knightId, deckType, count } = request;
       const deckPath = 'private/' + currentRoom + '/' + myKnight + '/hostDecks/';
 
@@ -6033,10 +6048,11 @@
 
     async function completeSWAction() {
       if (heroicSubState.galahadFree) {
-        await fbDb.ref('games/' + currentRoom + '/meta/galahadPowerUsed').set(true);
+        // Reset local state BEFORE Firebase write so meta listener re-render sees correct state
         heroicMode = null;
         heroicSubState = {};
         selectedCardId = null;
+        await fbDb.ref('games/' + currentRoom + '/meta/galahadPowerUsed').set(true);
         renderHand();
         renderTurnActions();
       } else {
