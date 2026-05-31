@@ -733,7 +733,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v23';
+    const APP_VERSION = 'shadows-v24';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -4675,7 +4675,10 @@
       if (heroicMode === 'merlinWar') { renderMerlinWarUI(area); return; }
       if (heroicMode === 'kayExtra') { return; } // Handled by combat overlay
       if (heroicMode === 'galahadFreeSpecial') { renderSpecialWhiteUI(area); return; }
-      if (heroicMode === 'arthurExchange') { renderArthurExchangeUI(area); return; }
+      if (heroicMode === 'arthurExchange') {
+        if (!roomData.arthurExchange) { heroicMode = null; heroicSubState = {}; }
+        else { renderArthurExchangeUI(area); return; }
+      }
       if (heroicMode === 'heroismQuest') { renderHeroismQuestUI(area); return; }
       if (heroicMode === 'clairvoyanceReorder') { renderClairvoyanceUI(area); return; }
       if (heroicMode === 'accuse') { renderAccuseUI(area); return; }
