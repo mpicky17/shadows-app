@@ -733,7 +733,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v24';
+    const APP_VERSION = 'shadows-v25';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1642,6 +1642,7 @@
       // Re-render UI when tab regains focus (Firebase updates may arrive while backgrounded)
       document.addEventListener('visibilitychange', () => {
         if (!document.hidden && inGameScreen && roomData) {
+          console.log('[SOC] tab refocused', { isHost, myKnight });
           renderGamePlayers();
           onRevealedBlackCardChanged();
           renderPendingInteraction();
@@ -1981,6 +1982,7 @@
       if (!reqCheck.exists()) return;
 
       const { knightId, deckType, count } = request;
+      console.log('[SOC] processDrawRequest', { requestId, knightId, deckType, count });
       const deckPath = 'private/' + currentRoom + '/' + myKnight + '/hostDecks/';
 
       // Percival peek: read top black card without removing
@@ -2209,6 +2211,7 @@
 
         // Add cards to my hand
         const newCards = result.cards || [];
+        console.log('[SOC] drawResult received', { knightId: result.knightId, cardCount: newCards.length, newHandSize: myHand.length + newCards.length });
         myHand = [...myHand, ...newCards];
 
         // Write updated hand to my private path & remove the result
@@ -2433,6 +2436,7 @@
       // Arthur exchange in progress — show return-card UI for target, waiting for others
       if (roomData.arthurExchange) { renderArthurExchangeWaiting(area); return; }
 
+      console.log('[SOC] renderTurnActions', { turn: roomData.currentTurnKnight, phase: roomData.turnPhase, isMyTurn: isMyTurn(), heroicMode, heroicActionTaken: roomData.heroicActionTaken, sacrificeUsed: roomData.sacrificeUsed, arthurPowerUsed: roomData.arthurPowerUsed });
       const currentName = getKnightDisplayName(roomData.currentTurnKnight);
 
       // Revealed traitor has special turn structure
@@ -4651,6 +4655,7 @@
     }
 
     async function completeHeroicAction(actionType) {
+      console.log('[SOC] completeHeroicAction', { actionType });
       lastHeroicAction = actionType;
       heroicMode = null;
       heroicSubState = {};
@@ -4662,6 +4667,7 @@
     function renderHeroicMenu() {
       const area = $('turn-action-area');
       const loc = getMyLocation();
+      console.log('[SOC] renderHeroicMenu', { heroicMode, heroicSubState, loc, heroicActionTaken: roomData.heroicActionTaken, arthurPowerUsed: roomData.arthurPowerUsed });
 
       // If in a sub-mode, delegate to that renderer
       if (heroicMode === 'move') { renderMoveSelector(area); return; }
@@ -4676,7 +4682,7 @@
       if (heroicMode === 'kayExtra') { return; } // Handled by combat overlay
       if (heroicMode === 'galahadFreeSpecial') { renderSpecialWhiteUI(area); return; }
       if (heroicMode === 'arthurExchange') {
-        if (!roomData.arthurExchange) { heroicMode = null; heroicSubState = {}; }
+        if (roomData.arthurPowerUsed) { heroicMode = null; heroicSubState = {}; }
         else { renderArthurExchangeUI(area); return; }
       }
       if (heroicMode === 'heroismQuest') { renderHeroismQuestUI(area); return; }
@@ -4791,6 +4797,7 @@
 
     function renderKnightPowerButtons() {
       let html = '';
+      console.log('[SOC] renderKnightPowerButtons', { myKnight, arthurPowerUsed: roomData.arthurPowerUsed, galahadPowerUsed: roomData.galahadPowerUsed, handLength: myHand.length, location: getMyLocation() });
       // Galahad: free Special White
       if (myKnight === 'galahad' && !roomData.galahadPowerUsed) {
         const hasGalahadSW = myHand.some(c => c.type === 'special');
@@ -4830,6 +4837,7 @@
         heroicMode = 'move';
         renderTurnActions();
       });
+      console.log('[SOC] bindKnightPowerListeners', { galahad: !!document.getElementById('btn-galahad-sw'), arthur: !!document.getElementById('btn-arthur-exchange'), tristan: !!document.getElementById('btn-tristan-move') });
     }
 
     // ── Accuse UI ────────────────────────────────────────────────────────
@@ -5031,6 +5039,7 @@
       });
 
       heroicSubState = { step: 'awaitingReturn', toKnight: targetKnight };
+      console.log('[SOC] performArthurSend', { targetKnight, cardId });
       await addLog('info', 'King Arthur exchanged a card with ' + getKnightDisplayName(targetKnight));
       renderHand();
       renderTurnActions();
@@ -5038,6 +5047,7 @@
 
     function renderArthurExchangeWaiting(area) {
       const exchange = roomData.arthurExchange;
+      console.log('[SOC] renderArthurExchangeWaiting', { exchange, isMyTurn: isMyTurn(), myKnight });
       if (!exchange) return;
 
       if (exchange.toKnight === myKnight && exchange.status === 'awaitingReturn') {
@@ -5063,6 +5073,7 @@
           await fbDb.ref('games/' + currentRoom + '/meta').update({
             arthurExchange: null, arthurPowerUsed: true,
           });
+          console.log('[SOC] arthurReturn complete', { returnedCardId: selectedCardId });
           selectedCardId = null;
           renderHand();
         });
@@ -6062,6 +6073,7 @@
     }
 
     async function completeSWAction() {
+      console.log('[SOC] completeSWAction', { galahadFree: heroicSubState.galahadFree });
       if (heroicSubState.galahadFree) {
         // Reset local state BEFORE Firebase write so meta listener re-render sees correct state
         heroicMode = null;
