@@ -368,6 +368,7 @@
     .gp-chip.current-turn { border-color: var(--gold); }
     .gp-chip.me { background: rgba(212,168,67,0.1); }
     .gp-chip.dead { opacity: 0.4; }
+    .gp-chip.traitor-revealed { background: rgba(139,0,0,0.35); border-color: #8B0000; }
     .gp-chip img { width: 24px; height: 24px; }
     .gp-life { color: var(--red-bright); font-weight: 700; font-size: 0.875rem; }
     .gp-relics { display: inline-flex; gap: 2px; margin-left: 4px; }
@@ -733,7 +734,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v31';
+    const APP_VERSION = 'shadows-v32';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1827,7 +1828,9 @@
         } else if (discardMode === 'morgan5' || discardMode === 'fateDiscard') {
           // Auto-discard on tap
           if (selectedCardId) {
+            const discardedCard = myHand.find(c => c.id === selectedCardId);
             myHand = myHand.filter(c => c.id !== selectedCardId);
+            if (discardedCard) requestWhiteDiscard([discardedCard]);
             selectedCardId = null;
             discardCount--;
             fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
@@ -1847,7 +1850,9 @@
         } else if (discardMode === 'morgan1volunteer') {
           // Auto-discard on tap for Morgan 1 volunteer (3 cards)
           if (selectedCardId) {
+            const discardedCard = myHand.find(c => c.id === selectedCardId);
             myHand = myHand.filter(c => c.id !== selectedCardId);
+            if (discardedCard) requestWhiteDiscard([discardedCard]);
             selectedCardId = null;
             discardCount--;
             fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
@@ -1954,6 +1959,7 @@
         if (isCurrent) cls += ' current-turn';
         if (isMe) cls += ' me';
         if (!p.alive) cls += ' dead';
+        if (p.isRevealed) cls += ' traitor-revealed';
         let relicHtml = '';
         if (p.relics?.excalibur) relicHtml += '<img src="assets/excalibur.svg" class="gp-relic" title="Excalibur">';
         if (p.relics?.holyGrail) relicHtml += '<img src="assets/holy-grail.svg" class="gp-relic" title="Holy Grail">';
@@ -1962,7 +1968,7 @@
         return '<div class="' + cls + '">' +
           '<img src="' + knight.icon + '" alt="">' +
           '<span>' + p.displayName + '</span>' + hostTag +
-          '<span class="gp-life">' + '\u2665'.repeat(Math.max(0, p.life)) + '</span>' +
+          (p.isRevealed ? '' : '<span class="gp-life">' + '\u2665'.repeat(Math.max(0, p.life)) + '</span>') +
           (relicHtml ? '<span class="gp-relics">' + relicHtml + '</span>' : '') +
           '<span class="gp-loc">' + getLocationLabel(p.location || 'roundTable') + '</span>' +
           '</div>';
@@ -1999,6 +2005,29 @@
       });
     }
 
+    async function reshuffleDecksIfNeeded(deckPath) {
+      const whiteDiscSnap = await fbDb.ref(deckPath + 'whiteDiscard').once('value');
+      const blackDiscSnap = await fbDb.ref(deckPath + 'blackDiscard').once('value');
+      let whiteDisc = whiteDiscSnap.val() || [];
+      let blackDisc = blackDiscSnap.val() || [];
+      if (whiteDisc.length === 0 && blackDisc.length === 0) {
+        await addLog('system', 'Warning: All card piles are empty — cannot draw!');
+        return false;
+      }
+      shuffle(whiteDisc);
+      shuffle(blackDisc);
+      const reshuffleUpdates = {};
+      reshuffleUpdates[deckPath + 'whiteDraw'] = whiteDisc;
+      reshuffleUpdates[deckPath + 'blackDraw'] = blackDisc;
+      reshuffleUpdates[deckPath + 'whiteDiscard'] = [];
+      reshuffleUpdates[deckPath + 'blackDiscard'] = [];
+      reshuffleUpdates['games/' + currentRoom + '/decks/whiteDrawCount'] = whiteDisc.length;
+      reshuffleUpdates['games/' + currentRoom + '/decks/blackDrawCount'] = blackDisc.length;
+      await fbDb.ref().update(reshuffleUpdates);
+      await addLog('system', 'Draw piles reshuffled from discard piles.');
+      return true;
+    }
+
     async function processDrawRequest(request, requestId) {
       // Idempotency: skip if already processed (removed from Firebase)
       const reqCheck = await fbDb.ref('games/' + currentRoom + '/drawRequests/' + requestId).once('value');
@@ -2029,6 +2058,15 @@
       if (deckType === 'armorReveal') {
         const deckSnap = await fbDb.ref(deckPath + 'blackDraw').once('value');
         const drawPile = deckSnap.val() || [];
+        if (drawPile.length === 0) {
+          const reshuffled = await reshuffleDecksIfNeeded(deckPath);
+          if (!reshuffled) {
+            await fbDb.ref('games/' + currentRoom + '/drawRequests/' + requestId).remove();
+            return;
+          }
+          await processDrawRequest(request, requestId);
+          return;
+        }
         const card1 = drawPile.pop();
         const card2 = drawPile.length > 0 ? drawPile.pop() : null;
         const cards = card2 ? [card1, card2] : [card1];
@@ -2070,8 +2108,12 @@
         const deckSnap = await fbDb.ref(deckPath + 'blackDraw').once('value');
         const drawPile = deckSnap.val() || [];
         if (drawPile.length === 0) {
-          console.warn('Black draw pile empty');
-          await fbDb.ref('games/' + currentRoom + '/drawRequests/' + requestId).remove();
+          const reshuffled = await reshuffleDecksIfNeeded(deckPath);
+          if (!reshuffled) {
+            await fbDb.ref('games/' + currentRoom + '/drawRequests/' + requestId).remove();
+            return;
+          }
+          await processDrawRequest(request, requestId);
           return;
         }
         const card = drawPile.pop();
@@ -2152,6 +2194,19 @@
         return;
       }
 
+      // White card discard: add cards to whiteDiscard pile
+      if (deckType === 'discardWhite') {
+        const cardsToDiscard = request.cards || [];
+        if (cardsToDiscard.length > 0) {
+          const discardSnap = await fbDb.ref(deckPath + 'whiteDiscard').once('value');
+          const discard = discardSnap.val() || [];
+          discard.push(...cardsToDiscard);
+          await fbDb.ref(deckPath + 'whiteDiscard').set(discard);
+        }
+        await fbDb.ref('games/' + currentRoom + '/drawRequests/' + requestId).remove();
+        return;
+      }
+
       const drawKey = deckType === 'white' ? 'whiteDraw' : 'blackDraw';
 
       const deckSnap = await fbDb.ref(deckPath + drawKey).once('value');
@@ -2166,6 +2221,7 @@
         if (whiteDisc.length === 0 && blackDisc.length === 0) {
           // Truly empty — nothing to reshuffle
           console.warn('Both discard piles empty, cannot reshuffle for', deckType);
+          await addLog('system', 'Warning: All card piles are empty — cannot draw!');
           await fbDb.ref('games/' + currentRoom + '/drawRequests/' + requestId).remove();
           return;
         }
@@ -2251,6 +2307,22 @@
     async function requestCardDraw(deckType, count) {
       const ref = fbDb.ref('games/' + currentRoom + '/drawRequests').push();
       await ref.set({ knightId: myKnight, deckType, count, timestamp: firebase.database.ServerValue.TIMESTAMP });
+    }
+
+    async function requestWhiteDiscard(cards) {
+      if (!cards || cards.length === 0) return;
+      if (isHost) {
+        const deckPath = 'private/' + currentRoom + '/' + myKnight + '/hostDecks/';
+        const discardSnap = await fbDb.ref(deckPath + 'whiteDiscard').once('value');
+        const discard = discardSnap.val() || [];
+        discard.push(...cards);
+        await fbDb.ref(deckPath + 'whiteDiscard').set(discard);
+      } else {
+        await fbDb.ref('games/' + currentRoom + '/drawRequests').push().set({
+          knightId: myKnight, deckType: 'discardWhite', cards,
+          timestamp: firebase.database.ServerValue.TIMESTAMP,
+        });
+      }
     }
 
     async function distributeCardsAmongKnights(totalCards, knightIds) {
@@ -2621,7 +2693,34 @@
         const drawPile = deckSnap.val() || [];
 
         if (drawPile.length === 0) {
-          showToast('Black draw pile is empty!');
+          const reshuffled = await reshuffleDecksIfNeeded(deckPath);
+          if (!reshuffled) return;
+          // Re-read the deck after reshuffle
+          const freshSnap = await fbDb.ref(deckPath + 'blackDraw').once('value');
+          const freshPile = freshSnap.val() || [];
+          if (freshPile.length === 0) return;
+
+          if (hasArmor && freshPile.length >= 2) {
+            const card1 = freshPile.pop();
+            const card2 = freshPile.pop();
+            const u = {};
+            u[deckPath + 'blackDraw'] = freshPile;
+            u['games/' + currentRoom + '/decks/blackDrawCount'] = freshPile.length;
+            u['games/' + currentRoom + '/meta/armorChoice'] = { cards: [card1, card2], forKnight: myKnight };
+            await fbDb.ref().update(u);
+            return;
+          }
+
+          const freshCard = freshPile.pop();
+          const u = {};
+          u[deckPath + 'blackDraw'] = freshPile;
+          u['games/' + currentRoom + '/decks/blackDrawCount'] = freshPile.length;
+          const dSnap = await fbDb.ref(deckPath + 'blackDiscard').once('value');
+          const d = dSnap.val() || [];
+          d.push(freshCard);
+          u[deckPath + 'blackDiscard'] = d;
+          u['games/' + currentRoom + '/meta/revealedBlackCard'] = { card: freshCard, drawnBy: myKnight, status: 'revealed' };
+          await fbDb.ref().update(u);
           return;
         }
 
@@ -2672,9 +2771,42 @@
         const drawPile = deckSnap.val() || [];
 
         if (drawPile.length === 0) {
-          showToast('Black draw pile is empty!');
-          await fbDb.ref('games/' + currentRoom + '/meta/morgan2Remaining').set(0);
-          await advanceToHeroicPhase();
+          const reshuffled = await reshuffleDecksIfNeeded(deckPath);
+          if (!reshuffled) {
+            await fbDb.ref('games/' + currentRoom + '/meta/morgan2Remaining').set(0);
+            await advanceToHeroicPhase();
+            return;
+          }
+          // Re-read the deck after reshuffle
+          const freshSnap = await fbDb.ref(deckPath + 'blackDraw').once('value');
+          const freshPile = freshSnap.val() || [];
+          if (freshPile.length === 0) {
+            await fbDb.ref('games/' + currentRoom + '/meta/morgan2Remaining').set(0);
+            await advanceToHeroicPhase();
+            return;
+          }
+
+          if (hasArmor && freshPile.length >= 2) {
+            const card1 = freshPile.pop();
+            const card2 = freshPile.pop();
+            const u = {};
+            u[deckPath + 'blackDraw'] = freshPile;
+            u['games/' + currentRoom + '/decks/blackDrawCount'] = freshPile.length;
+            u['games/' + currentRoom + '/meta/armorChoice'] = { cards: [card1, card2], forKnight: myKnight };
+            await fbDb.ref().update(u);
+            return;
+          }
+
+          const freshCard = freshPile.pop();
+          const u = {};
+          u[deckPath + 'blackDraw'] = freshPile;
+          u['games/' + currentRoom + '/decks/blackDrawCount'] = freshPile.length;
+          const dSnap = await fbDb.ref(deckPath + 'blackDiscard').once('value');
+          const d = dSnap.val() || [];
+          d.push(freshCard);
+          u[deckPath + 'blackDiscard'] = d;
+          u['games/' + currentRoom + '/meta/revealedBlackCard'] = { card: freshCard, drawnBy: myKnight, status: 'revealed' };
+          await fbDb.ref().update(u);
           return;
         }
 
@@ -3226,6 +3358,10 @@
           updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
         }
 
+        // Discard fight cards from quest
+        const lostFightCards = quest.fightCards || [];
+        if (lostFightCards.length > 0) await requestWhiteDiscard(lostFightCards.map(fc => ({ ...fc, type: 'fight' })));
+
         // Reset quest for perpetual quests
         updates['games/' + currentRoom + '/quests/' + questKey + '/warriors'] = 0;
         updates['games/' + currentRoom + '/quests/' + questKey + '/fightCards'] = [];
@@ -3307,6 +3443,7 @@
         for (const qk of ['blackKnight', 'lancelot']) {
           const q = cachedQuests?.[qk];
           if (q && q.status === 'active' && (q.whiteCards || []).length > 0) {
+            await requestWhiteDiscard(q.whiteCards);
             updates['games/' + currentRoom + '/quests/' + qk + '/whiteCards'] = [];
             await addLog('quest', getLocationLabel(qk) + ': white cards removed (Guinevere).');
           }
@@ -3535,8 +3672,9 @@
       const merlinCard = myHand.find(c => c.type === 'special' && c.name === 'Merlin');
       if (!merlinCard) { showToast('No Merlin card in hand!'); return; }
 
-      // Remove from hand
+      // Remove from hand and discard
       myHand = myHand.filter(c => c.id !== merlinCard.id);
+      await requestWhiteDiscard([merlinCard]);
       await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
 
       // Increment totalMerlins atomically
@@ -3926,6 +4064,7 @@
       if (!card) return;
 
       myHand = myHand.filter(c => c.id !== selectedCardId);
+      await requestWhiteDiscard([card]);
       selectedCardId = null;
       discardMode = null;
       await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
@@ -4176,6 +4315,9 @@
           lossUpdates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.max(0, (cachedPlayers[kid]?.life ?? 4) - 1);
           lossUpdates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
         }
+        // Discard fight cards from quest before reset
+        const mordredLostFightCards = quest?.fightCards || [];
+        if (mordredLostFightCards.length > 0) await requestWhiteDiscard(mordredLostFightCards.map(fc => ({ ...fc, type: 'fight' })));
         lossUpdates['games/' + currentRoom + '/quests/' + questKey] = { status: 'active', warriors: 0, fightCards: [], knightsPresent: [] };
         // Mordred is detached on quest loss
         lossUpdates['games/' + currentRoom + '/meta/persistentEffects/mordred'] = null;
@@ -4200,7 +4342,8 @@
           traitorStealProcessed = true;
           if (myHand.length > 0) {
             const idx = Math.floor(Math.random() * myHand.length);
-            myHand.splice(idx, 1);
+            const stolenCard = myHand.splice(idx, 1)[0];
+            requestWhiteDiscard([stolenCard]);
             fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
             renderHand();
           }
@@ -4526,8 +4669,10 @@
       await fbDb.ref().update(updates);
       // Discard all white cards
       if (knightId === myKnight) {
+        const discardedHand = [...myHand];
         myHand = [];
         await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set([]);
+        await requestWhiteDiscard(discardedHand);
         renderHand();
       } else if (isHost) {
         // Host clears the traitor's private hand on their behalf
@@ -4569,8 +4714,10 @@
       if (p?.relics?.lancelotArmor) await addLog('system', getKnightDisplayName(knightId) + '\'s Lancelot\'s Armor is lost forever!');
       // Discard hand
       if (knightId === myKnight) {
+        const discardedHand = [...myHand];
         myHand = [];
         await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set([]);
+        await requestWhiteDiscard(discardedHand);
         renderHand();
       }
       // Check if all loyal knights are dead (host only — requires private loyalty data)
@@ -4786,7 +4933,7 @@
       const locLabel = getLocationLabel(loc);
       const handLimit = getHandLimit();
       const atLimit = myHand.length >= handLimit;
-      const hasSpecialWhite = myHand.some(c => c.type === 'special' && c.name !== 'Merlin');
+      const hasSpecialWhite = myHand.some(c => c.type === 'special');
       const siegeEngines = cachedBoard?.siegeEngines || 0;
 
       let html = '<div class="heroic-menu"><h3>Heroic Action</h3>' +
@@ -4833,7 +4980,8 @@
 
       // Accuse
       const totalSwords = (cachedBoard?.swords || []).length;
-      const canAccuse = (siegeEngines >= 6 || totalSwords >= 6) && !cachedPlayers[myKnight]?.hasAccused && lastHeroicAction !== 'accuse';
+      const traitorRevealed = Object.values(cachedPlayers).some(p => p && p.isRevealed);
+      const canAccuse = (siegeEngines >= 6 || totalSwords >= 6) && !cachedPlayers[myKnight]?.hasAccused && lastHeroicAction !== 'accuse' && !traitorRevealed;
       if (canAccuse) {
         html += '<button class="btn btn-evil" id="btn-accuse" style="margin-top:0.25rem;">Accuse a Knight</button>';
       }
@@ -5259,6 +5407,7 @@
         updates['games/' + currentRoom + '/quests/' + currentLoc + '/knightsPresent'] = oldKnights;
         // Solo quest: discard white cards when knight leaves (black cards remain)
         if (isSoloQuest(currentLoc) && (cachedQuests[currentLoc].whiteCards || []).length > 0) {
+          await requestWhiteDiscard(cachedQuests[currentLoc].whiteCards);
           updates['games/' + currentRoom + '/quests/' + currentLoc + '/whiteCards'] = [];
           await addLog('quest', getLocationLabel(currentLoc) + ': white cards removed (knight departed).');
         }
@@ -5295,6 +5444,7 @@
         updates['games/' + currentRoom + '/quests/' + currentLoc + '/knightsPresent'] = oldKnights;
         // Solo quest: discard white cards when knight leaves (black cards remain)
         if (isSoloQuest(currentLoc) && (cachedQuests[currentLoc].whiteCards || []).length > 0) {
+          await requestWhiteDiscard(cachedQuests[currentLoc].whiteCards);
           updates['games/' + currentRoom + '/quests/' + currentLoc + '/whiteCards'] = [];
         }
       }
@@ -5408,8 +5558,9 @@
       const card = myHand.find(c => c.id === cardId);
       if (!card) return;
 
-      // Remove from hand
+      // Remove from hand and discard
       myHand = myHand.filter(c => c.id !== cardId);
+      await requestWhiteDiscard([card]);
       const updates = {};
       updates['private/' + currentRoom + '/' + myKnight + '/hand'] = myHand;
 
@@ -5606,6 +5757,7 @@
       if (!card || card.type !== 'fight') { showToast('Select a Fight card!'); return; }
 
       myHand = myHand.filter(c => c.id !== cardId);
+      await requestWhiteDiscard([card]);
       await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
 
       const res = roomData.combatResolution;
@@ -5698,6 +5850,10 @@
       for (const kid of knightsOnQuest) {
         updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
       }
+
+      // Discard quest cards to pile
+      const questWhiteCards = q.whiteCards || [];
+      if (questWhiteCards.length > 0) await requestWhiteDiscard(questWhiteCards);
 
       // Reset or transition quest
       if (questKey === 'blackKnight') {
@@ -5796,6 +5952,8 @@
           updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
           updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
         }
+        const grailWhiteCards = (q.cards || []).filter(c => c?.type === 'grail');
+        if (grailWhiteCards.length > 0) await requestWhiteDiscard(grailWhiteCards);
         updates['games/' + currentRoom + '/quests/holyGrail/status'] = 'won';
         updates['games/' + currentRoom + '/quests/holyGrail/knightsPresent'] = [];
         await fbDb.ref().update(updates);
@@ -5811,6 +5969,8 @@
           updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
           updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
         }
+        const fightCards = q.fightCards || [];
+        if (fightCards.length > 0) await requestWhiteDiscard(fightCards.map(fc => ({ ...fc, type: 'fight' })));
         updates['games/' + currentRoom + '/quests/' + questKey] = { status: 'active', warriors: 0, fightCards: [], knightsPresent: [] };
         await fbDb.ref().update(updates);
         await distributeCardsAmongKnights(4, knightsOnQuest);
@@ -5923,8 +6083,10 @@
       const roll = Math.floor(Math.random() * 8) + 1;
       const won = totalSum > roll;
 
-      // Remove played cards from hand
+      // Remove played cards from hand and discard
+      const playedCards = myHand.filter(c => cards.includes(c.id));
       myHand = myHand.filter(c => !cards.includes(c.id));
+      await requestWhiteDiscard(playedCards);
       await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
 
       // Store result for display — don't finalize yet (let player see result + Kay prompt)
@@ -5974,6 +6136,7 @@
       if (!card || card.type !== 'fight') { showToast('Select a Fight card!'); return; }
 
       myHand = myHand.filter(c => c.id !== cardId);
+      await requestWhiteDiscard([card]);
       await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
 
       const newSum = heroicSubState.siegeSum + card.value;
@@ -6054,7 +6217,9 @@
       }
       if (count < 3) { showToast('Not enough cards!'); return; }
 
+      const discardedCards = myHand.filter(c => toRemove.includes(c.id));
       myHand = myHand.filter(c => !toRemove.includes(c.id));
+      await requestWhiteDiscard(discardedCards);
       const updates = {};
       updates['private/' + currentRoom + '/' + myKnight + '/hand'] = myHand;
       updates['games/' + currentRoom + '/players/' + myKnight + '/life'] = Math.min(6, life + 1);
@@ -6165,8 +6330,9 @@
       const isGalahadFree = heroicMode === 'galahadFreeSpecial';
       heroicSubState = { galahadFree: isGalahadFree };
 
-      // Remove from hand
+      // Remove from hand and discard
       myHand = myHand.filter(c => c.id !== cardId);
+      await requestWhiteDiscard([card]);
       await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
       await fbDb.ref('games/' + currentRoom + '/meta/specialWhitePlayed').set(true);
       renderHand();
@@ -6479,8 +6645,9 @@
       }
       const cards = heroicSubState.reorderCards;
 
+      const lowDeckMsg = cards.length < 5 ? ' (Showing ' + cards.length + ' of 5 — deck is low)' : '';
       let html = '<div class="quest-play-panel"><h3>Clairvoyance — Top of Black Deck</h3>' +
-        '<p style="color:var(--text-dim);font-size:0.875rem;">Card 1 will be drawn first. Use arrows to reorder.</p>';
+        '<p style="color:var(--text-dim);font-size:0.875rem;">Card 1 will be drawn first. Use arrows to reorder.' + lowDeckMsg + '</p>';
       for (let i = 0; i < cards.length; i++) {
         const c = cards[i];
         const name = getBlackCardDisplayName(c);
