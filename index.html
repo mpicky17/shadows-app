@@ -733,7 +733,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v22';
+    const APP_VERSION = 'shadows-v23';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -4799,6 +4799,10 @@
       if (myKnight === 'arthur' && !roomData.arthurPowerUsed && myHand.length > 0) {
         html += '<button class="btn btn-heroic" id="btn-arthur-exchange" style="border-color:var(--gold);">Arthur: Exchange Card</button>';
       }
+      // Tristan: free move from Round Table
+      if (myKnight === 'tristan' && getMyLocation() === 'roundTable') {
+        html += '<button class="btn btn-heroic" id="btn-tristan-move" style="border-color:var(--gold);">Tristan: Free Move from Round Table</button>';
+      }
       return html;
     }
 
@@ -4816,6 +4820,11 @@
         heroicSubState = { step: 'selectCard' };
         selectedCardId = null;
         renderHand();
+        renderTurnActions();
+      });
+      const tristanBtn = document.getElementById('btn-tristan-move');
+      if (tristanBtn) tristanBtn.addEventListener('click', () => {
+        heroicMode = 'move';
         renderTurnActions();
       });
     }
