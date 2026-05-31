@@ -372,6 +372,7 @@
     .gp-life { color: var(--red-bright); font-weight: 700; font-size: 0.875rem; }
     .gp-relics { display: inline-flex; gap: 2px; margin-left: 4px; }
     .gp-relic { width: 16px; height: 16px; vertical-align: middle; }
+    .gp-host { font-size: 0.625rem; color: var(--gold); border: 1px solid var(--gold); border-radius: 3px; padding: 0 3px; margin-left: 4px; vertical-align: middle; font-weight: 700; }
 
     .quest-grid {
       display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0.5rem;
@@ -732,7 +733,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v20';
+    const APP_VERSION = 'shadows-v21';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1933,9 +1934,10 @@
         if (p.relics?.excalibur) relicHtml += '<img src="assets/excalibur.svg" class="gp-relic" title="Excalibur">';
         if (p.relics?.holyGrail) relicHtml += '<img src="assets/holy-grail.svg" class="gp-relic" title="Holy Grail">';
         if (p.relics?.lancelotArmor) relicHtml += '<img src="assets/lancelot-armor.svg" class="gp-relic" title="Lancelot\'s Armor">';
+        const hostTag = p.uid === roomData.hostUid ? '<span class="gp-host" title="Host (keep this tab active)">HOST</span>' : '';
         return '<div class="' + cls + '">' +
           '<img src="' + knight.icon + '" alt="">' +
-          '<span>' + p.displayName + '</span>' +
+          '<span>' + p.displayName + '</span>' + hostTag +
           '<span class="gp-life">' + '\u2665'.repeat(Math.max(0, p.life)) + '</span>' +
           (relicHtml ? '<span class="gp-relics">' + relicHtml + '</span>' : '') +
           '<span class="gp-loc">' + getLocationLabel(p.location || 'roundTable') + '</span>' +
