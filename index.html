@@ -732,7 +732,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v16';
+    const APP_VERSION = 'shadows-v17';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -2372,6 +2372,8 @@
       if (roomData.revealedBlackCard) { area.innerHTML = ''; return; }
       // Don't show actions if armor choice is pending
       if (roomData.armorChoice) { renderArmorChoiceOverlay(area); return; }
+      // Arthur exchange in progress — show return-card UI for target, waiting for others
+      if (roomData.arthurExchange) { renderArthurExchangeWaiting(area); return; }
 
       const currentName = getKnightDisplayName(roomData.currentTurnKnight);
 
@@ -4619,12 +4621,6 @@
       if (heroicMode === 'heroismQuest') { renderHeroismQuestUI(area); return; }
       if (heroicMode === 'clairvoyanceReorder') { renderClairvoyanceUI(area); return; }
       if (heroicMode === 'accuse') { renderAccuseUI(area); return; }
-
-      // Arthur exchange in progress — show waiting UI for all
-      if (roomData.arthurExchange) {
-        renderArthurExchangeWaiting(area);
-        return;
-      }
 
       // After action taken — show End Turn + optional Sacrifice + power buttons
       if (roomData.heroicActionTaken) {
