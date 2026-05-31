@@ -732,7 +732,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v18';
+    const APP_VERSION = 'shadows-v19';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -819,6 +819,7 @@
     let questsListener = null;
     let decksListener = null;
     let drawRequestListener = null;
+    let drawRequestQueue = Promise.resolve();
     let drawResultListener = null;
     let setupListener = null;
     let cachedBoard = null;
@@ -1637,6 +1638,15 @@
       // All: listen for draw results (cards dealt to me)
       listenForDrawResults();
 
+      // Re-render UI when tab regains focus (Firebase updates may arrive while backgrounded)
+      document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && inGameScreen && roomData) {
+          renderGamePlayers();
+          onRevealedBlackCardChanged();
+          renderPendingInteraction();
+        }
+      });
+
       // Listen to setup selections
       listenToSetupSelections();
 
@@ -1945,8 +1955,10 @@
     function listenForDrawRequests() {
       if (drawRequestListener) return;
       const ref = fbDb.ref('games/' + currentRoom + '/drawRequests');
-      drawRequestListener = ref.on('child_added', async snap => {
-        await processDrawRequest(snap.val(), snap.key);
+      drawRequestListener = ref.on('child_added', snap => {
+        drawRequestQueue = drawRequestQueue
+          .then(() => processDrawRequest(snap.val(), snap.key))
+          .catch(e => console.error('Draw request processing error:', e));
       });
     }
 
@@ -2100,7 +2112,7 @@
       const drawKey = deckType === 'white' ? 'whiteDraw' : 'blackDraw';
 
       const deckSnap = await fbDb.ref(deckPath + drawKey).once('value');
-      const drawPile = deckSnap.val() || [];
+      let drawPile = deckSnap.val() || [];
 
       if (drawPile.length === 0) {
         // Per rules: when either draw pile runs out, reshuffle BOTH discard piles
@@ -2133,6 +2145,33 @@
       const drawnCards = [];
       for (let i = 0; i < count && drawPile.length > 0; i++) {
         drawnCards.push(drawPile.pop());
+      }
+
+      // If pile exhausted mid-draw, reshuffle and draw remainder
+      if (drawnCards.length < count && drawPile.length === 0) {
+        const whiteDiscSnap2 = await fbDb.ref(deckPath + 'whiteDiscard').once('value');
+        const blackDiscSnap2 = await fbDb.ref(deckPath + 'blackDiscard').once('value');
+        let whiteDisc2 = whiteDiscSnap2.val() || [];
+        let blackDisc2 = blackDiscSnap2.val() || [];
+        if (whiteDisc2.length > 0 || blackDisc2.length > 0) {
+          shuffle(whiteDisc2);
+          shuffle(blackDisc2);
+          const reshuffleUpd = {};
+          reshuffleUpd[deckPath + 'whiteDraw'] = whiteDisc2;
+          reshuffleUpd[deckPath + 'blackDraw'] = blackDisc2;
+          reshuffleUpd[deckPath + 'whiteDiscard'] = [];
+          reshuffleUpd[deckPath + 'blackDiscard'] = [];
+          reshuffleUpd['games/' + currentRoom + '/decks/whiteDrawCount'] = whiteDisc2.length;
+          reshuffleUpd['games/' + currentRoom + '/decks/blackDrawCount'] = blackDisc2.length;
+          await fbDb.ref().update(reshuffleUpd);
+          await addLog('system', 'Draw piles reshuffled from discard piles.');
+          const freshPile = deckType === 'white' ? whiteDisc2 : blackDisc2;
+          const remaining = count - drawnCards.length;
+          for (let i = 0; i < remaining && freshPile.length > 0; i++) {
+            drawnCards.push(freshPile.pop());
+          }
+          drawPile = freshPile;
+        }
       }
 
       const updates = {};
