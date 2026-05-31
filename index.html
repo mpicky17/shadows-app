@@ -733,7 +733,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v29';
+    const APP_VERSION = 'shadows-v30';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -2129,7 +2129,8 @@
       if (deckType === 'traitorSteal') {
         const targetKnight = request.targetKnight;
         const handSnap = await fbDb.ref('private/' + currentRoom + '/' + targetKnight + '/hand').once('value');
-        const hand = handSnap.val() || [];
+        const rawHand = handSnap.val() || [];
+        const hand = Array.isArray(rawHand) ? rawHand : Object.values(rawHand);
         if (hand.length > 0) {
           const idx = Math.floor(Math.random() * hand.length);
           const stolen = hand.splice(idx, 1)[0];
@@ -4979,22 +4980,40 @@
     async function performTraitorTaunt(targetKnight) {
       $('turn-action-area').innerHTML = '<div class="turn-actions"><p class="waiting-text">Stealing a card...</p></div>';
 
-      if (isHost) {
-        const handSnap = await fbDb.ref('private/' + currentRoom + '/' + targetKnight + '/hand').once('value');
-        const hand = handSnap.val() || [];
-        if (hand.length > 0) {
-          const idx = Math.floor(Math.random() * hand.length);
-          hand.splice(idx, 1);
-          await fbDb.ref('private/' + currentRoom + '/' + targetKnight + '/hand').set(hand);
+      try {
+        if (isHost) {
+          const handSnap = await fbDb.ref('private/' + currentRoom + '/' + targetKnight + '/hand').once('value');
+          const rawHand = handSnap.val() || [];
+          const hand = Array.isArray(rawHand) ? rawHand : Object.values(rawHand);
+          if (hand.length > 0) {
+            const idx = Math.floor(Math.random() * hand.length);
+            const stolen = hand.splice(idx, 1)[0];
+            // Add stolen card to discard pile
+            const discardPath = 'private/' + currentRoom + '/' + myKnight + '/hostDecks/whiteDiscard';
+            const discardSnap = await fbDb.ref(discardPath).once('value');
+            const discard = discardSnap.val() || [];
+            discard.push(stolen);
+            const updates = {};
+            updates['private/' + currentRoom + '/' + targetKnight + '/hand'] = hand;
+            updates[discardPath] = discard;
+            updates['games/' + currentRoom + '/meta/traitorPhase'] = 'helpEvil';
+            await fbDb.ref().update(updates);
+          } else {
+            await fbDb.ref('games/' + currentRoom + '/meta/traitorPhase').set('helpEvil');
+          }
+          await addLog('evil', 'Traitor stole a card from ' + getKnightDisplayName(targetKnight) + '!');
+        } else {
+          await fbDb.ref('games/' + currentRoom + '/drawRequests').push().set({
+            knightId: myKnight, deckType: 'traitorSteal', targetKnight,
+            timestamp: firebase.database.ServerValue.TIMESTAMP,
+          });
+          await addLog('evil', 'Traitor stole a card from ' + getKnightDisplayName(targetKnight) + '!');
         }
+      } catch (e) {
+        console.error('[SOC] performTraitorTaunt error:', e);
+        // Ensure turn progresses even if steal fails
         await fbDb.ref('games/' + currentRoom + '/meta/traitorPhase').set('helpEvil');
-        await addLog('evil', 'Traitor stole a card from ' + getKnightDisplayName(targetKnight) + '!');
-      } else {
-        await fbDb.ref('games/' + currentRoom + '/drawRequests').push().set({
-          knightId: myKnight, deckType: 'traitorSteal', targetKnight,
-          timestamp: firebase.database.ServerValue.TIMESTAMP,
-        });
-        await addLog('evil', 'Traitor stole a card from ' + getKnightDisplayName(targetKnight) + '!');
+        await addLog('evil', 'Traitor attempted to steal from ' + getKnightDisplayName(targetKnight));
       }
     }
 
