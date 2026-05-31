@@ -733,7 +733,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v26';
+    const APP_VERSION = 'shadows-v27';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -5524,7 +5524,7 @@
             '<button class="btn btn-heroic" id="btn-kay-play"' + (hasFight ? '' : ' disabled') + '>Select Fight Card</button>' +
             '<button class="btn btn-heroic" id="btn-kay-skip" style="margin-top:0.5rem;">Skip</button>';
           const kayBtn = document.getElementById('btn-kay-play');
-          if (kayBtn) kayBtn.addEventListener('click', () => { heroicMode = 'kayExtra'; renderTurnActions(); });
+          if (kayBtn) kayBtn.addEventListener('click', startKayExtraCard);
           document.getElementById('btn-kay-skip').addEventListener('click', async () => {
             await fbDb.ref('games/' + currentRoom + '/meta/combatResolution/kayPlayed').set(true);
           });
