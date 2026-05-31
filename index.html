@@ -733,7 +733,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v27';
+    const APP_VERSION = 'shadows-v28';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1705,6 +1705,7 @@
         myHand = Array.isArray(rawHand) ? rawHand : Object.values(rawHand);
         renderLoyalty();
         renderHand();
+        if (roomData?.combatResolution) onCombatResolutionChanged();
       });
     }
 
