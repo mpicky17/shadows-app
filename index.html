@@ -733,7 +733,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v30';
+    const APP_VERSION = 'shadows-v31';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -823,6 +823,7 @@
     let drawRequestQueue = Promise.resolve();
     let drawResultListener = null;
     const processedDrawResults = new Set();
+    let traitorStealProcessed = false;
     let setupListener = null;
     let cachedBoard = null;
     let cachedQuests = null;
@@ -3785,6 +3786,11 @@
         return;
       }
 
+      if (interaction.type === 'traitorSteal') {
+        renderTraitorStealPanel(interaction);
+        return;
+      }
+
       area.innerHTML = '';
     }
 
@@ -4180,6 +4186,50 @@
 
       if (await checkGameEnd()) return;
       await advanceToHeroicPhase();
+    }
+
+    // ── Traitor Steal Panel ──────────────────────────────────────────
+    function renderTraitorStealPanel(interaction) {
+      const area = $('interaction-area');
+      const targetKnight = interaction.targetKnight;
+      const myResponse = interaction.responses?.[myKnight];
+
+      if (myKnight === targetKnight) {
+        if (!myResponse && !traitorStealProcessed) {
+          // Auto-discard a random card on target's own device
+          traitorStealProcessed = true;
+          if (myHand.length > 0) {
+            const idx = Math.floor(Math.random() * myHand.length);
+            myHand.splice(idx, 1);
+            fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
+            renderHand();
+          }
+          fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
+            .set({ done: true });
+          area.innerHTML = '<div class="interaction-panel"><h3>Traitor\'s Taunt</h3>' +
+            '<p>A card was stolen from your hand!</p></div>';
+        } else if (myResponse) {
+          area.innerHTML = '<div class="interaction-panel"><h3>Traitor\'s Taunt</h3>' +
+            '<p>A card was stolen from your hand.</p></div>';
+          checkTraitorStealResolution(interaction);
+        }
+      } else {
+        area.innerHTML = '<div class="interaction-panel"><h3>Traitor\'s Taunt</h3>' +
+          '<p class="waiting-text">Stealing from ' + getKnightDisplayName(targetKnight) + '...</p></div>';
+        checkTraitorStealResolution(interaction);
+      }
+    }
+
+    async function checkTraitorStealResolution(interaction) {
+      if (!isMyTurn()) return;
+      const responses = interaction.responses || {};
+      if (responses[interaction.targetKnight]) {
+        traitorStealProcessed = false;
+        await fbDb.ref('games/' + currentRoom + '/meta').update({
+          pendingInteraction: null,
+          traitorPhase: 'helpEvil',
+        });
+      }
     }
 
     // ── Convocation Choice Panel ──────────────────────────────────────
@@ -4978,43 +5028,13 @@
     }
 
     async function performTraitorTaunt(targetKnight) {
-      $('turn-action-area').innerHTML = '<div class="turn-actions"><p class="waiting-text">Stealing a card...</p></div>';
-
-      try {
-        if (isHost) {
-          const handSnap = await fbDb.ref('private/' + currentRoom + '/' + targetKnight + '/hand').once('value');
-          const rawHand = handSnap.val() || [];
-          const hand = Array.isArray(rawHand) ? rawHand : Object.values(rawHand);
-          if (hand.length > 0) {
-            const idx = Math.floor(Math.random() * hand.length);
-            const stolen = hand.splice(idx, 1)[0];
-            // Add stolen card to discard pile
-            const discardPath = 'private/' + currentRoom + '/' + myKnight + '/hostDecks/whiteDiscard';
-            const discardSnap = await fbDb.ref(discardPath).once('value');
-            const discard = discardSnap.val() || [];
-            discard.push(stolen);
-            const updates = {};
-            updates['private/' + currentRoom + '/' + targetKnight + '/hand'] = hand;
-            updates[discardPath] = discard;
-            updates['games/' + currentRoom + '/meta/traitorPhase'] = 'helpEvil';
-            await fbDb.ref().update(updates);
-          } else {
-            await fbDb.ref('games/' + currentRoom + '/meta/traitorPhase').set('helpEvil');
-          }
-          await addLog('evil', 'Traitor stole a card from ' + getKnightDisplayName(targetKnight) + '!');
-        } else {
-          await fbDb.ref('games/' + currentRoom + '/drawRequests').push().set({
-            knightId: myKnight, deckType: 'traitorSteal', targetKnight,
-            timestamp: firebase.database.ServerValue.TIMESTAMP,
-          });
-          await addLog('evil', 'Traitor stole a card from ' + getKnightDisplayName(targetKnight) + '!');
-        }
-      } catch (e) {
-        console.error('[SOC] performTraitorTaunt error:', e);
-        // Ensure turn progresses even if steal fails
-        await fbDb.ref('games/' + currentRoom + '/meta/traitorPhase').set('helpEvil');
-        await addLog('evil', 'Traitor attempted to steal from ' + getKnightDisplayName(targetKnight));
-      }
+      // Use pendingInteraction so the target's own device handles the discard
+      // (consistent with Morgan 1/5 and Fate discard patterns)
+      await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set({
+        type: 'traitorSteal', targetKnight,
+        responses: {}, resolved: false,
+      });
+      await addLog('evil', 'Traitor stole a card from ' + getKnightDisplayName(targetKnight) + '!');
     }
 
     function renderArthurExchangeUI(area) {
