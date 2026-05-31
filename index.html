@@ -732,7 +732,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v17';
+    const APP_VERSION = 'shadows-v18';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1828,6 +1828,8 @@
       // Normal card selection
       selectedCardId = (selectedCardId === cardId) ? null : cardId;
       renderHand();
+      // Re-render turn actions if Arthur exchange needs the selection
+      if (roomData?.arthurExchange) renderTurnActions();
     }
 
     function renderBoard() {
