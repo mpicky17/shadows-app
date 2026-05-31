@@ -733,7 +733,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v21';
+    const APP_VERSION = 'shadows-v22';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -5226,6 +5226,7 @@
     // ═══════════════════════════════════════════════════════════════════
 
     async function performDrawWhiteCards() {
+      document.querySelectorAll('.btn-heroic').forEach(b => b.disabled = true);
       const handLimit = getHandLimit();
       if (myHand.length >= handLimit) { showToast('Hand is full!'); return; }
 
