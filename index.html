@@ -733,7 +733,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v28';
+    const APP_VERSION = 'shadows-v29';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1705,7 +1705,7 @@
         myHand = Array.isArray(rawHand) ? rawHand : Object.values(rawHand);
         renderLoyalty();
         renderHand();
-        if (roomData?.combatResolution) onCombatResolutionChanged();
+        if (roomData?.combatResolution && heroicMode !== 'kayExtra') onCombatResolutionChanged();
       });
     }
 
@@ -5555,10 +5555,11 @@
       heroicMode = 'kayExtra';
       heroicSubState = {};
       selectedCardId = null;
+      // Hide combat overlay so hand cards are tappable
+      $('combat-overlay').classList.add('hidden');
       renderHand();
-      // Show card selection in combat actions
-      const actionsEl = $('combat-actions');
-      actionsEl.innerHTML = '<p style="color:var(--gold);font-size:1rem;">Select a Fight card from your hand</p>';
+      // Show prompt in turn action area instead
+      $('turn-action-area').innerHTML = '<div class="heroic-menu"><h3>Sir Kay</h3><p style="color:var(--gold);font-size:1rem;">Select a Fight card from your hand</p></div>';
     }
 
     async function kayPlayCard(cardId) {
