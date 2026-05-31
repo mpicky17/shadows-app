@@ -733,7 +733,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v25';
+    const APP_VERSION = 'shadows-v26';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -822,6 +822,7 @@
     let drawRequestListener = null;
     let drawRequestQueue = Promise.resolve();
     let drawResultListener = null;
+    const processedDrawResults = new Set();
     let setupListener = null;
     let cachedBoard = null;
     let cachedQuests = null;
@@ -1657,6 +1658,26 @@
               });
             });
           }
+          // Player: catch up on any draw results missed while backgrounded
+          fbDb.ref('games/' + currentRoom + '/drawResults').once('value', async snap => {
+            if (!snap.exists()) return;
+            let caught = false;
+            snap.forEach(child => {
+              const result = child.val();
+              if (!result || result.knightId !== myKnight) return;
+              if (processedDrawResults.has(child.key)) return;
+              processedDrawResults.add(child.key);
+              const newCards = result.cards || [];
+              console.log('[SOC] drawResult catch-up', { cardCount: newCards.length, key: child.key });
+              myHand = [...myHand, ...newCards];
+              const updates = {};
+              updates['private/' + currentRoom + '/' + myKnight + '/hand'] = myHand;
+              updates['games/' + currentRoom + '/drawResults/' + child.key] = null;
+              fbDb.ref().update(updates);
+              caught = true;
+            });
+            if (caught) renderHand();
+          });
         }
       });
 
@@ -2208,6 +2229,8 @@
       drawResultListener = ref.on('child_added', async snap => {
         const result = snap.val();
         if (!result || result.knightId !== myKnight) return;
+        if (processedDrawResults.has(snap.key)) return;
+        processedDrawResults.add(snap.key);
 
         // Add cards to my hand
         const newCards = result.cards || [];
