@@ -732,7 +732,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v15';
+    const APP_VERSION = 'shadows-v16';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -4434,6 +4434,29 @@
         await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set([]);
         renderHand();
       }
+      // Check if all loyal knights are dead (host only — requires private loyalty data)
+      if (isHost) {
+        const turnOrder = roomData?.turnOrder || [];
+        const aliveKnights = turnOrder.filter(kid => {
+          const pl = cachedPlayers[kid];
+          return pl && pl.alive !== false && kid !== knightId; // exclude the knight who just died
+        });
+        if (aliveKnights.length > 0) {
+          let allTraitors = true;
+          for (const kid of aliveKnights) {
+            const snap = await fbDb.ref('private/' + currentRoom + '/' + kid + '/loyalty').once('value');
+            if (snap.val() !== 'traitor') { allTraitors = false; break; }
+          }
+          if (allTraitors) {
+            await writeAllLoyalties();
+            await fbDb.ref('games/' + currentRoom + '/meta').update({
+              status: 'ended', winner: 'evil', endReason: 'allLoyalDead',
+            });
+            await addLog('system', 'GAME OVER: All Loyal Knights have fallen! Evil wins!');
+            showToast('Game Over! All Loyal Knights have fallen!');
+          }
+        }
+      }
     }
 
     async function advanceTurn() {
@@ -4452,6 +4475,8 @@
           return; // Pause — continueTurnAfterGrailCheck() resumes
         }
         await killKnight(currentKnight);
+        // If killKnight ended the game (all loyal dead), stop
+        if (roomData?.status === 'ended') return;
       }
 
       await finishTurnAdvance(currentKnight);
@@ -4466,6 +4491,11 @@
 
       if (!accepted) {
         await killKnight(dyingKnight);
+        // If killKnight ended the game (all loyal dead), stop
+        if (roomData?.status === 'ended') {
+          await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set(null);
+          return;
+        }
       }
       await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set(null);
       await finishTurnAdvance(dyingKnight);
@@ -5087,6 +5117,11 @@
       if (currentLoc !== 'roundTable' && currentLoc !== 'siege' && cachedQuests?.[currentLoc]) {
         const oldKnights = (cachedQuests[currentLoc].knightsPresent || []).filter(k => k !== myKnight);
         updates['games/' + currentRoom + '/quests/' + currentLoc + '/knightsPresent'] = oldKnights;
+        // Solo quest: discard white cards when knight leaves (black cards remain)
+        if (isSoloQuest(currentLoc) && (cachedQuests[currentLoc].whiteCards || []).length > 0) {
+          updates['games/' + currentRoom + '/quests/' + currentLoc + '/whiteCards'] = [];
+          await addLog('quest', getLocationLabel(currentLoc) + ': white cards removed (knight departed).');
+        }
       }
 
       // Add to new quest's knightsPresent
@@ -5118,6 +5153,10 @@
       if (currentLoc !== 'roundTable' && currentLoc !== 'siege' && cachedQuests?.[currentLoc]) {
         const oldKnights = (cachedQuests[currentLoc].knightsPresent || []).filter(k => k !== myKnight);
         updates['games/' + currentRoom + '/quests/' + currentLoc + '/knightsPresent'] = oldKnights;
+        // Solo quest: discard white cards when knight leaves (black cards remain)
+        if (isSoloQuest(currentLoc) && (cachedQuests[currentLoc].whiteCards || []).length > 0) {
+          updates['games/' + currentRoom + '/quests/' + currentLoc + '/whiteCards'] = [];
+        }
       }
       // Add to new
       if (destination !== 'roundTable' && destination !== 'siege' && cachedQuests?.[destination]) {

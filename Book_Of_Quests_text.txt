@@ -1,0 +1,535 @@
+BOOK OF QUESTS — Shadows Over Camelot
+======================================
+
+Pages 2–3
+----------
+
+THE BOOK OF QUESTS
+
+Quests are the driving force in the life of every noble Knight. So it should be the sacred Obligation at the very heart of Shadows over Camelot.
+
+While the content of the Rules Booklet should be familiar to every aspiring Knight, the Book of Quests is primarily a reference tool. Whether you are a Combat Veteran looking for a fabled edge, or a Knight in search of help or the quickest route to Victory or Defeat, you will find everything you need in the following sections of this booklet. The first, presented upfront, is a detailed inventory of each card used in the game. The second is a detailed account of each and every Quest.
+
+In this booklet, page numbers given as reference point to the corresponding entries in the Rules booklet unless indicated otherwise.
+
+THE QUESTS
+
+There are several "Standard" Quests in Camelot's immediate vicinity:
+  - The Tournament against the Black Knight
+  - The Quest for Lancelot
+  - The Quest for Excalibur
+  - The Quest for the Holy Grail
+  - The Pict and Saxon Wars
+
+For each Quest won or lost, new Swords are laid upon the Round Table. As the game progresses, the Swords show which side currently has the advantage.
+
+There are also two "special" Quests within Camelot proper where a defeat spells immediate doom for the Loyal Knights:
+  - The Siege of Camelot, which is lost if 12 Siege Engines ever surround Camelot.
+  - The Quest of the Round Table, where the outcome of the game is decided in favor of evil whenever fewer than half the maximum, past 12 or more Swords have been laid down.
+
+STANDARD QUESTS
+
+The Standard Quests follow a common structure and some standard traits:
+  - An illustration and caption(s) to represent the Quest on various game elements and on the table.
+  - An encounter indicator (hex) marking the location of each standard Quest on the main game board.
+  - A representation of where the Quest occurs and the type of cards played on it, including position markers.
+  - Quest Victory/Defeat point systems.
+  - Pre-determined Knight positions to indicate whether the Quest is a Group Quest (open to all Knights) or a Solo Quest.
+  - Pre-designated card slots, where appropriate, where a specific number of Black and White cards may be placed to resolve or hinder the Quest.
+  - Victory and Defeat pictograms, showing the spoils gained in the various outcomes (including Relic wins) if any, and punishment dealt to the vanquished.
+
+GOOD AND EVIL ACTIONS
+
+Each Quest usually has one or more Black cards or Evil actions attached to it: one or more actions that Evil can exploit to move the Quest to a point where it will eventually be resolved in its favor. Actions are described in the Progression of Evil section of each Quest and are triggered by specific Black Cards listed on the Progression of Evil panels for each Quest's description. Where applicable, a list of pointers to the relevant entries in the Standard Card Manifest section is also shown.
+
+SOLO QUESTS
+
+A Quest featuring a single Knight spot on its Quest tile is a Solo Quest. The Tournament against the Black Knight and the Quest for Lancelot are Solo Quests — Solo Quests may only be occupied by one Knight at any given time.
+
+In the situation where a Knight on a Solo Quest chooses, as forced, to abandon the Quest before its completion in order to attend to other pressing matters, his Quest place will be forfeited and all the White cards played on the Quest side are automatically discarded.
+
+Any Black card played on the Solo Quest that he leaves remain in place.
+
+The Quest is not lost or completed, nor the consequences of a loss applied, but the Quest suffers a major set-back.
+
+COMBAT QUESTS
+
+The Tournament against the Black Knight, the Quest for Lancelot's Armor and the Dragon's Quest are Combat Quests.
+
+In a Combat Quest, both sides progressively play Fight cards in a pattern dictated by the Quest (pairs, straights, full houses), while trying to make sure the sum total of the value of the White cards played during the Quest is higher than the sum total of the Black cards.
+
+A Combat Quest ends the moment all White (or Black) card slots are filled. Victory goes to the side whose sum is highest. Ties go to Evil.
+
+PERPETUAL QUESTS
+
+A few of the Quests (The Tournament against the Black Knight, the Pict and Saxon Wars) are Perpetual Quests. Once won (or lost and the consequences of defeat are applied), an identical Quest starts anew.
+
+THE END OF A QUEST
+
+Once a Quest terminates, all of the cards (Black and White) and Pict or Saxon figures placed on the Quest are removed and put back in their respective discard piles or the Reserve. All of the Knights are moved back to the Round Table (for free) as detailed within the Rulebook. The Relics are then shuffled, in accordance with the Quest's Victory or Loss pictograms. The Relic, if any, is awarded to the Knight who completed the Quest. If the Quest is lost, remove it from play forever (except for Perpetual Quests).
+
+
+Pages 4–5
+----------
+
+OF VICTORY AND DEFEAT
+
+Each Quest usually displays two sets of pictograms, a light-colored one showing the spoils of Victory and a dark-colored one pointing the consequences of Defeat.
+
+The Quest's various Victory and Defeat pictograms are:
+
+Life points gained/lost:
+All Knights present on the Quest when it is won or lost immediately gain or lose the number of Life points indicated. No Knight may ever go above 6 or below 0 Life points.
+
+Note: Win or lose, if a quest is resolved in a round where the Excalibur or Holy Grail relic has already been awarded, the relic(s) fall outside of the Quest's victory pictograms.
+
+White cards shared:
+Draw from the top of the White draw pile as many cards as indicated. These cards are then shared among all the Knights present on the Quest. If no agreement can be reached, these cards are shuffled and dealt out randomly to all Knights present, starting with the Knight who won the Quest.
+
+White/Black Swords added:
+Add to the Round Table the number of White/Black Swords indicated by this icon.
+
+Relic won:
+If the Quest is won, the winner of the Quest (i.e. the player responsible for the last Action that successfully completed the Quest) takes the Relic and places it on his Coat of Arms. If the Quest is lost, the Relic is removed from play and put away in the game box.
+
+Add a Siege Engine:
+This symbol in the Defeat pictograms of the Pict and Saxon Wars indicates that Siege Engines must be placed around Camelot each time a War is lost.
+
+Play as a Siege Engine:
+Once the Dragon, Excalibur or the Holy Grail's Quests have been completed (won or lost), the corresponding card type associated with them (Lancelot/Dragon card, Excalibur card, Despair) has no quest to go to. Play these cards as Siege Engines instead.
+
+Important Note: The Specific Black cards (Desolation, Morgan of Cornwall, Mists of Avalon, Mordred, Vivien, Dark Forest) that normally add effects are not played as Siege Engines — only the standard Black quest cards (Excalibur, Despair, Lancelot/Dragon) become Siege Engines when their quest is no longer in play. The Special Black cards that reference a quest (Desolation, Dark Forest) should add a Siege Engine if the Holy Grail quest is inactive, as specified in their individual descriptions.
+
+
+THE TOURNAMENT AGAINST THE BLACK KNIGHT
+
+Object of the Quest:
+The Tournament against the Black Knight is a Perpetual, Solo, Combat Quest in which a single Knight attempts to progressively play four White Fight cards of distinct values forming two pairs (e.g. 1, 1 and 3, 3 — but not 1, 1 and 1, 1). In the meantime, the forces of Evil will play Black Knight cards on their side. When the Quest ends, the side with the highest total value wins.
+
+Progression of Evil:
+Whenever a Black Knight card is drawn, it is placed on the Quest. If a fourth Black Knight card is laid down, the Quest ends immediately.
+
+Heroic Action:
+Play 1 White Fight card (value 1–5). When the fourth White Fight card is laid down (completing the second pair), the Quest ends immediately.
+
+Win/Lose Conditions:
+At the end of the Quest, the Knights win if the sum of the White Fight cards is greater than the sum of the Black Knight cards. Any other result (including a tie) is a Loss for the Loyal Knights.
+
+The Quest is perpetual. Once ended, all cards are removed and the Quest starts anew.
+
+Spoils of Victory:
+The Knight on the Quest, when the Black Knight is defeated, wins 1 Life point, draws 3 White cards into his hand, and immediately goes to the Round Table. 1 White Sword is laid on the Round Table.
+
+Consequences of Defeat:
+Add 1 Black Sword to the Round Table. Any Knight present on this Quest loses 1 Life point and immediately goes back to the Round Table.
+
+
+Pages 6–7
+----------
+
+THE QUEST FOR LANCELOT
+
+Object of the Quest:
+The Quest for Lancelot is a Solo, Combat Quest in which a single Knight attempts to progressively play a full house of White Fight cards (i.e. 3 identical cards plus 2 identical cards of a different value — 5 cards total on the Knights' side). In the meantime, the forces of Evil will progressively lay Lancelot's cards on their side. When the Quest ends, the side with the highest total value wins.
+
+Progression of Evil:
+Whenever a Lancelot/Dragon card is drawn (using the Lancelot value), it is placed on the Quest. If a fifth Lancelot card is laid down, the Quest ends immediately.
+
+Heroic Action:
+Play 1 White Fight card. The 5th White Fight card completing the full house ends the Quest immediately.
+
+Win/Lose Conditions:
+If the sum of the White Fight cards is greater than the sum of the Black Lancelot cards played on the Quest, the Quest is won. Any other result (including a tie) is a Loss for the Loyal Knights.
+
+This Quest can only be achieved once. As soon as it is completed (whether won or lost), it disappears entirely from the game and the reverse side of the Quest's board is turned over to reveal the Dragon's Quest.
+
+Spoils of Victory:
+The Knight present on the Quest when Lancelot is defeated wins 1 White Sword on the Round Table, gains 1 Life point, draws 4 White cards, and immediately goes to the Round Table.
+
+Consequences of Defeat:
+Add 1 Black Sword to the Round Table. Any Knight(s) present on the Quest lose 1 Life point each and immediately go back to the Round Table.
+
+Relic: Lancelot's Armor:
+Power: Whenever the owner of Lancelot's Armor draws a Black card, he draws the top 2 Black cards instead of 1. He plays one of his choice and places the other back under the Black draw pile (at the bottom). Unlike the other relics, Lancelot's Armor remains with the Knight even after he has been revealed as the Traitor. The power of the relic remains available through the duration of the game. It is the only Relic that works for its owner even if a revealed Traitor.
+
+
+THE DRAGON'S QUEST
+
+Object of the Quest:
+The Dragon's Quest only appears once Lancelot's Quest has been completed (won or lost). Unlike the Quest for Lancelot, the Dragon's Quest is a Group Quest that allows multiple Knights to join forces. The Knights attempt to play three sets of triples (3 of a kind with 3 different values — 9 cards total on the Knights' side). In the meantime, the forces of Evil will progressively lay Dragon cards on their side. When the Quest ends, the side with the highest total value wins.
+
+Progression of Evil:
+Whenever a Lancelot/Dragon card is drawn (using the Dragon value), it is placed on the Quest. If a fifth Dragon card is laid down, the Quest ends immediately.
+
+Heroic Action:
+Play 1 White Fight card. When the ninth White Fight card (completing the third set of triples) is laid down, the Quest ends immediately.
+
+Win/Lose Conditions:
+If the sum of the White Fight cards is greater than the sum of the Dragon cards, the Knights win. Any other result (including a tie) is a Loss for the Loyal Knights.
+
+Like the Quest for Lancelot, once resolved (won or lost), the Dragon's Quest is removed from the game. Any Lancelot/Dragon cards drawn subsequently are played as Siege Engines.
+
+Spoils of Victory:
+When the Dragon is dispatched, 2 White Swords are placed on the Round Table. Each Knight present gains 2 Life points. 7 White cards are drawn and shared among the Knights present. Remove the quest board from the table.
+
+Consequences of Defeat:
+Add 2 Black Swords to the Round Table. Any Knight(s) on the Quest lose 2 Life points each and immediately go back to the Round Table.
+
+
+Pages 8–9
+----------
+
+THE QUEST FOR EXCALIBUR
+
+Object of the Quest:
+The Quest for Excalibur is a Group Quest won by progressively moving the fabled sword to the green-colored Knight side of the river. An Excalibur Black card drawn moves the sword one step in the other direction (toward Evil).
+
+Progression of Evil:
+Drawing an Excalibur card moves Excalibur one step closer to the Evil side. If it reaches the last Evil position, the Quest is lost.
+
+Heroic Action:
+Play 1 White card (any type) while on the Quest for Excalibur to move Excalibur one step closer to the Knight side.
+
+Win/Lose Conditions:
+Moving Excalibur to either end of the river ends the Quest — a win if Excalibur reaches the Knights' side, a loss if it reaches the Evil side.
+
+Once Excalibur is won or lost, the Quest board is turned over. Any future Excalibur card drawn adds 1 Siege Engine instead.
+
+Spoils of Victory:
+Any Knights present on the Quest when Excalibur is won gain 1 Life point each. They also share 7 White cards. 2 White Swords are placed on the Round Table. The victorious Knight (who played the final card) receives the Excalibur relic. All Knights on the Quest return to the Round Table.
+
+Consequences of Defeat:
+Add 2 Black Swords to the Round Table. Any Knights on the Quest when Excalibur is lost lose 1 Life point each and immediately go back to the Round Table. Excalibur is removed from the game forever. Flip the Quest board over.
+
+Relic: Excalibur:
+For as long as a Knight wields Excalibur, he adds +1 to the outcome of any Combat Quest he participates in, as well as any fight against a Siege Engine. Excalibur's power can only be used once per combat — on the very last card played or after the die roll. Excalibur can also be used to cancel any 1 Standard Black card just drawn: discard the Black card instead of placing it on its quest (the sacrifice of losing 1 Life Point from drawing still applies if applicable, but the card is discarded rather than placed). Once the Knight holding Excalibur dies, the sword is permanently removed from the game. Excalibur may never be "saved" or passed on to another Knight.
+
+
+THE QUEST FOR THE HOLY GRAIL
+
+Object of the Quest:
+The Quest for the Holy Grail is a Group Quest won by filling the seven card spots leading to the Grail exclusively with White Grail cards. In the meantime, Black cards of the Desolation and Despair varieties are also played on the Quest, filling spots from the far end.
+
+Progression of Evil:
+Dark Forest, Desolation, and Despair cards are played on the Quest, filling spots.
+
+Heroic Action:
+Play 1 Grail card on the first empty slot closest to the Grail. If all 7 spots are already taken when a new Grail card is played, the card cancels the closest Despair/Desolation card (closest to the Grail first). Both the Grail card played and the cancelled Black card are discarded. One Grail card = one Heroic Action.
+
+Win/Lose Conditions:
+When 7 cards of the same type fill all spots: if all are Grail cards, the Knights win. If all are Despair/Desolation (no Grail cards remain), the Quest is lost. Once the Grail is won or lost, the Quest board is flipped. Any future Despair cards drawn add 1 Siege Engine instead.
+
+Spoils of Victory:
+Add 3 White Swords to the Round Table. Any Knight(s) present on the Quest gain 1 Life point each. They draw 7 White cards and share them. The victorious Knight (who played the final Grail card) receives the Holy Grail relic and places it on his Coat of Arms. All Knights on the Quest return to the Round Table.
+
+Consequences of Defeat:
+Add 3 Black Swords to the Round Table. Any Knight(s) on the Quest lose 1 Life point each and immediately go back to the Round Table. The Holy Grail is removed from the game forever. Flip the Quest board over.
+
+Relic: Holy Grail:
+If at any time a Knight drops to 0 Life points and is about to die, the owner of the Holy Grail may decide to let him drink from the Grail instead. The beneficiary is immediately healed and his Life points set to 4. The Grail is then removed from play. Its power also extends to the Grail holder himself: if the Grail holder drops to 0 LP, he may use it on himself. This is the only way a Knight can avoid dying when reaching 0 LP. The Grail cannot save a revealed Traitor — if a Traitor holds the Grail, he can only use it to save Loyal Knights.
+
+
+Pages 10–11
+------------
+
+THE PICT AND SAXON WARS
+
+Object of the Quest:
+The Pict and Saxon Wars are two similar (but distinct) Perpetual, Group Quests, won by progressively laying White Fight cards in ascending order from 1 to 5. In the meantime, the forces of Evil increase their warriors, with each standard Pict, Saxon, or Mercenary card adding 1 warrior to the board.
+
+Progression of Evil:
+Whenever a Pict, Saxon, or Mercenary card is drawn, 1 warrior is added. If a 4th warrior is added to the board of a given War, that War is immediately lost.
+
+Heroic Action:
+Play 1 White Fight card in ascending straight order (must start with 1, each subsequent card exactly +1). If the 5th card (value 5) is laid on the board of a given War, that War is immediately won.
+
+Win/Lose Conditions:
+Victory or Loss is decided by whether the 5 cards needed to complete the straight, or the 4 warriors needed to overwhelm the defenders, come first. Once the Quest ends, a new War starts.
+
+Spoils of Victory:
+Any Knights on the Quest when the Pict or Saxons are repelled win 1 Life point each. They draw 4 White cards from the top of the draw pile, share among Knights present, and immediately go back to the Round Table. 1 White Sword is placed on the Round Table.
+
+Consequences of Defeat:
+Add 2 Siege Engines to Camelot and 1 Black Sword to the Round Table. Any Knight(s) present on the Quest lose 1 Life point each and immediately go back to the Round Table.
+
+
+CAMELOT
+
+Camelot is not an ordinary Quest, but truly the heart of the game. If Camelot falls, all hope (and the game!) is lost.
+
+Camelot is made up of two areas: The Round Table (which sits inside Camelot's walls) and the Siege Area (outside the walls). Movement between the two areas is free — they are simply two sides of the same Camelot coin.
+
+THE ROUND TABLE
+
+This is the Knights' primary access point to the benefits and ills distributed throughout the game. The Round Table is also the place where all Knights start the game.
+
+Whilst spending a turn in Camelot a Knight may either:
+  - Draw 2 White cards from the top of the White draw pile (Sir Gawain draws 3). A Knight is not able to draw if he holds 12 or more White cards. Drawing cards is a Heroic Action.
+  - Go fight a Siege Engine (move to Siege Area — free movement).
+  - Make an Accusation against a Knight.
+  - Play a Special White card as a Heroic Action.
+
+THE SIEGE AREA
+
+The Siege Pods, located just outside Camelot's walls, are the area where the Siege Engines are placed.
+
+At the start of the game, none are placed. During the course of the game:
+  - When a player draws a Black card pertaining to a Quest that is no longer in play, 1 Siege Engine is added to the Siege Area.
+  - When a Pict or Saxon War is lost, 2 Siege Engines are added.
+  - A maximum of 12 Siege Engines can surround Camelot (if the 12th is placed, the game is immediately lost).
+
+To fight a Siege Engine:
+  1. Play as many White Fight cards as desired from your hand.
+  2. Roll the 8-sided die.
+  3. If the sum of the White Fight cards played is greater than the value on the die, you win the fight. The Siege Engine is placed back in the Reserve and the Fight cards are discarded.
+  4. If the sum is less than or equal to the die value, the fight is lost. Lose 1 Life point. The Siege Engine stays. Fight cards are still discarded.
+  5. Excalibur adds +1 to your sum if you hold it.
+  6. Sir Kay may play 1 additional Fight card after the die is rolled.
+
+
+Pages 12–13
+------------
+
+VICTORY IN CAMELOT
+
+The game ends immediately once the last Action in which a 12th Sword is laid on the Round Table. Note that if several Swords were laid at once during the game's final Action, the game may end with more than 12 Swords on the Round Table.
+
+If the Traitor is still alive and undetected at this point, he reveals his Loyalty card, and two White Swords on the Round Table are flipped to their Black side.
+
+The Black and White Swords on the Round Table are then tallied up separately. If the number of White Swords is strictly greater than the number of Black ones, the Knights' Chapter is victorious!
+
+SUDDEN DEFEAT IN CAMELOT
+
+If at any point during the game there are 7 or more Black Swords on the Round Table, the Knights face Sudden Defeat and Camelot falls.
+
+If at any time during the game a 12th Siege Engine is laid, Camelot falls, bringing the Knights down to defeat.
+
+
+APPENDIX 1: THE KNIGHTS & THE TRAITOR
+
+King Arthur — Son of Uther Pendragon:
+Starting with the first round of play, King Arthur always takes the first player slot. King Arthur can on every turn exchange one White card with any other Knight (regardless of location). Both cards are exchanged face-down (without looking). The exchange does not cost a Heroic Action — it can be done before, after, or between Heroic Actions. Both the card given and the card received are random/unknown to the other player.
+
+Sir Galahad — Son of Lancelot:
+Once during his turn, Sir Galahad may play one Special White card for free (it does not cost his Heroic Action). He must still take a different mandatory Heroic Action — he cannot play a second Special White card as that mandatory action.
+
+Sir Gawain — Son of King Lot:
+When at the Round Table, if he chooses to draw White cards as his Heroic Action, Sir Gawain draws 3 White cards instead of 2.
+
+Sir Kay — Seneschal of King Arthur:
+When present on a Combat Quest where the fight has just ended, Sir Kay may play an additional White Fight card at no cost, after the Black cards are revealed but before points are tallied. The extra card is placed on the board in addition to any regular cards played. Sir Kay may also play an additional Fight card when fighting a Siege Engine (after the die is rolled).
+
+Sir Palamedes — Saracen Knight:
+For each Quest that Sir Palamedes contributes to which ends in a Victory, he gains 1 additional Life point (in addition to any Life point benefits indicated on the Quest). Max 6 LP.
+
+Sir Percival — Son of Pellinore:
+Sir Percival may peek at the top card of the Black draw pile before deciding if he wants to draw it or opt for a different Evil Action during the Progression of Evil phase.
+
+Sir Tristan — of Lyonesse:
+Sir Tristan has the ability to leave the Round Table without it costing him a Heroic Action. He must still use a Heroic Action elsewhere, but departing the Round Table is free. This effectively allows him to move to a Quest and then perform a Heroic Action there in the same turn.
+
+THE TRAITOR
+
+The Traitor must remain hidden. He should blend in, playing cards, going on Quests, while subtly working against the Knights. He should avoid becoming too obvious, as getting discovered may limit his ability to sabotage.
+
+Hidden Traitor (before reveal):
+  - Plays normally like any other Knight.
+  - Should act deceptively — subtle sabotage, not obvious evil moves.
+  - May lie about intent or resources (but never cheat).
+  - May falsely accuse a Loyal Knight to flip a White Sword to Black.
+  - Can voluntarily reveal at any time.
+
+Revealed Traitor (after accusation or voluntary reveal):
+When revealed:
+  1. If accused (not voluntary): Accusing Knight adds 1 White Sword to Round Table.
+  2. Remove miniature from board (plays from the Shadows, out of reach).
+  3. Remove Life die (cannot be killed).
+  4. Discard all White cards.
+  5. If holding Excalibur or Holy Grail: remove them from the game.
+  6. Lancelot's Armor stays with the Traitor.
+
+Revealed Traitor's Turn:
+  1. Taunt the Knights: Pick 1 White card at random from the hand of a Knight of your choice and discard it.
+  2. Help Evil spread (choose 1):
+     - Add 1 Siege Engine to Camelot
+     - OR Draw & play the top Black card
+
+Traitor Victory Conditions:
+  - 12 Siege Engines surrounding Camelot
+  - 7+ Black Swords on the Round Table
+  - All other Knights dead
+  - 12+ Swords on Round Table and at least half are Black
+
+
+Pages 14–15
+------------
+
+APPENDIX II: CARDS MANIFEST
+
+There are three major categories of cards in Shadows over Camelot:
+
+The Loyalty cards: Mostly good-aligned with only 1 Traitor card among them. Dealt face-down to each player at the start.
+
+The White cards: Represented by their White border, these represent the good and positive forces. Made available through gameplay.
+
+The Black cards: Depicted by their Black border, these represent the forces of Evil.
+
+In each of the Black and White sets, there are 2 subcategories:
+
+Standard cards: Regular cards played on quests or drawn during play.
+
+Special cards: All White Special cards (except Merlin) are playable during a player's turn as a Heroic Action, used only once and then discarded. The Merlin card may also be played during Progression of Evil (to cancel a Special Black card with 3 Merlins collectively).
+
+Combat cards: All White Fight and Black combat cards (Black Knight, Lancelot, Dragon, Saxon, Pict, Mercenary) played on Quests, including Fight cards used against Siege Engines.
+
+A few important notes about Cards:
+  - There are 84 White cards and 76 Black cards in the game.
+  - A player may hold at most 12 White cards in his hand; at 12, he cannot choose to draw.
+  - White cards can only be played during a Knight's turn.
+  - Multiple cards may be played in a given combat, but only 1 card at a time may be placed on a particular Quest per Heroic Action.
+  - A player's hand may temporarily exceed 12 through Special card effects from other players.
+  - When either draw pile (White or Black) runs out, reshuffle both discard piles into fresh draw piles simultaneously.
+
+STANDARD WHITES
+
+FIGHT CARDS (51 cards):
+  - Value 1: x14
+  - Value 2: x12
+  - Value 3: x10
+  - Value 4: x8
+  - Value 5: x7
+
+Fight cards are played during a Knight's Heroic Action in one of the Combat Quests (Black Knight, Lancelot, Dragon), the Pict and Saxon Wars, or when fighting a Siege Engine. On Combat Quests, White Fight cards are placed face-up on the Knights' side of the Quest board.
+
+When playing on the Pict or Saxon Wars, Fight cards MUST be played in ascending order from 1 to 5.
+
+GRAIL CARDS (18 cards, all identical):
+Played one at a time as a Heroic Action. Grail cards are placed on the nearest empty spot on the Holy Grail Quest Board closest to the Grail. If all 7 spots are full, the Grail card cancels the nearest Despair/Desolation card (closest to the Grail). Both cards are then discarded. The Grail card is always played in the first available slot.
+
+SPECIAL WHITES
+
+MERLIN CARD (7 cards):
+Each Knight receives 1 Merlin card at the start of the game. Remaining Merlins are shuffled into the White draw pile.
+
+Cancel: 3 Merlin cards played collectively (by any players) cancel 1 Special Black card immediately when drawn. Cannot be applied retroactively.
+
+Heroic Play: Play 1 Merlin as a Heroic Action to:
+  - Remove 1 Siege Engine from Camelot, OR
+  - Remove the last standard Black card from any quest, OR
+  - Remove 1 warrior from Saxon or Pict War.
+
+FATE CARD (1 card):
+If a Loyal Knight plays Fate, all Knights draw 1 White card. If the Traitor plays this card, he must reveal himself and all opponents discard 2 White cards each.
+
+PIETY (1 card):
+When played, the player may either gain 3 Life Points (max 6) OR give 1 Life Point to every other Knight (max 6 each).
+
+HEROISM (1 card):
+When played, this card is placed on the Quest of the player's choice. It adds 1 Sword to the Quest's outcome: +1 White Sword if the Quest is won, +1 Black Sword if the Quest is lost.
+
+REINFORCEMENTS (1 card):
+When played, the player may either draw 4 White cards for himself OR let each of the other Knights draw 1 White card.
+
+CLAIRVOYANCE (1 card):
+Draw the first 5 cards from the top of the Black draw pile, look at them, and reorder them as desired. Place them back on top.
+
+MESSENGER (1 card):
+Pass 1 to 3 White cards from your hand to the Knight of your choice.
+
+CONVOCATION (1 card):
+All Knights return to Camelot. The gathered Knights draw White cards equal to the number of Knights gathered and share them.
+
+LADY OF THE LAKE (1 card):
+If the Quest for Excalibur is still in play, move Excalibur 1 step closer to the Knights' side. If the Quest has already been completed (won or lost), gain 2 Life Points instead.
+
+
+STANDARD BLACKS
+
+BLACK KNIGHT COMBAT CARDS (11 cards):
+  - Value 1: x5
+  - Value 3: x3
+  - Value 5: x2
+  - Value 7: x1
+Placed on the Black Knight quest board. Face-down when played; revealed at quest resolution.
+
+LANCELOT/DRAGON COMBAT CARDS (11 cards):
+Dual-value cards. Use Lancelot value when Lancelot Quest is active; Dragon value when Dragon Quest is active.
+  - Lancelot 1 / Dragon 5: x4
+  - Lancelot 3 / Dragon 7: x3
+  - Lancelot 5 / Dragon 9: x3
+  - Lancelot 7 / Dragon 11: x1
+Placed on the quest board. Face-down when played; revealed at quest resolution. Player may draw 1 free White card when placing a combat Black card face-down.
+
+EXCALIBUR CARDS (15 cards):
+Move Excalibur 1 step toward the Evil side. If the Quest is no longer in play, add 1 Siege Engine instead.
+
+DESPAIR CARDS (15 cards):
+Place on the Holy Grail quest board. If the Quest is no longer in play, add 1 Siege Engine instead.
+
+MERCENARIES, PICT AND SAXON WAR CARDS (12 cards):
+  - Pict: x4 (add 1 Pict warrior)
+  - Saxon: x4 (add 1 Saxon warrior)
+  - Mercenary: x4 (player's choice: add 1 warrior to either Saxon or Pict War)
+If the 4th warrior is placed, that War is immediately lost.
+
+
+Page 16
+--------
+
+SPECIAL BLACK CARDS (12 total)
+
+Applied immediately when drawn. Can be cancelled by 3 Merlin cards played collectively (must be immediate, never retroactive).
+
+GUINEVERE CARD (1 card):
+All Knights return to Camelot. Any White cards played on Solo Quests are removed and discarded. The drawing player's turn ends immediately.
+
+MISTS OF AVALON CARD (1 card):
+Permanent effect. Each quest lost henceforth adds 1 extra Black Sword to the Round Table (in addition to the quest's normal defeat consequences).
+
+MORDRED CARD (1 card):
+The drawing player adds 1 warrior to the Saxon or Pict War of his choice and attaches Mordred to that War. That War now requires an extra Fight card (value 5) to win — effectively needing cards 1 through 5 plus an additional 5. Mordred is removed when the War is won or lost.
+
+VIVIEN CARD (1 card):
+No Merlin cards may be played (as Heroic Action or to cancel Special Black cards) until a Quest is won. Can itself be cancelled by 3 Merlins when drawn. Once cancelled or lifted (by winning a quest), Merlins can be played again.
+
+MORGAN CARD 1 (1 card):
+Any Knight may volunteer to discard 3 White cards from his hand. If nobody volunteers, each Knight discards 1 White card.
+
+MORGAN CARD 2 (1 card):
+The drawing player immediately draws and applies the next 3 Black cards in succession.
+
+MORGAN CARD 3 (1 card):
+Add 2 Siege Engines to Camelot immediately.
+
+MORGAN CARD 4 (1 card):
+Each Knight loses 1 Life point immediately.
+
+MORGAN CARD 5 (1 card):
+Any Knight may volunteer to lose 2 Life points. If nobody volunteers, ALL Knights discard 1 White card each (if they have at least one).
+
+DESOLATION (2 cards):
+Place on the Holy Grail quest board (same mechanic as Despair, but Special — cannot be countered by quest action, only by 3 Merlins when drawn). If the Holy Grail quest is not in play, add 1 Siege Engine.
+
+DARK FOREST (1 card):
+No Grail cards may be played on the Holy Grail quest until a Quest is won. Does not prevent other quest actions. If the Holy Grail quest is not in play, add 1 Siege Engine instead.
+
+
+SPECIFIC RELICS
+
+EXCALIBUR (from Quest for Excalibur):
+  - Passive: Adds +1 to the outcome of any Combat Quest or Siege Engine fight the holder participates in.
+  - Active: Can be discarded to cancel any 1 Standard Black card just drawn (discard the Black card instead of applying it).
+  - Cannot be gifted or passed to another Knight.
+  - On holder's death: removed from game permanently.
+
+HOLY GRAIL (from Quest for the Holy Grail):
+  - Any dying Knight (reaching 0 LP) may drink from the Grail to be healed to 4 LP.
+  - Owner can use on self or on another dying Knight.
+  - Consumed after use (removed from game).
+  - Cannot save a revealed Traitor.
+
+LANCELOT'S ARMOR (from Quest for Lancelot):
+  - When drawing a Black card, draw 2 instead. Play 1, place the other back under the Black draw pile.
+  - Stays with the Knight even if revealed as Traitor.
+  - On holder's death (if Loyal): removed from game.
+  - Only relic that functions for a revealed Traitor.
