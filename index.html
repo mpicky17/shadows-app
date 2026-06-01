@@ -734,7 +734,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v34';
+    const APP_VERSION = 'shadows-v35';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1904,7 +1904,9 @@
         { key: 'holyGrail', name: 'Holy Grail', info: q => {
           const gc = (q.cards || []).filter(c => c && c.type === 'grail').length;
           const bc = (q.cards || []).filter(c => c && c.type !== 'grail').length;
-          return gc + ' grail, ' + bc + ' despair';
+          let info = gc + ' grail, ' + bc + ' despair';
+          if (roomData?.persistentEffects?.darkForest) info += ' \u26D4';
+          return info;
         }},
         { key: 'excalibur', name: 'Excalibur', info: q => 'Position: ' + (q.position || 0) },
         { key: 'blackKnight', name: 'Black Knight', info: q => {
@@ -1940,8 +1942,9 @@
         if (!q || q.status === 'completed' || q.status === 'won') return '';
         const lostStyle = q.status === 'lost' ? ' style="opacity:0.5;border-color:var(--red-bright);"' : '';
         const lostLabel = q.status === 'lost' ? ' (LOST)' : '';
+        const heroismTag = roomData?.heroismQuests?.[qi.key] ? ' [+1\u2694]' : '';
         return '<div class="quest-chip"' + lostStyle + '><div class="qname">' + qi.name + lostLabel + '</div>' +
-               '<div class="qinfo">' + qi.info(q) + '</div></div>';
+               '<div class="qinfo">' + qi.info(q) + heroismTag + '</div></div>';
       }).join('');
     }
 
@@ -3010,7 +3013,7 @@
 
       // Excalibur cancel prompt — any holder can cancel any black card
       const excHolder = findExcaliburHolder();
-      if (excHolder && !roomData.excaliburPrompt) {
+      if (excHolder && (!roomData.excaliburPrompt || roomData.excaliburPrompt.declined)) {
         // Initiate the prompt (only active player sets it to avoid races)
         if (isMyTurn()) {
           fbDb.ref('games/' + currentRoom + '/meta/excaliburPrompt').set({
@@ -3048,7 +3051,7 @@
       } else if ((card.type === 'blackKnight' || card.type === 'lancelotDragon') && isQuestActive(card.type)) {
         actionsEl.innerHTML =
           '<button class="btn btn-evil" id="btn-face-up">Place Face-Up</button>' +
-          '<button class="btn btn-evil" id="btn-face-down">Place Face-Down (+1 White)</button>';
+          '<button class="btn btn-evil" id="btn-face-down">Place Face-Down' + (cachedPlayers?.[myKnight]?.isRevealed ? '' : ' (+1 White)') + '</button>';
         document.getElementById('btn-face-up').addEventListener('click', () => resolveRevealedCard('combat', false));
         document.getElementById('btn-face-down').addEventListener('click', () => resolveRevealedCard('combat', true));
       } else if (card.type === 'specialBlack') {
@@ -3159,7 +3162,7 @@
 
       await addLog('quest', 'Black Knight card placed' + (faceDown ? ' face-down' : '') + ' (' + blackCards.length + '/4)');
 
-      if (faceDown) await requestCardDraw('white', 1);
+      if (faceDown && !cachedPlayers?.[roomData.currentTurnKnight]?.isRevealed) await requestCardDraw('white', 1);
 
       if (blackCards.length >= 4) {
         await addLog('quest', 'Black Knight — 4th black card forces combat!');
@@ -3195,7 +3198,7 @@
       const phaseName = quest.phase === 'dragon' ? 'Dragon' : 'Lancelot';
       await addLog('quest', phaseName + ' card placed' + (faceDown ? ' face-down' : '') + ' (' + blackCards.length + '/' + maxBlack + ')');
 
-      if (faceDown) await requestCardDraw('white', 1);
+      if (faceDown && !cachedPlayers?.[roomData.currentTurnKnight]?.isRevealed) await requestCardDraw('white', 1);
 
       if (blackCards.length >= maxBlack) {
         await addLog('quest', phaseName + ' — max black cards forces combat!');
@@ -3629,7 +3632,7 @@
       html += '<div style="margin:0.5rem 0;font-size:1rem;">';
       for (const kid of turnOrder) {
         const p = cachedPlayers[kid];
-        if (!p || p.alive === false) continue;
+        if (!p || p.alive === false || p.isRevealed) continue;
         const resp = interaction.responses?.[kid];
         const name = p.displayName || KNIGHTS[kid]?.name || kid;
         if (resp?.done) {
@@ -3645,7 +3648,15 @@
       }
       html += '</div>';
 
-      if (!myDone) {
+      if (!myDone && cachedPlayers[myKnight]?.isRevealed) {
+        // Revealed traitor auto-passes — no white cards to offer
+        html += '<p style="color:var(--text-dim);font-size:1rem;">You are revealed — auto-passing...</p>';
+        if (!overlayVisible) html += '</div>';
+        area.innerHTML = html;
+        fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
+          .set({ done: true, merlinsOffered: 0 });
+        return;
+      } else if (!myDone) {
         if (merlinCount > 0) {
           html += '<button class="btn btn-merlin" id="btn-offer-merlin" style="margin-right:0.5rem;">Offer Merlin (' + merlinCount + ' left)</button>';
         }
@@ -3721,7 +3732,7 @@
 
       const total = interaction.totalMerlins || 0;
       const turnOrder = roomData?.turnOrder || [];
-      const aliveKnights = turnOrder.filter(kid => cachedPlayers[kid]?.alive !== false);
+      const aliveKnights = turnOrder.filter(kid => cachedPlayers[kid]?.alive !== false && !cachedPlayers[kid]?.isRevealed);
       const responses = interaction.responses || {};
       const allDone = aliveKnights.every(kid => responses[kid]?.done);
 
@@ -4211,6 +4222,14 @@
         return;
       }
 
+      if (myResponse?.volunteering) {
+        // Restore discard mode if re-rendered while volunteering
+        if (discardMode !== 'morgan1volunteer') {
+          discardMode = 'morgan1volunteer'; discardCount = 3; selectedCardId = null;
+        }
+        renderMorgan1DiscardUI();
+        return;
+      }
       if (myResponse) {
         area.innerHTML = '<div class="interaction-panel"><h3>Morgan 1</h3>' +
           '<p>You declined. Waiting for other knights...</p></div>';
@@ -4225,8 +4244,10 @@
         '<button class="btn btn-heroic" id="btn-m1-decline" style="margin-top:0.5rem;">Decline</button></div>';
 
       if (canVolunteer) {
-        document.getElementById('btn-m1-volunteer').addEventListener('click', () => {
-          discardMode = 'morgan1volunteer'; discardCount = 3; selectedCardId = null; renderMorgan1DiscardUI();
+        document.getElementById('btn-m1-volunteer').addEventListener('click', async () => {
+          discardMode = 'morgan1volunteer'; discardCount = 3; selectedCardId = null;
+          await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight).set({ volunteering: true });
+          renderMorgan1DiscardUI();
         });
       }
       document.getElementById('btn-m1-decline').addEventListener('click', async () => {
@@ -4259,8 +4280,8 @@
         return;
       }
 
-      // Check if all alive knights have responded
-      const allResponded = aliveKnights.every(kid => responses[kid]);
+      // Check if all alive knights have responded (volunteering-in-progress doesn't count as declined)
+      const allResponded = aliveKnights.every(kid => responses[kid] && !responses[kid].volunteering);
       if (!allResponded) return;
 
       // All declined — fall back to everyone discards 1
@@ -4655,6 +4676,7 @@
       updates['games/' + currentRoom + '/meta/pendingInteraction'] = null;
       updates['games/' + currentRoom + '/meta/evilActionTaken'] = false;
       updates['games/' + currentRoom + '/meta/morgan2Remaining'] = null;
+      updates['games/' + currentRoom + '/meta/excaliburPrompt'] = null;
       await fbDb.ref().update(updates);
     }
 
@@ -4910,6 +4932,7 @@
       if (heroicMode === 'heroismQuest') { renderHeroismQuestUI(area); return; }
       if (heroicMode === 'clairvoyanceReorder') { renderClairvoyanceUI(area); return; }
       if (heroicMode === 'accuse') { renderAccuseUI(area); return; }
+      if (heroicMode === 'fateTraitorChoice') { renderFateTraitorChoiceUI(area); return; }
 
       // After action taken — show End Turn + optional Sacrifice + power buttons
       if (roomData.heroicActionTaken) {
@@ -4917,7 +4940,7 @@
         // Knight powers available even after action
         html += renderKnightPowerButtons();
         html += '<button class="btn btn-heroic" id="btn-end-turn">End Turn</button>';
-        if (!roomData.sacrificeUsed && (cachedPlayers[myKnight]?.life || 0) > 1) {
+        if (!roomData.sacrificeUsed && (cachedPlayers[myKnight]?.life || 0) >= 1) {
           html += '<button class="btn btn-sacrifice" id="btn-sacrifice">Sacrifice 1 LP for another action</button>';
         }
         html += '</div></div>';
@@ -5022,7 +5045,7 @@
       let html = '';
       console.log('[SOC] renderKnightPowerButtons', { myKnight, arthurPowerUsed: roomData.arthurPowerUsed, galahadPowerUsed: roomData.galahadPowerUsed, handLength: myHand.length, location: getMyLocation() });
       // Galahad: free Special White
-      if (myKnight === 'galahad' && !roomData.galahadPowerUsed) {
+      if (myKnight === 'galahad' && !roomData.galahadPowerUsed && heroicMode !== 'galahadFreeSpecial') {
         const hasGalahadSW = myHand.some(c => c.type === 'special');
         if (hasGalahadSW) {
           html += '<button class="btn btn-heroic" id="btn-galahad-sw" style="border-color:var(--gold);">Galahad: Free Special White</button>';
@@ -6233,7 +6256,7 @@
 
     async function performSacrifice() {
       const life = cachedPlayers[myKnight]?.life || 4;
-      if (life <= 1) { showToast('Not enough life to sacrifice!'); return; }
+      if (life <= 0) { showToast('Not enough life to sacrifice!'); return; }
 
       const updates = {};
       updates['games/' + currentRoom + '/players/' + myKnight + '/life'] = life - 1;
@@ -6312,6 +6335,41 @@
       } else {
         await completeHeroicAction('specialWhite');
       }
+    }
+
+    function renderFateTraitorChoiceUI(area) {
+      area.innerHTML = '<div class="quest-play-panel"><h3>Fate Card — Traitor Choice</h3>' +
+        '<p style="font-size:1rem;color:var(--text-dim);">As long as your identity remains unknown, you may choose to play this card as a Loyal Knight.</p>' +
+        '<button class="btn btn-heroic" id="btn-fate-pretend" style="margin-bottom:0.5rem;">Pretend Loyal (all knights draw 1 card)</button>' +
+        '<button class="btn btn-danger" id="btn-fate-reveal">Reveal as Traitor (opponents discard 2 cards)</button></div>';
+      document.getElementById('btn-fate-pretend').addEventListener('click', async () => {
+        heroicMode = null;
+        const turnOrder = roomData?.turnOrder || [];
+        for (const kid of turnOrder) {
+          const p = cachedPlayers[kid];
+          if (!p || p.alive === false || p.isRevealed) continue;
+          if (kid === myKnight) {
+            await requestCardDraw('white', 1);
+          } else {
+            await fbDb.ref('games/' + currentRoom + '/drawRequests').push().set({
+              knightId: kid, deckType: 'white', count: 1,
+              timestamp: firebase.database.ServerValue.TIMESTAMP,
+            });
+          }
+        }
+        await addLog('info', getKnightDisplayName(myKnight) + ' played Fate (Loyal) — all knights draw 1 card!');
+        await completeSWAction();
+      });
+      document.getElementById('btn-fate-reveal').addEventListener('click', async () => {
+        heroicMode = null;
+        // Set fateDiscard BEFORE revealAsTraitor to prevent taunt UI flash (Fix #13)
+        await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set({
+          type: 'fateDiscard', traitorKnight: myKnight,
+          discardCount: 2, responses: {}, resolved: false,
+        });
+        await revealAsTraitor(myKnight, 'fate');
+        await addLog('evil', getKnightDisplayName(myKnight) + ' played Fate — TRAITOR REVEALED! All opponents discard 2 cards!');
+      });
     }
 
     async function performSpecialWhitePlay(cardId) {
@@ -6442,13 +6500,10 @@
           await addLog('info', getKnightDisplayName(myKnight) + ' played Fate (Loyal) — all knights draw 1 card!');
           await completeSWAction();
         } else {
-          // Traitor: reveal self, opponents discard 2
-          await revealAsTraitor(myKnight, 'fate');
-          await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set({
-            type: 'fateDiscard', traitorKnight: myKnight,
-            discardCount: 2, responses: {}, resolved: false,
-          });
-          await addLog('evil', getKnightDisplayName(myKnight) + ' played Fate — TRAITOR REVEALED! All opponents discard 2 cards!');
+          // Traitor: choice to pretend loyal or reveal
+          heroicMode = 'fateTraitorChoice';
+          renderTurnActions();
+          return; // Don't call completeSWAction yet
         }
 
       } else if (name === 'Heroism') {
@@ -6697,8 +6752,9 @@
       }
       await fbDb.ref('games/' + currentRoom + '/meta/clairvoyance').set(null);
       await addLog('info', getKnightDisplayName(myKnight) + ' reordered the top of the Black deck');
+      const wasGalahadFree = heroicSubState.galahadFree;
       heroicMode = null;
-      heroicSubState = {};
+      heroicSubState = wasGalahadFree ? { galahadFree: true } : {};
       await completeSWAction();
     }
 
@@ -6753,8 +6809,9 @@
         await fbDb.ref().update(updates);
       }
 
+      const wasGalahadFree = heroicSubState.galahadFree;
       heroicMode = null;
-      heroicSubState = {};
+      heroicSubState = wasGalahadFree ? { galahadFree: true } : {};
       selectedCardId = null;
       renderHand();
       await addLog('info', getKnightDisplayName(myKnight) + ' passed ' + cardsToPass.length + ' card(s) to ' + getKnightDisplayName(targetKnight) + ' via Messenger');
