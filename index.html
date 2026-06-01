@@ -734,7 +734,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v32';
+    const APP_VERSION = 'shadows-v33';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1830,10 +1830,10 @@
           if (selectedCardId) {
             const discardedCard = myHand.find(c => c.id === selectedCardId);
             myHand = myHand.filter(c => c.id !== selectedCardId);
-            if (discardedCard) requestWhiteDiscard([discardedCard]);
             selectedCardId = null;
             discardCount--;
             fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
+            if (discardedCard) requestWhiteDiscard([discardedCard]);
             if (discardCount <= 0) {
               const wasFate = discardMode === 'fateDiscard';
               discardMode = null;
@@ -1852,10 +1852,10 @@
           if (selectedCardId) {
             const discardedCard = myHand.find(c => c.id === selectedCardId);
             myHand = myHand.filter(c => c.id !== selectedCardId);
-            if (discardedCard) requestWhiteDiscard([discardedCard]);
             selectedCardId = null;
             discardCount--;
             fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
+            if (discardedCard) requestWhiteDiscard([discardedCard]);
             if (discardCount <= 0) {
               discardMode = null;
               fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
@@ -3674,8 +3674,8 @@
 
       // Remove from hand and discard
       myHand = myHand.filter(c => c.id !== merlinCard.id);
-      await requestWhiteDiscard([merlinCard]);
       await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
+      await requestWhiteDiscard([merlinCard]);
 
       // Increment totalMerlins atomically
       await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/totalMerlins')
@@ -4064,10 +4064,10 @@
       if (!card) return;
 
       myHand = myHand.filter(c => c.id !== selectedCardId);
-      await requestWhiteDiscard([card]);
       selectedCardId = null;
       discardMode = null;
       await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
+      await requestWhiteDiscard([card]);
       await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
         .set({ done: true });
       showToast('Card discarded.');
@@ -4343,8 +4343,8 @@
           if (myHand.length > 0) {
             const idx = Math.floor(Math.random() * myHand.length);
             const stolenCard = myHand.splice(idx, 1)[0];
-            requestWhiteDiscard([stolenCard]);
             fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
+            requestWhiteDiscard([stolenCard]);
             renderHand();
           }
           fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
@@ -5558,11 +5558,11 @@
       const card = myHand.find(c => c.id === cardId);
       if (!card) return;
 
-      // Remove from hand and discard
+      // Remove from hand and save before discard to avoid race condition
       myHand = myHand.filter(c => c.id !== cardId);
+      await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
       await requestWhiteDiscard([card]);
       const updates = {};
-      updates['private/' + currentRoom + '/' + myKnight + '/hand'] = myHand;
 
       const q = cachedQuests[loc];
 
@@ -5757,8 +5757,8 @@
       if (!card || card.type !== 'fight') { showToast('Select a Fight card!'); return; }
 
       myHand = myHand.filter(c => c.id !== cardId);
-      await requestWhiteDiscard([card]);
       await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
+      await requestWhiteDiscard([card]);
 
       const res = roomData.combatResolution;
       const newWhiteCards = [...res.whiteCards, { id: card.id, value: card.value }];
@@ -6086,8 +6086,8 @@
       // Remove played cards from hand and discard
       const playedCards = myHand.filter(c => cards.includes(c.id));
       myHand = myHand.filter(c => !cards.includes(c.id));
-      await requestWhiteDiscard(playedCards);
       await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
+      await requestWhiteDiscard(playedCards);
 
       // Store result for display — don't finalize yet (let player see result + Kay prompt)
       heroicSubState.rollResult = roll;
@@ -6136,8 +6136,8 @@
       if (!card || card.type !== 'fight') { showToast('Select a Fight card!'); return; }
 
       myHand = myHand.filter(c => c.id !== cardId);
-      await requestWhiteDiscard([card]);
       await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
+      await requestWhiteDiscard([card]);
 
       const newSum = heroicSubState.siegeSum + card.value;
       const roll = heroicSubState.rollResult;
@@ -6219,11 +6219,9 @@
 
       const discardedCards = myHand.filter(c => toRemove.includes(c.id));
       myHand = myHand.filter(c => !toRemove.includes(c.id));
+      await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
       await requestWhiteDiscard(discardedCards);
-      const updates = {};
-      updates['private/' + currentRoom + '/' + myKnight + '/hand'] = myHand;
-      updates['games/' + currentRoom + '/players/' + myKnight + '/life'] = Math.min(6, life + 1);
-      await fbDb.ref().update(updates);
+      await fbDb.ref('games/' + currentRoom + '/players/' + myKnight + '/life').set(Math.min(6, life + 1));
       renderHand();
       await addLog('info', getKnightDisplayName(myKnight) + ' healed (+1 LP)');
       await completeHeroicAction('heal');
@@ -6332,8 +6330,8 @@
 
       // Remove from hand and discard
       myHand = myHand.filter(c => c.id !== cardId);
-      await requestWhiteDiscard([card]);
       await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
+      await requestWhiteDiscard([card]);
       await fbDb.ref('games/' + currentRoom + '/meta/specialWhitePlayed').set(true);
       renderHand();
 
