@@ -795,7 +795,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v37';
+    const APP_VERSION = 'shadows-v38';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1642,7 +1642,7 @@
         // Spectator host: store decks under '_host' pseudo-key
         if (isSpectator && isHost) {
           updates[pp + '_host'] = {
-            uid: currentUser.uid,
+            uid: myUid,
             hostDecks: {
               whiteDraw: mainWhiteDeck,
               blackDraw: blackDeck,
