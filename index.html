@@ -795,7 +795,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v38';
+    const APP_VERSION = 'shadows-v39';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -3176,7 +3176,7 @@
 
       // Excalibur cancel prompt — any holder can cancel any black card
       const excHolder = findExcaliburHolder();
-      if (excHolder && (!roomData.excaliburPrompt || roomData.excaliburPrompt.declined)) {
+      if (excHolder && !roomData.excaliburPrompt) {
         // Initiate the prompt (only active player sets it to avoid races)
         if (isMyTurn()) {
           fbDb.ref('games/' + currentRoom + '/meta/excaliburPrompt').set({
