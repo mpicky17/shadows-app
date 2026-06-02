@@ -795,7 +795,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v36';
+    const APP_VERSION = 'shadows-v37';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -868,6 +868,7 @@
     let currentRoom = null;     // room code
     let isHost = false;         // am I the host?
     let isSpectator = false;     // watching without playing
+    let hostDeckKey = null;      // myKnight or '_host' for spectator hosts
     let gameListener = null;    // Firebase listener handle
     let playersListener = null;
     let roomData = null;        // cached room meta
@@ -1638,6 +1639,20 @@
           updates[pp + kid] = pdata;
         }
 
+        // Spectator host: store decks under '_host' pseudo-key
+        if (isSpectator && isHost) {
+          updates[pp + '_host'] = {
+            uid: currentUser.uid,
+            hostDecks: {
+              whiteDraw: mainWhiteDeck,
+              blackDraw: blackDeck,
+              whiteDiscard: [],
+              blackDiscard: [],
+            },
+          };
+        }
+        hostDeckKey = isHost ? (myKnight || '_host') : null;
+
         console.log('Game init:', {
           turnOrder, loyalty: loyaltyDeck,
           hands: Object.fromEntries(turnOrder.map(k => [k, playerHands[k].length])),
@@ -1748,8 +1763,11 @@
       listenToDecks();
       listenToGamePlayers();
 
-      // Host: listen for draw requests (spectator host processes draws too)
-      if (isHost) listenForDrawRequests();
+      // Host: set deck key and listen for draw requests (spectator host processes draws too)
+      if (isHost) {
+        hostDeckKey = myKnight || '_host';
+        listenForDrawRequests();
+      }
 
       // Players: listen for draw results (cards dealt to me) — not for spectators
       if (!isSpectator) listenForDrawResults();
@@ -2181,7 +2199,7 @@
 
       const { knightId, deckType, count } = request;
       console.log('[SOC] processDrawRequest', { requestId, knightId, deckType, count });
-      const deckPath = 'private/' + currentRoom + '/' + myKnight + '/hostDecks/';
+      const deckPath = 'private/' + currentRoom + '/' + hostDeckKey + '/hostDecks/';
 
       // Percival peek: read top black card without removing
       if (deckType === 'percivalPeek') {
@@ -2458,7 +2476,7 @@
     async function requestWhiteDiscard(cards) {
       if (!cards || cards.length === 0) return;
       if (isHost) {
-        const deckPath = 'private/' + currentRoom + '/' + myKnight + '/hostDecks/';
+        const deckPath = 'private/' + currentRoom + '/' + hostDeckKey + '/hostDecks/';
         const discardSnap = await fbDb.ref(deckPath + 'whiteDiscard').once('value');
         const discard = discardSnap.val() || [];
         discard.push(...cards);
@@ -2754,7 +2772,7 @@
 
     async function percivalPeekAction() {
       if (isHost) {
-        const deckPath = 'private/' + currentRoom + '/' + myKnight + '/hostDecks/blackDraw';
+        const deckPath = 'private/' + currentRoom + '/' + hostDeckKey + '/hostDecks/blackDraw';
         const snap = await fbDb.ref(deckPath).once('value');
         const pile = snap.val() || [];
         if (pile.length === 0) { showToast('Black draw pile is empty!'); return; }
@@ -2836,7 +2854,7 @@
       const hasArmor = cachedPlayers[myKnight]?.relics?.lancelotArmor;
 
       if (isHost) {
-        const deckPath = 'private/' + currentRoom + '/' + myKnight + '/hostDecks/';
+        const deckPath = 'private/' + currentRoom + '/' + hostDeckKey + '/hostDecks/';
         const deckSnap = await fbDb.ref(deckPath + 'blackDraw').once('value');
         const drawPile = deckSnap.val() || [];
 
@@ -2914,7 +2932,7 @@
       const hasArmor = cachedPlayers[myKnight]?.relics?.lancelotArmor;
 
       if (isHost) {
-        const deckPath = 'private/' + currentRoom + '/' + myKnight + '/hostDecks/';
+        const deckPath = 'private/' + currentRoom + '/' + hostDeckKey + '/hostDecks/';
         const deckSnap = await fbDb.ref(deckPath + 'blackDraw').once('value');
         const drawPile = deckSnap.val() || [];
 
@@ -3029,7 +3047,7 @@
       const unchosen = choice.cards[1 - chosenIndex];
 
       if (isHost) {
-        const deckPath = 'private/' + currentRoom + '/' + myKnight + '/hostDecks/';
+        const deckPath = 'private/' + currentRoom + '/' + hostDeckKey + '/hostDecks/';
         // Add chosen to discard
         const discardSnap = await fbDb.ref(deckPath + 'blackDiscard').once('value');
         const discard = discardSnap.val() || [];
@@ -6917,7 +6935,7 @@
 
       } else if (name === 'Clairvoyance') {
         if (isHost) {
-          const deckPath = 'private/' + currentRoom + '/' + myKnight + '/hostDecks/blackDraw';
+          const deckPath = 'private/' + currentRoom + '/' + hostDeckKey + '/hostDecks/blackDraw';
           const snap = await fbDb.ref(deckPath).once('value');
           const pile = snap.val() || [];
           const n = Math.min(5, pile.length);
@@ -7139,7 +7157,7 @@
 
     async function confirmClairvoyanceOrder(newOrder) {
       if (isHost) {
-        const deckPath = 'private/' + currentRoom + '/' + myKnight + '/hostDecks/blackDraw';
+        const deckPath = 'private/' + currentRoom + '/' + hostDeckKey + '/hostDecks/blackDraw';
         const snap = await fbDb.ref(deckPath).once('value');
         const pile = snap.val() || [];
         // Remove top N, put newOrder back (reversed since array end = top)
