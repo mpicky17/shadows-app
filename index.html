@@ -241,6 +241,20 @@
       font-size: 0.75rem; color: var(--gold);
       margin-top: 0.25rem; font-style: italic;
     }
+    .knight-card .knight-power {
+      font-size: 0.625rem; color: var(--text-dim); margin-top: 0.25rem;
+      line-height: 1.2; font-style: italic;
+    }
+    .knight-tooltip {
+      position: fixed; z-index: 250;
+      background: var(--bg-card); border: 1px solid var(--gold);
+      border-radius: var(--radius); padding: 0.75rem;
+      max-width: 260px; font-size: 0.875rem; color: var(--text);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+      line-height: 1.4;
+    }
+    .knight-tooltip strong { color: var(--gold); }
+    .knight-tooltip em { color: var(--text-dim); font-size: 0.8125rem; }
 
     .lobby-players {
       display: flex;
@@ -554,6 +568,41 @@
     .d8-result.lose { color: var(--red-bright); }
     .combat-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.9); z-index: 200; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 1.5rem; gap: 1rem; text-align: center; overflow-y: auto; }
     .combat-overlay.hidden { display: none; }
+    @keyframes overlayFadeIn {
+      from { opacity: 0; transform: translateY(20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .combat-overlay:not(.hidden) { animation: overlayFadeIn 0.3s ease-out; }
+    @keyframes cardPlayFlash {
+      0% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.8; transform: scale(1.05); }
+      100% { opacity: 1; transform: scale(1); }
+    }
+    .quest-chip.card-played { animation: cardPlayFlash 0.4s ease-out; }
+    .rules-overlay {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.9); z-index: 150;
+      display: flex; align-items: flex-start; justify-content: center;
+      padding: 1rem; overflow-y: auto;
+    }
+    .rules-overlay.hidden { display: none; }
+    .rules-panel {
+      max-width: 600px; width: 100%; background: var(--bg-card);
+      border-radius: var(--radius); padding: 1rem;
+      max-height: 90vh; display: flex; flex-direction: column;
+    }
+    .rules-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.75rem; }
+    .rules-tabs { display: flex; gap: 0.375rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+    .rules-tab {
+      padding: 0.375rem 0.625rem; font-size: 0.8125rem; font-weight: 600;
+      border: 1px solid var(--gold-dim); border-radius: 4px;
+      background: transparent; color: var(--text-dim); cursor: pointer;
+    }
+    .rules-tab.active { background: var(--gold); color: var(--bg-dark); border-color: var(--gold); }
+    .rules-content { flex: 1; overflow-y: auto; font-size: 0.875rem; color: var(--text); line-height: 1.5; }
+    .rules-content h4 { color: var(--gold); margin: 0.75rem 0 0.25rem; font-size: 1rem; }
+    .rules-content ul { padding-left: 1.25rem; margin: 0.25rem 0; }
+    .rules-content li { margin-bottom: 0.25rem; }
     .results-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.95); z-index: 300; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding: 2rem 1rem; overflow-y: auto; }
     .results-overlay.hidden { display: none; }
     .results-panel { max-width: 500px; width: 100%; text-align: center; }
@@ -652,6 +701,7 @@
 
     <div class="lobby-actions">
       <button class="btn btn-primary" id="btn-start" style="display:none;" disabled>Start Game (need 3+ players)</button>
+      <button class="btn" id="btn-spectate">Watch as Spectator</button>
       <button class="btn btn-danger" id="btn-leave">Leave Game</button>
     </div>
   </div>
@@ -664,6 +714,7 @@
         <span class="deck-count white-count" id="white-deck-count">W: --</span>
         <span class="deck-count black-count" id="black-deck-count">B: --</span>
       </div>
+      <button class="btn" id="btn-rules" style="font-size:0.75rem;padding:0.25rem 0.5rem;min-width:auto;border-color:var(--text-dim);color:var(--text-dim);">?</button>
       <button class="btn btn-danger btn-leave-game" id="btn-leave-game">Leave</button>
     </div>
 
@@ -724,6 +775,16 @@
         <button class="btn btn-heroic" id="btn-results-lobby" style="width:100%;margin-top:0.5rem;">Return to Lobby</button>
       </div>
     </div>
+    <div class="rules-overlay hidden" id="rules-overlay">
+      <div class="rules-panel">
+        <div class="rules-header">
+          <h2 style="color:var(--gold);font-size:1.25rem;margin:0;">Rules Reference</h2>
+          <button class="btn" id="btn-close-rules" style="font-size:0.875rem;padding:0.25rem 0.75rem;min-width:auto;">Close</button>
+        </div>
+        <div class="rules-tabs" id="rules-tabs"></div>
+        <div class="rules-content" id="rules-content"></div>
+      </div>
+    </div>
   </div>
 
   <!-- Toast -->
@@ -734,7 +795,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v35';
+    const APP_VERSION = 'shadows-v36';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -742,13 +803,13 @@
     // ═══════════════════════════════════════════════════════════════════
 
     const KNIGHTS = {
-      arthur:    { name: 'King Arthur',    title: 'Son of Uther Pendragon', color: '#8B1A1A', icon: 'assets/knight-arthur.svg' },
-      galahad:   { name: 'Sir Galahad',    title: 'Son of Lancelot',        color: '#1E3A5F', icon: 'assets/knight-galahad.svg' },
-      gawain:    { name: 'Sir Gawain',     title: 'Son of King Lot',        color: '#1B5E20', icon: 'assets/knight-gawain.svg' },
-      kay:       { name: 'Sir Kay',        title: 'Seneschal of King Arthur',color: '#1565C0', icon: 'assets/knight-kay.svg' },
-      palamedes: { name: 'Sir Palamedes',  title: 'Saracen Knight',         color: '#2D1B4E', icon: 'assets/knight-palamedes.svg' },
-      percival:  { name: 'Sir Percival',   title: 'Son of Pellinore',       color: '#616161', icon: 'assets/knight-percival.svg' },
-      tristan:   { name: 'Sir Tristan',    title: 'of Lyonesse',            color: '#4A148C', icon: 'assets/knight-tristan.svg' },
+      arthur:    { name: 'King Arthur',    title: 'Son of Uther Pendragon', color: '#8B1A1A', icon: 'assets/knight-arthur.svg', power: 'Exchange 1 card with any knight (once/turn)' },
+      galahad:   { name: 'Sir Galahad',    title: 'Son of Lancelot',        color: '#1E3A5F', icon: 'assets/knight-galahad.svg', power: 'Play 1 Special White for free (once/turn)' },
+      gawain:    { name: 'Sir Gawain',     title: 'Son of King Lot',        color: '#1B5E20', icon: 'assets/knight-gawain.svg', power: 'Draw 3 White cards instead of 2 at Round Table' },
+      kay:       { name: 'Sir Kay',        title: 'Seneschal of King Arthur',color: '#1565C0', icon: 'assets/knight-kay.svg', power: 'Play 1 extra Fight card after combat revealed' },
+      palamedes: { name: 'Sir Palamedes',  title: 'Saracen Knight',         color: '#2D1B4E', icon: 'assets/knight-palamedes.svg', power: 'Gain 1 extra LP per quest victory while present' },
+      percival:  { name: 'Sir Percival',   title: 'Son of Pellinore',       color: '#616161', icon: 'assets/knight-percival.svg', power: 'Peek at top Black card before deciding evil action' },
+      tristan:   { name: 'Sir Tristan',    title: 'of Lyonesse',            color: '#4A148C', icon: 'assets/knight-tristan.svg', power: 'Free move from Round Table (gets another action)' },
     };
 
     const ROOM_CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no I/O/0/1 to avoid confusion
@@ -806,6 +867,7 @@
     let myKnight = null;        // selected knight ID
     let currentRoom = null;     // room code
     let isHost = false;         // am I the host?
+    let isSpectator = false;     // watching without playing
     let gameListener = null;    // Firebase listener handle
     let playersListener = null;
     let roomData = null;        // cached room meta
@@ -900,10 +962,11 @@
     }
 
     function saveSession() {
-      if (currentRoom && myKnight) {
+      if (currentRoom && (myKnight || isSpectator)) {
         localStorage.setItem('shadows-room-code', currentRoom);
-        localStorage.setItem('shadows-knight-id', myKnight);
+        localStorage.setItem('shadows-knight-id', myKnight || '');
         localStorage.setItem('shadows-is-host', isHost ? 'true' : 'false');
+        localStorage.setItem('shadows-is-spectator', isSpectator ? 'true' : 'false');
       }
     }
 
@@ -911,13 +974,15 @@
       localStorage.removeItem('shadows-room-code');
       localStorage.removeItem('shadows-knight-id');
       localStorage.removeItem('shadows-is-host');
+      localStorage.removeItem('shadows-is-spectator');
     }
 
     async function tryReconnect() {
       const savedRoom = localStorage.getItem('shadows-room-code');
       const savedKnight = localStorage.getItem('shadows-knight-id');
       const savedHost = localStorage.getItem('shadows-is-host');
-      if (!savedRoom || !savedKnight || !myUid) return false;
+      const savedSpectator = localStorage.getItem('shadows-is-spectator');
+      if (!savedRoom || (!savedKnight && savedSpectator !== 'true') || !myUid) return false;
 
       try {
         // Validate room still exists
@@ -936,6 +1001,23 @@
           return false;
         }
 
+        // Spectator reconnect — no knight validation needed
+        if (savedSpectator === 'true') {
+          currentRoom = savedRoom;
+          myKnight = null;
+          isHost = savedHost === 'true';
+          isSpectator = true;
+          roomData = meta;
+          console.log('Reconnecting to room', savedRoom, 'as spectator', isHost ? '(host)' : '');
+          if (meta.status === 'lobby') {
+            showScreen('lobby-screen');
+            enterLobby();
+          } else {
+            listenToRoom();
+          }
+          return true;
+        }
+
         // Validate our knight entry still exists and belongs to us
         const knightSnap = await fbDb.ref('games/' + savedRoom + '/players/' + savedKnight).once('value');
         if (!knightSnap.exists() || knightSnap.val().uid !== myUid) {
@@ -948,6 +1030,7 @@
         currentRoom = savedRoom;
         myKnight = savedKnight;
         isHost = savedHost === 'true';
+        isSpectator = false;
         roomData = meta;
 
         console.log('Reconnecting to room', savedRoom, 'as', savedKnight, isHost ? '(host)' : '');
@@ -970,14 +1053,17 @@
     function updateHomeScreenForSession() {
       const savedRoom = localStorage.getItem('shadows-room-code');
       const savedKnight = localStorage.getItem('shadows-knight-id');
-      const hasSession = !!(savedRoom && savedKnight);
+      const savedSpectator = localStorage.getItem('shadows-is-spectator');
+      const hasSession = !!(savedRoom && (savedKnight || savedSpectator === 'true'));
 
       $('home-actions').style.display = hasSession ? 'none' : '';
       $('home-recovery').style.display = hasSession ? '' : 'none';
 
       if (hasSession) {
-        const knightName = KNIGHTS[savedKnight]?.name || savedKnight;
-        $('recovery-info').textContent = 'Room: ' + savedRoom + ' | ' + knightName;
+        const label = savedSpectator === 'true'
+          ? 'Room: ' + savedRoom + ' | Spectating'
+          : 'Room: ' + savedRoom + ' | ' + (KNIGHTS[savedKnight]?.name || savedKnight);
+        $('recovery-info').textContent = label;
       }
     }
 
@@ -1192,11 +1278,25 @@
           <img src="${knight.icon}" alt="${knight.name}">
           <div class="knight-name">${knight.name}</div>
           <div class="knight-title">${knight.title}</div>
+          <div class="knight-power">${knight.power}</div>
           <div class="knight-taken-by"></div>
         `;
         card.addEventListener('click', () => selectKnight(id));
         grid.appendChild(card);
       }
+    }
+
+    async function enterSpectatorMode() {
+      if (!currentRoom) return;
+      // Remove any previously selected knight
+      if (myKnight) {
+        await fbDb.ref('games/' + currentRoom + '/players/' + myKnight).remove();
+      }
+      myKnight = null;
+      isSpectator = true;
+      document.querySelectorAll('.knight-card').forEach(c => c.classList.remove('selected'));
+      saveSession();
+      showToast('You are now spectating.');
     }
 
     async function selectKnight(knightId) {
@@ -1223,6 +1323,7 @@
       if (removals.length > 0) await Promise.all(removals);
 
       myKnight = knightId;
+      isSpectator = false;
 
       await fbDb.ref('games/' + currentRoom + '/players/' + knightId).set({
         uid: myUid,
@@ -1280,6 +1381,7 @@
           onRevealedBlackCardChanged();
           renderPendingInteraction();
           onCombatResolutionChanged();
+          onQuestResultChanged();
         }
       });
 
@@ -1397,6 +1499,7 @@
       currentRoom = null;
       myKnight = null;
       isHost = false;
+      isSpectator = false;
       roomData = null;
       inGameScreen = false;
       myLoyalty = null;
@@ -1595,6 +1698,9 @@
     });
 
     $('btn-leave').addEventListener('click', () => leaveRoom(true));
+    $('btn-spectate').addEventListener('click', enterSpectatorMode);
+    $('btn-rules').addEventListener('click', openRules);
+    $('btn-close-rules').addEventListener('click', closeRules);
     $('btn-leave-game').addEventListener('click', () => {
       if (confirm('Leave this game? You can return later from the home screen.')) {
         leaveRoom(false);
@@ -1627,8 +1733,14 @@
       inGameScreen = true;
       showScreen('game-screen');
 
-      // Listen to own private data (loyalty + hand)
-      listenToPrivateData();
+      // Spectators: hide hand and loyalty areas
+      if (isSpectator) {
+        $('hand-area').style.display = 'none';
+        $('loyalty-display').style.display = 'none';
+      }
+
+      // Listen to own private data (loyalty + hand) — not for spectators
+      if (!isSpectator) listenToPrivateData();
 
       // Listen to shared game state
       listenToBoard();
@@ -1636,11 +1748,11 @@
       listenToDecks();
       listenToGamePlayers();
 
-      // Host: listen for draw requests
+      // Host: listen for draw requests (spectator host processes draws too)
       if (isHost) listenForDrawRequests();
 
-      // All: listen for draw results (cards dealt to me)
-      listenForDrawResults();
+      // Players: listen for draw results (cards dealt to me) — not for spectators
+      if (!isSpectator) listenForDrawResults();
 
       // Re-render UI when tab regains focus (Firebase updates may arrive while backgrounded)
       document.addEventListener('visibilitychange', () => {
@@ -1661,25 +1773,27 @@
             });
           }
           // Player: catch up on any draw results missed while backgrounded
-          fbDb.ref('games/' + currentRoom + '/drawResults').once('value', async snap => {
-            if (!snap.exists()) return;
-            let caught = false;
-            snap.forEach(child => {
-              const result = child.val();
-              if (!result || result.knightId !== myKnight) return;
-              if (processedDrawResults.has(child.key)) return;
-              processedDrawResults.add(child.key);
-              const newCards = result.cards || [];
-              console.log('[SOC] drawResult catch-up', { cardCount: newCards.length, key: child.key });
-              myHand = [...myHand, ...newCards];
-              const updates = {};
-              updates['private/' + currentRoom + '/' + myKnight + '/hand'] = myHand;
-              updates['games/' + currentRoom + '/drawResults/' + child.key] = null;
-              fbDb.ref().update(updates);
-              caught = true;
+          if (!isSpectator) {
+            fbDb.ref('games/' + currentRoom + '/drawResults').once('value', async snap => {
+              if (!snap.exists()) return;
+              let caught = false;
+              snap.forEach(child => {
+                const result = child.val();
+                if (!result || result.knightId !== myKnight) return;
+                if (processedDrawResults.has(child.key)) return;
+                processedDrawResults.add(child.key);
+                const newCards = result.cards || [];
+                console.log('[SOC] drawResult catch-up', { cardCount: newCards.length, key: child.key });
+                myHand = [...myHand, ...newCards];
+                const updates = {};
+                updates['private/' + currentRoom + '/' + myKnight + '/hand'] = myHand;
+                updates['games/' + currentRoom + '/drawResults/' + child.key] = null;
+                fbDb.ref().update(updates);
+                caught = true;
+              });
+              if (caught) renderHand();
             });
-            if (caught) renderHand();
-          });
+          }
         }
       });
 
@@ -1943,7 +2057,7 @@
         const lostStyle = q.status === 'lost' ? ' style="opacity:0.5;border-color:var(--red-bright);"' : '';
         const lostLabel = q.status === 'lost' ? ' (LOST)' : '';
         const heroismTag = roomData?.heroismQuests?.[qi.key] ? ' [+1\u2694]' : '';
-        return '<div class="quest-chip"' + lostStyle + '><div class="qname">' + qi.name + lostLabel + '</div>' +
+        return '<div class="quest-chip" data-quest-key="' + qi.key + '"' + lostStyle + '><div class="qname">' + qi.name + lostLabel + '</div>' +
                '<div class="qinfo">' + qi.info(q) + heroismTag + '</div></div>';
       }).join('');
     }
@@ -1968,7 +2082,7 @@
         if (p.relics?.holyGrail) relicHtml += '<img src="assets/holy-grail.svg" class="gp-relic" title="Holy Grail">';
         if (p.relics?.lancelotArmor) relicHtml += '<img src="assets/lancelot-armor.svg" class="gp-relic" title="Lancelot\'s Armor">';
         const hostTag = p.uid === roomData.hostUid ? '<span class="gp-host" title="Host (keep this tab active)">HOST</span>' : '';
-        return '<div class="' + cls + '">' +
+        return '<div class="' + cls + '" data-knight-id="' + kid + '" style="cursor:pointer;">' +
           '<img src="' + knight.icon + '" alt="">' +
           '<span>' + p.displayName + '</span>' + hostTag +
           (p.isRevealed ? '' : '<span class="gp-life">' + '\u2665'.repeat(Math.max(0, p.life)) + '</span>') +
@@ -1977,14 +2091,22 @@
           '</div>';
       }).join('');
 
+      // Attach knight tooltip handlers
+      el.querySelectorAll('.gp-chip').forEach(chip => {
+        chip.addEventListener('click', () => {
+          const kid = chip.dataset.knightId;
+          if (kid && KNIGHTS[kid]) showKnightTooltip(kid, chip);
+        });
+      });
+
       // Update turn info
       const current = cachedPlayers[roomData.currentTurnKnight];
       if (current && roomData.status === 'playing') {
         const k = KNIGHTS[roomData.currentTurnKnight];
         $('turn-info').textContent = (current.uid === myUid ? 'Your' : current.displayName + "'s") +
-          ' turn — ' + (roomData.turnPhase || 'evil');
+          ' turn — ' + (roomData.turnPhase || 'evil') + (isSpectator ? ' (Spectating)' : '');
       } else if (roomData.status === 'setup') {
-        $('turn-info').textContent = 'Setup — Card Sharing';
+        $('turn-info').textContent = 'Setup — Card Sharing' + (isSpectator ? ' (Spectating)' : '');
       } else if (roomData.status === 'ended') {
         $('turn-info').textContent = 'Game Over — ' + (roomData.winner === 'loyal' ? 'Loyal Knights Win!' : 'Evil Wins!');
         renderResultsScreen();
@@ -1992,6 +2114,27 @@
 
       // Render turn actions (Phase 3)
       renderTurnActions();
+    }
+
+    function showKnightTooltip(knightId, anchorEl) {
+      const existing = document.querySelector('.knight-tooltip');
+      if (existing) {
+        const wasForSame = existing.dataset.knightId === knightId;
+        existing.remove();
+        if (wasForSame) return;
+      }
+      const k = KNIGHTS[knightId];
+      const tooltip = document.createElement('div');
+      tooltip.className = 'knight-tooltip';
+      tooltip.dataset.knightId = knightId;
+      tooltip.innerHTML = '<strong>' + k.name + '</strong> — ' + k.title +
+        '<br><em>' + k.power + '</em>';
+      document.body.appendChild(tooltip);
+      const rect = anchorEl.getBoundingClientRect();
+      tooltip.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 270)) + 'px';
+      tooltip.style.top = (rect.bottom + 8) + 'px';
+      const remove = () => { if (document.body.contains(tooltip)) tooltip.remove(); document.removeEventListener('click', remove); };
+      setTimeout(() => document.addEventListener('click', remove), 10);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -2532,6 +2675,8 @@
       if (roomData.pendingInteraction && !roomData.pendingInteraction.resolved) { area.innerHTML = ''; return; }
       // Don't show actions if a card is being revealed
       if (roomData.revealedBlackCard) { area.innerHTML = ''; return; }
+      // Don't show actions if quest result overlay is showing
+      if (roomData.questResult) { area.innerHTML = ''; return; }
       // Don't show actions if armor choice is pending
       if (roomData.armorChoice) { renderArmorChoiceOverlay(area); return; }
       // Arthur exchange in progress — show return-card UI for target, waiting for others
@@ -3242,16 +3387,21 @@
           updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
         }
         updates['games/' + currentRoom + '/quests/excalibur/knightsPresent'] = [];
+        updates['games/' + currentRoom + '/meta/questResult'] = {
+          questKey: 'excalibur', result: 'defeat', position: newPos, fromEvil: true,
+          summary: '2 Black Swords, -1 LP. Excalibur removed from game.',
+        };
 
         await fbDb.ref().update(updates);
         await addLog('quest', 'Excalibur quest LOST! 2 Black Swords, -1 LP. Excalibur removed from game.');
         await applyHeroismSword('excalibur', 'black');
+        if (await checkGameEnd()) return;
+        // advanceToHeroicPhase called when quest result overlay dismissed
       } else {
         await fbDb.ref().update(updates);
+        if (await checkGameEnd()) return;
+        await advanceToHeroicPhase();
       }
-
-      if (await checkGameEnd()) return;
-      await advanceToHeroicPhase();
     }
 
     async function applyDespairCard(card) {
@@ -3303,17 +3453,22 @@
           updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
         }
         updates['games/' + currentRoom + '/quests/holyGrail/knightsPresent'] = [];
+        updates['games/' + currentRoom + '/meta/questResult'] = {
+          questKey: 'holyGrail', result: 'defeat', cards, fromEvil: true,
+          summary: '3 Black Swords, -1 LP. Holy Grail removed from game.',
+        };
 
         await fbDb.ref().update(updates);
         await addLog('quest', 'Holy Grail quest LOST! 3 Black Swords, -1 LP. Holy Grail removed from game.');
         await applyHeroismSword('holyGrail', 'black');
+        if (await checkGameEnd()) return;
+        // advanceToHeroicPhase called when quest result overlay dismissed
       } else {
         await fbDb.ref().update(updates);
         await addLog('quest', 'Despair placed on Holy Grail (' + blackCount + ' black, ' + grailCount + ' grail)');
+        if (await checkGameEnd()) return;
+        await advanceToHeroicPhase();
       }
-
-      if (await checkGameEnd()) return;
-      await advanceToHeroicPhase();
     }
 
     async function applySaxonCard(card) {
@@ -3374,17 +3529,23 @@
         if (roomData?.persistentEffects?.mordred === questKey) {
           updates['games/' + currentRoom + '/meta/persistentEffects/mordred'] = null;
         }
+        const warName = questKey === 'saxonWar' ? 'Saxon' : 'Pict';
+        updates['games/' + currentRoom + '/meta/questResult'] = {
+          questKey, result: 'defeat', warriors: newWarriors, fromEvil: true,
+          summary: '1 Black Sword + 2 Siege Engines, -1 LP. ' + warName + ' War resets.',
+        };
 
         await fbDb.ref().update(updates);
         await addLog('quest', label + ' War LOST! 4th warrior placed. 1 Black Sword + 2 Siege Engines. Quest resets.');
         await applyHeroismSword(questKey, 'black');
+        if (await checkGameEnd()) return;
+        // advanceToHeroicPhase called when quest result overlay dismissed
       } else {
         await fbDb.ref().update(updates);
         await addLog('quest', label + ' warrior added (' + newWarriors + '/4)');
+        if (await checkGameEnd()) return;
+        await advanceToHeroicPhase();
       }
-
-      if (await checkGameEnd()) return;
-      await advanceToHeroicPhase();
     }
 
     async function addSiegeEngineFromCard(label) {
@@ -3536,14 +3697,21 @@
                 updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
               }
               updates['games/' + currentRoom + '/quests/holyGrail/knightsPresent'] = [];
+              updates['games/' + currentRoom + '/meta/questResult'] = {
+                questKey: 'holyGrail', result: 'defeat', cards, fromEvil: true,
+                summary: '3 Black Swords. Holy Grail removed from game.',
+              };
               await fbDb.ref().update(updates);
               await addLog('quest', 'Holy Grail quest LOST! 3 Black Swords added.');
+              await applyHeroismSword('holyGrail', 'black');
+              if (await checkGameEnd()) return;
+              // advanceToHeroicPhase called when quest result overlay dismissed
             } else {
               await fbDb.ref().update(updates);
               await addLog('quest', 'Desolation replaced a Grail card on Holy Grail (' + blackCount + ' black, ' + grailCount + ' grail)');
+              if (await checkGameEnd()) return;
+              await advanceToHeroicPhase();
             }
-            if (await checkGameEnd()) return;
-            await advanceToHeroicPhase();
             return;
           }
           // No Grail cards left — all 7 are black, quest already lost
@@ -3566,14 +3734,21 @@
             updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
           }
           updates['games/' + currentRoom + '/quests/holyGrail/knightsPresent'] = [];
+          updates['games/' + currentRoom + '/meta/questResult'] = {
+            questKey: 'holyGrail', result: 'defeat', cards, fromEvil: true,
+            summary: '3 Black Swords. Holy Grail removed from game.',
+          };
           await fbDb.ref().update(updates);
           await addLog('quest', 'Holy Grail quest LOST! 3 Black Swords added.');
+          await applyHeroismSword('holyGrail', 'black');
+          if (await checkGameEnd()) return;
+          // advanceToHeroicPhase called when quest result overlay dismissed
         } else {
           await fbDb.ref().update(updates);
           await addLog('quest', 'Desolation placed on Holy Grail (' + blackCount + ' black, ' + grailCount + ' grail)');
+          if (await checkGameEnd()) return;
+          await advanceToHeroicPhase();
         }
-        if (await checkGameEnd()) return;
-        await advanceToHeroicPhase();
 
       } else if (name === 'Morgan 1') {
         // Volunteer phase first; if all decline, fall back to morganDiscard
@@ -5587,6 +5762,15 @@
       await requestWhiteDiscard([card]);
       const updates = {};
 
+      // Flash the quest chip to signal card placement
+      const chip = document.querySelector('.quest-chip[data-quest-key="' + loc + '"]');
+      if (chip) {
+        chip.classList.remove('card-played');
+        void chip.offsetWidth; // force reflow to restart animation
+        chip.classList.add('card-played');
+        setTimeout(() => chip.classList.remove('card-played'), 400);
+      }
+
       const q = cachedQuests[loc];
 
       if (loc === 'excalibur') {
@@ -5693,9 +5877,89 @@
     function onCombatResolutionChanged() {
       const resolution = roomData?.combatResolution;
       const overlay = $('combat-overlay');
-      if (!resolution) { overlay.classList.add('hidden'); return; }
+      if (!resolution) {
+        // Don't hide if a quest result is showing
+        if (!roomData?.questResult) overlay.classList.add('hidden');
+        return;
+      }
       overlay.classList.remove('hidden');
       renderCombatOverlay(resolution);
+    }
+
+    function onQuestResultChanged() {
+      const result = roomData?.questResult;
+      const overlay = $('combat-overlay');
+      if (!result) {
+        if (!roomData?.combatResolution) overlay.classList.add('hidden');
+        return;
+      }
+      overlay.classList.remove('hidden');
+      renderQuestResultOverlay(result);
+    }
+
+    function renderQuestResultOverlay(data) {
+      const questLabel = getLocationLabel(data.questKey);
+      $('combat-title').textContent = questLabel + ' — Quest Result';
+
+      let html = '';
+      if (data.questKey === 'holyGrail') {
+        html += '<p style="color:var(--text-dim);font-size:1rem;">Holy Grail Quest Board</p><div class="combat-cards">';
+        for (const card of (data.cards || [])) {
+          const isGrail = card.type === 'grail';
+          html += '<div class="combat-card ' + (isGrail ? 'white-side' : 'black-side') + '">' +
+            '<div class="cc-val">' + (isGrail ? 'G' : 'D') + '</div>' +
+            '<div style="font-size:0.625rem;">' + (isGrail ? 'Grail' : (card.type === 'desolation' ? 'Desolation' : 'Despair')) + '</div></div>';
+        }
+        html += '</div>';
+        const gc = (data.cards || []).filter(c => c.type === 'grail').length;
+        const bc = (data.cards || []).filter(c => c.type !== 'grail').length;
+        html += '<p style="color:var(--gold);font-size:1.125rem;font-weight:700;margin:0.5rem 0;">' + gc + ' Grail / ' + bc + ' Despair</p>';
+      } else if (data.questKey === 'excalibur') {
+        html += '<p style="color:var(--text-dim);font-size:1rem;">Excalibur River Position</p>';
+        html += '<div style="display:flex;gap:4px;justify-content:center;margin:0.75rem 0;">';
+        for (let i = -5; i <= 5; i++) {
+          const pos = data.position || 0;
+          const isExc = i === pos;
+          const bg = isExc ? 'var(--gold)' : (i < 0 ? 'rgba(139,26,26,0.3)' : (i > 0 ? 'rgba(46,125,50,0.3)' : 'rgba(255,255,255,0.15)'));
+          const col = isExc ? 'var(--bg-dark)' : 'var(--text-dim)';
+          html += '<div style="width:26px;height:26px;border-radius:4px;display:flex;align-items:center;justify-content:center;' +
+            'background:' + bg + ';font-size:0.6875rem;font-weight:700;color:' + col + ';">' + (isExc ? '\u2694' : '') + '</div>';
+        }
+        html += '</div>';
+      } else if (data.questKey === 'saxonWar' || data.questKey === 'pictWar') {
+        const warName = data.questKey === 'saxonWar' ? 'Saxon' : 'Pict';
+        html += '<p style="color:var(--text-dim);font-size:1rem;">' + warName + ' War</p>';
+        if (data.result === 'victory' && data.fightCards) {
+          html += '<div class="combat-cards">';
+          for (const card of data.fightCards) {
+            html += '<div class="combat-card white-side"><div class="cc-val">' + card.value + '</div>' +
+              '<div style="font-size:0.625rem;">Fight</div></div>';
+          }
+          html += '</div>';
+        } else {
+          html += '<p style="color:var(--red-bright);font-size:1.5rem;font-weight:700;margin:0.5rem 0;">' + (data.warriors || 4) + '/4 Warriors</p>';
+        }
+      }
+
+      const isVictory = data.result === 'victory';
+      html += '<div class="combat-result ' + (isVictory ? 'victory' : 'defeat') + '">' +
+        (isVictory ? 'VICTORY!' : 'DEFEAT...') + '</div>';
+      html += '<p style="color:var(--text-dim);font-size:0.875rem;">' + (data.summary || '') + '</p>';
+      $('combat-content').innerHTML = html;
+
+      const actionsEl = $('combat-actions');
+      if (isMyTurn() || (data.fromEvil && isHost)) {
+        actionsEl.innerHTML = '<button class="btn btn-heroic" id="btn-dismiss-quest-result">Continue</button>';
+        document.getElementById('btn-dismiss-quest-result').addEventListener('click', async () => {
+          const wasFromEvil = data.fromEvil;
+          await fbDb.ref('games/' + currentRoom + '/meta/questResult').set(null);
+          if (wasFromEvil && isMyTurn()) {
+            if (!(await checkGameEnd())) await advanceToHeroicPhase();
+          }
+        });
+      } else {
+        actionsEl.innerHTML = '<p class="waiting-text">Waiting for resolution...</p>';
+      }
     }
 
     function renderCombatOverlay(res) {
@@ -5962,6 +6226,10 @@
         }
         updates['games/' + currentRoom + '/quests/excalibur/status'] = 'won';
         updates['games/' + currentRoom + '/quests/excalibur/knightsPresent'] = [];
+        updates['games/' + currentRoom + '/meta/questResult'] = {
+          questKey: 'excalibur', result: 'victory', position: q.position || 0,
+          summary: '2 White Swords, +1 LP each, 7 cards, Excalibur relic to ' + getKnightDisplayName(myKnight),
+        };
         await fbDb.ref().update(updates);
         await distributeCardsAmongKnights(7, knightsOnQuest);
         await addLog('quest', 'Quest for Excalibur WON! 2 White Swords, +1 LP each, 7 cards, Excalibur relic to ' + getKnightDisplayName(myKnight));
@@ -5979,6 +6247,10 @@
         if (grailWhiteCards.length > 0) await requestWhiteDiscard(grailWhiteCards);
         updates['games/' + currentRoom + '/quests/holyGrail/status'] = 'won';
         updates['games/' + currentRoom + '/quests/holyGrail/knightsPresent'] = [];
+        updates['games/' + currentRoom + '/meta/questResult'] = {
+          questKey: 'holyGrail', result: 'victory', cards: q.cards || [],
+          summary: '3 White Swords, +1 LP, 7 cards, Holy Grail relic to ' + getKnightDisplayName(myKnight),
+        };
         await fbDb.ref().update(updates);
         await distributeCardsAmongKnights(7, knightsOnQuest);
         await addLog('quest', 'Quest for the Holy Grail WON! 3 White Swords, +1 LP, 7 cards, Holy Grail relic to ' + getKnightDisplayName(myKnight));
@@ -5994,6 +6266,10 @@
         }
         const fightCards = q.fightCards || [];
         if (fightCards.length > 0) await requestWhiteDiscard(fightCards.map(fc => ({ ...fc, type: 'fight' })));
+        updates['games/' + currentRoom + '/meta/questResult'] = {
+          questKey, result: 'victory', fightCards: q.fightCards || [],
+          summary: '1 White Sword, +1 LP each, 4 cards drawn.',
+        };
         updates['games/' + currentRoom + '/quests/' + questKey] = { status: 'active', warriors: 0, fightCards: [], knightsPresent: [] };
         await fbDb.ref().update(updates);
         await distributeCardsAmongKnights(4, knightsOnQuest);
@@ -6320,6 +6596,135 @@
         'Convocation': 'All knights return to Camelot and draw/share cards',
       };
       return descs[name] || name;
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  Rules Reference Overlay
+    // ═══════════════════════════════════════════════════════════════════
+
+    const RULES_TABS = [
+      { id: 'turn', label: 'Turn' },
+      { id: 'quests', label: 'Quests' },
+      { id: 'cards', label: 'Cards' },
+      { id: 'knights', label: 'Knights' },
+      { id: 'relics', label: 'Relics' },
+      { id: 'end', label: 'End Game' },
+    ];
+    let currentRulesTab = 'turn';
+
+    function getRulesContent(tabId) {
+      if (tabId === 'turn') return '' +
+        '<h4>Phase 1: Progression of Evil</h4>' +
+        '<p>Choose ONE:</p><ul>' +
+        '<li><b>Draw a Black card</b> — reveal and apply its effect</li>' +
+        '<li><b>Add a Siege Engine</b> — place one around Camelot</li>' +
+        '<li><b>Lose 1 Life Point</b></li></ul>' +
+        '<h4>Phase 2: Heroic Action</h4>' +
+        '<p>Perform ONE action:</p><ul>' +
+        '<li><b>Move</b> to a new quest location</li>' +
+        '<li><b>Quest action</b> — play a card on your current quest</li>' +
+        '<li><b>Play Special White</b> — max 1 per turn</li>' +
+        '<li><b>Draw cards</b> — draw 2 White (at Round Table only)</li>' +
+        '<li><b>Heal</b> — discard 3 identical cards, gain 1 LP</li>' +
+        '<li><b>Fight Siege Engine</b> — play Fight cards vs d8 roll</li>' +
+        '<li><b>Accuse</b> — available when 6+ siege engines or 6+ swords</li></ul>' +
+        '<h4>Sacrifice</h4>' +
+        '<p>Once per turn, lose 1 LP for a second <em>different</em> Heroic Action. If this brings you to 0 LP, complete the action then die.</p>';
+
+      if (tabId === 'quests') return '' +
+        '<h4>Holy Grail (Group)</h4>' +
+        '<p>Play Grail cards on 7 slots. Win: 7 Grail cards placed. Lose: all slots filled with Despair/Desolation.</p>' +
+        '<p>Victory: 3 White Swords, +1 LP, Holy Grail relic, 7 cards. Defeat: 3 Black Swords, -1 LP.</p>' +
+        '<h4>Excalibur (Group)</h4>' +
+        '<p>Discard any White card to move Excalibur toward knights. Black Excalibur cards push it toward evil.</p>' +
+        '<p>Victory: 2 White Swords, +1 LP, Excalibur relic, 7 cards. Defeat: 2 Black Swords, -1 LP.</p>' +
+        '<h4>Black Knight (Solo, Perpetual)</h4>' +
+        '<p>Play Fight cards (4 slots). Compare sum vs 4 Black Knight cards. Higher wins. Ties = Evil.</p>' +
+        '<p>Victory: 1 White Sword, +1 LP, 3 cards. Defeat: 1 Black Sword, -1 LP.</p>' +
+        '<h4>Lancelot / Dragon (Solo / Group)</h4>' +
+        '<p>Lancelot: Full house pattern (5 cards). Dragon: 3 three-of-a-kinds (9 cards). Compare sums.</p>' +
+        '<p>Lancelot Victory: 1 White Sword, +1 LP, Armor relic, 4 cards. Dragon Victory: 2 White Swords, +2 LP, 7 cards.</p>' +
+        '<h4>Saxon & Pict Wars (Group, Perpetual)</h4>' +
+        '<p>Play Fight cards in ascending order (1-2-3-4-5). Lose if 4th warrior placed.</p>' +
+        '<p>Victory: 1 White Sword, +1 LP, 4 cards. Defeat: 1 Black Sword + 2 Siege Engines, -1 LP.</p>';
+
+      if (tabId === 'cards') return '' +
+        '<h4>Special White Cards</h4><ul>' +
+        '<li><b>Merlin (x7):</b> 3 Merlins cancel 1 Special Black card when drawn. Or play 1 to remove siege/warrior/black card.</li>' +
+        '<li><b>Fate (x1):</b> Loyal: all draw 1 card. Traitor: may pretend loyal or reveal (opponents discard 2).</li>' +
+        '<li><b>Piety (x1):</b> Gain 3 LP, or each other knight gains 1 LP.</li>' +
+        '<li><b>Reinforcements (x1):</b> Draw 4 cards, or each other knight draws 1.</li>' +
+        '<li><b>Heroism (x1):</b> Place on quest; adds +1 sword to outcome.</li>' +
+        '<li><b>Clairvoyance (x1):</b> View and reorder top 5 Black cards.</li>' +
+        '<li><b>Messenger (x1):</b> Pass 1-3 cards to any knight.</li>' +
+        '<li><b>Lady of the Lake (x1):</b> Move Excalibur 1 toward knights (or +2 LP if quest done).</li>' +
+        '<li><b>Convocation (x1):</b> All knights may return to Camelot; draw/share cards.</li></ul>' +
+        '<h4>Special Black Cards</h4><ul>' +
+        '<li><b>Morgan 1:</b> One knight volunteers to discard 3, or all discard 1.</li>' +
+        '<li><b>Morgan 2:</b> Draw and apply next 3 Black cards.</li>' +
+        '<li><b>Morgan 3:</b> Add 2 Siege Engines.</li>' +
+        '<li><b>Morgan 4:</b> All knights lose 1 LP.</li>' +
+        '<li><b>Morgan 5:</b> One knight volunteers to lose 2 LP, or all discard 1.</li>' +
+        '<li><b>Desolation (x2):</b> Place on Grail quest (uncancellable by quest action).</li>' +
+        '<li><b>Dark Forest:</b> No Grail cards may be played until a quest is won.</li>' +
+        '<li><b>Guinevere:</b> All knights return to Camelot. Solo quest cards removed. Turn ends.</li>' +
+        '<li><b>Mist of Avalon:</b> Permanent — each lost quest adds 1 extra Black Sword.</li>' +
+        '<li><b>Mordred:</b> Attach to a war; needs extra Fight 5 to win.</li>' +
+        '<li><b>Vivien:</b> No Merlin cards until a quest is won.</li></ul>';
+
+      if (tabId === 'knights') {
+        let html = '<h4>Knight Special Powers</h4><ul>';
+        for (const [id, k] of Object.entries(KNIGHTS)) {
+          html += '<li><b>' + k.name + ':</b> ' + k.power + '</li>';
+        }
+        return html + '</ul>';
+      }
+
+      if (tabId === 'relics') return '' +
+        '<h4>Excalibur</h4>' +
+        '<p>+1 to any combat you participate in. Can discard to cancel any 1 Black card just drawn. Cannot be gifted. Lost forever on death.</p>' +
+        '<h4>Holy Grail</h4>' +
+        '<p>Any dying knight (0 LP) may drink to gain 4 LP. Owner can self-save. Consumed on use.</p>' +
+        '<h4>Lancelot\'s Armor</h4>' +
+        '<p>When drawing a Black card, draw 2 instead — play 1, put the other under the pile. Stays with Traitor if revealed. Lost on death.</p>';
+
+      if (tabId === 'end') return '' +
+        '<h4>Instant Loss (Loyal Knights)</h4><ul>' +
+        '<li>12 Siege Engines around Camelot</li>' +
+        '<li>7+ Black Swords on the Round Table</li>' +
+        '<li>All Loyal Knights dead</li></ul>' +
+        '<h4>12th Sword Placed</h4>' +
+        '<p>Hidden Traitor reveals and flips 2 White Swords to Black. Strictly more White than Black = Loyal wins. Otherwise Evil wins.</p>' +
+        '<h4>Ties</h4>' +
+        '<p>All ties resolved in favor of Evil: combat, sword count, siege fights.</p>' +
+        '<h4>Traitor</h4>' +
+        '<p>Hidden: plays normally, may lie about resources. Revealed: taunts (steal 1 random card from a knight) + draw Black card or add Siege Engine each turn.</p>';
+
+      return '';
+    }
+
+    function openRules() {
+      $('rules-overlay').classList.remove('hidden');
+      renderRulesOverlay();
+    }
+
+    function closeRules() {
+      $('rules-overlay').classList.add('hidden');
+    }
+
+    function renderRulesOverlay() {
+      const tabsEl = $('rules-tabs');
+      tabsEl.innerHTML = RULES_TABS.map(t =>
+        '<button class="rules-tab' + (t.id === currentRulesTab ? ' active' : '') +
+        '" data-tab="' + t.id + '">' + t.label + '</button>'
+      ).join('');
+      tabsEl.querySelectorAll('.rules-tab').forEach(btn => {
+        btn.addEventListener('click', () => {
+          currentRulesTab = btn.dataset.tab;
+          renderRulesOverlay();
+        });
+      });
+      $('rules-content').innerHTML = getRulesContent(currentRulesTab);
     }
 
     async function completeSWAction() {
