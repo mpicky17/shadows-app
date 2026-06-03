@@ -807,7 +807,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v40';
+    const APP_VERSION = 'shadows-v41';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1017,6 +1017,12 @@
 
         // Spectator reconnect — no knight validation needed
         if (savedSpectator === 'true') {
+          // Validate spectator host UID still matches (prevents stale host after uid change)
+          if (savedHost === 'true' && meta.hostUid !== myUid) {
+            console.warn('[SOC] Spectator host UID mismatch:', myUid, 'vs', meta.hostUid);
+            clearSession();
+            return false;
+          }
           currentRoom = savedRoom;
           myKnight = null;
           isHost = savedHost === 'true';
@@ -1046,6 +1052,12 @@
         isHost = savedHost === 'true';
         isSpectator = false;
         roomData = meta;
+
+        // Validate host UID still matches (downgrade to non-host if stale)
+        if (isHost && meta.hostUid !== myUid) {
+          console.warn('[SOC] Player host UID mismatch:', myUid, 'vs', meta.hostUid);
+          isHost = false;
+        }
 
         console.log('Reconnecting to room', savedRoom, 'as', savedKnight, isHost ? '(host)' : '');
 
@@ -1167,8 +1179,33 @@
       setConnectionStatus('connecting');
 
       try {
-        const cred = await fbAuth.signInAnonymously();
-        myUid = cred.user.uid;
+        // Wait for persisted auth state to load from IndexedDB before signing in.
+        // onAuthStateChanged fires once immediately with the restored user (or null).
+        // Calling signInAnonymously() before this resolves can race with persistence
+        // and create a NEW anonymous UID, causing permission_denied on host deck reads.
+        const existingUser = await new Promise(resolve => {
+          const unsubscribe = fbAuth.onAuthStateChanged(user => {
+            unsubscribe();
+            resolve(user);
+          });
+        });
+
+        if (existingUser) {
+          myUid = existingUser.uid;
+          console.log('[SOC] Restored persisted auth:', myUid);
+        } else {
+          const cred = await fbAuth.signInAnonymously();
+          myUid = cred.user.uid;
+          console.log('[SOC] Created new anonymous auth:', myUid);
+        }
+
+        // Keep myUid in sync if auth state changes later (token refresh, etc.)
+        fbAuth.onAuthStateChanged(user => {
+          if (user && user.uid !== myUid) {
+            console.warn('[SOC] Auth UID changed:', myUid, '->', user.uid);
+            myUid = user.uid;
+          }
+        });
 
         // Restore saved name
         const savedName = localStorage.getItem('shadows-player-name');
