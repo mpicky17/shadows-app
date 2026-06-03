@@ -583,6 +583,16 @@
       100% { opacity: 1; transform: scale(1); }
     }
     .quest-chip.card-played { animation: cardPlayFlash 0.4s ease-out; }
+    .quest-update-popup {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      background: rgba(20, 15, 10, 0.95); border: 2px solid var(--gold); border-radius: 12px;
+      padding: 1rem 1.5rem; z-index: 180; text-align: center;
+      min-width: 220px; max-width: 90vw; animation: overlayFadeIn 0.3s ease-out;
+      pointer-events: none;
+    }
+    .quest-update-popup.hidden { display: none; }
+    .quest-update-popup.fade-out { animation: popupFadeOut 0.5s ease-out forwards; }
+    @keyframes popupFadeOut { 0% { opacity: 1; } 100% { opacity: 0; } }
     .rules-overlay {
       position: fixed; top: 0; left: 0; right: 0; bottom: 0;
       background: rgba(0,0,0,0.9); z-index: 150;
@@ -777,6 +787,11 @@
       </div>
       <div class="overlay-minimized hidden" id="combat-minimized">Tap to expand Quest Result</div>
     </div>
+    <div id="quest-update-popup" class="quest-update-popup hidden">
+      <div id="quest-update-title" style="font-weight:700;font-size:1rem;margin-bottom:0.5rem;"></div>
+      <div id="quest-update-content"></div>
+      <div id="quest-update-desc" style="color:var(--text-dim);font-size:0.875rem;margin-top:0.5rem;"></div>
+    </div>
     <div class="results-overlay hidden" id="results-overlay">
       <div class="results-panel">
         <h2 class="results-title" id="results-title"></h2>
@@ -807,7 +822,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v41';
+    const APP_VERSION = 'shadows-v42';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -891,6 +906,8 @@
     let myHand = [];
     let selectedCardId = null;  // card selected in hand (for setup)
     let mySetupShared = false;  // have I shared a card in setup?
+    let prevCachedQuests = null;
+    let questUpdatePopupTimer = null;
     let privateListener = null;
     let boardListener = null;
     let questsListener = null;
@@ -1560,6 +1577,7 @@
       mySetupShared = false;
       cachedBoard = null;
       cachedQuests = null;
+      prevCachedQuests = null;
       cachedDecks = null;
       cachedPlayers = {};
       discardMode = null;
@@ -1931,7 +1949,13 @@
     function listenToQuests() {
       if (questsListener) return;
       questsListener = fbDb.ref('games/' + currentRoom + '/quests').on('value', snap => {
-        cachedQuests = snap.val() || {};
+        const newQuests = snap.val() || {};
+        // Detect mid-quest changes and show popup (skip setup, first load, and when result/combat overlay showing)
+        if (prevCachedQuests && roomData?.status === 'playing' && !roomData?.questResult && !roomData?.combatResolution) {
+          detectQuestChange(prevCachedQuests, newQuests);
+        }
+        prevCachedQuests = JSON.parse(JSON.stringify(newQuests));
+        cachedQuests = newQuests;
         renderQuests();
       });
     }
@@ -3390,6 +3414,141 @@
         chip.classList.add('card-played');
         setTimeout(() => { skipNextQuestRender = false; renderQuests(); }, 450);
       }
+    }
+
+    function detectQuestChange(prev, next) {
+      // Excalibur — position changed
+      if (prev.excalibur?.position !== next.excalibur?.position && next.excalibur?.status === 'active') {
+        const pos = next.excalibur.position || 0;
+        const dir = pos > (prev.excalibur?.position || 0) ? 'toward Knights' : 'toward Evil';
+        showQuestUpdatePopup('excalibur', next.excalibur, 'Excalibur moved ' + dir);
+        return;
+      }
+      // Holy Grail — cards changed
+      const prevGrailLen = (prev.holyGrail?.cards || []).length;
+      const nextGrailLen = (next.holyGrail?.cards || []).length;
+      if (prevGrailLen !== nextGrailLen && next.holyGrail?.status === 'active') {
+        const gc = (next.holyGrail.cards || []).filter(c => c?.type === 'grail').length;
+        const bc = (next.holyGrail.cards || []).filter(c => c?.type !== 'grail').length;
+        const desc = nextGrailLen > prevGrailLen ? 'Card placed' : 'Card removed';
+        showQuestUpdatePopup('holyGrail', next.holyGrail, desc + ' \u2014 ' + gc + ' Grail / ' + bc + ' Despair');
+        return;
+      }
+      // Black Knight — cards changed
+      const prevBKW = (prev.blackKnight?.whiteCards || []).length;
+      const nextBKW = (next.blackKnight?.whiteCards || []).length;
+      const prevBKB = (prev.blackKnight?.blackCards || []).length;
+      const nextBKB = (next.blackKnight?.blackCards || []).length;
+      if ((prevBKW !== nextBKW || prevBKB !== nextBKB) && next.blackKnight?.status === 'active') {
+        showQuestUpdatePopup('blackKnight', next.blackKnight, nextBKW + '/4 White, ' + nextBKB + '/4 Black');
+        return;
+      }
+      // Lancelot/Dragon — cards changed
+      const prevLW = (prev.lancelot?.whiteCards || []).length;
+      const nextLW = (next.lancelot?.whiteCards || []).length;
+      const prevLB = (prev.lancelot?.blackCards || []).length;
+      const nextLB = (next.lancelot?.blackCards || []).length;
+      if ((prevLW !== nextLW || prevLB !== nextLB) && next.lancelot?.status === 'active') {
+        const phase = next.lancelot.phase === 'dragon' ? 'Dragon' : 'Lancelot';
+        const maxW = next.lancelot.phase === 'dragon' ? 9 : 5;
+        showQuestUpdatePopup('lancelot', next.lancelot, phase + ' \u2014 ' + nextLW + '/' + maxW + ' White, ' + nextLB + '/5 Black');
+        return;
+      }
+      // Saxon War
+      const prevSF = (prev.saxonWar?.fightCards || []).length;
+      const nextSF = (next.saxonWar?.fightCards || []).length;
+      const prevSW = prev.saxonWar?.warriors || 0;
+      const nextSW = next.saxonWar?.warriors || 0;
+      if ((prevSF !== nextSF || prevSW !== nextSW) && next.saxonWar?.status === 'active') {
+        showQuestUpdatePopup('saxonWar', next.saxonWar, nextSW + '/4 Warriors, ' + nextSF + '/5 Fight cards');
+        return;
+      }
+      // Pict War
+      const prevPF = (prev.pictWar?.fightCards || []).length;
+      const nextPF = (next.pictWar?.fightCards || []).length;
+      const prevPW = prev.pictWar?.warriors || 0;
+      const nextPW = next.pictWar?.warriors || 0;
+      if ((prevPF !== nextPF || prevPW !== nextPW) && next.pictWar?.status === 'active') {
+        showQuestUpdatePopup('pictWar', next.pictWar, nextPW + '/4 Warriors, ' + nextPF + '/5 Fight cards');
+        return;
+      }
+    }
+
+    function showQuestUpdatePopup(questKey, questData, desc) {
+      const popup = $('quest-update-popup');
+      $('quest-update-title').textContent = getLocationLabel(questKey);
+
+      let html = '';
+      if (questKey === 'excalibur') {
+        html += '<div style="display:flex;gap:3px;justify-content:center;">';
+        for (let i = -5; i <= 5; i++) {
+          const pos = questData.position || 0;
+          const isExc = i === pos;
+          const bg = isExc ? 'var(--gold)' : (i < 0 ? 'rgba(139,26,26,0.3)' : (i > 0 ? 'rgba(46,125,50,0.3)' : 'rgba(255,255,255,0.15)'));
+          html += '<div style="width:22px;height:22px;border-radius:3px;display:flex;align-items:center;justify-content:center;' +
+            'background:' + bg + ';font-size:0.625rem;font-weight:700;color:' + (isExc ? 'var(--bg-dark)' : 'var(--text-dim)') + ';">' +
+            (isExc ? '\u2694' : '') + '</div>';
+        }
+        html += '</div>';
+      } else if (questKey === 'holyGrail') {
+        html += '<div style="display:flex;gap:3px;justify-content:center;">';
+        const cards = questData.cards || [];
+        for (let i = 0; i < 7; i++) {
+          const c = cards[i];
+          if (!c) {
+            html += '<div style="width:28px;height:36px;border-radius:3px;border:1px dashed var(--text-dim);opacity:0.3;"></div>';
+          } else {
+            const isGrail = c.type === 'grail';
+            html += '<div class="combat-card ' + (isGrail ? 'white-side' : 'black-side') + '" style="width:28px;min-height:36px;font-size:0.625rem;">' +
+              '<div style="font-weight:700;">' + (isGrail ? 'G' : 'D') + '</div></div>';
+          }
+        }
+        html += '</div>';
+      } else if (questKey === 'blackKnight' || questKey === 'lancelot') {
+        const wc = questData.whiteCards || [];
+        const bc = questData.blackCards || [];
+        const maxW = questKey === 'blackKnight' ? 4 : (questData.phase === 'dragon' ? 9 : 5);
+        const maxB = questKey === 'blackKnight' ? 4 : 5;
+        html += '<div style="display:flex;gap:3px;justify-content:center;margin-bottom:4px;">';
+        for (let i = 0; i < maxW; i++) {
+          const c = wc[i];
+          html += c
+            ? '<div class="combat-card white-side" style="width:24px;min-height:32px;font-size:0.625rem;"><div style="font-weight:700;">' + c.value + '</div></div>'
+            : '<div style="width:24px;height:32px;border-radius:3px;border:1px dashed rgba(200,180,120,0.3);"></div>';
+        }
+        html += '</div><div style="display:flex;gap:3px;justify-content:center;">';
+        for (let i = 0; i < maxB; i++) {
+          const c = bc[i];
+          html += c
+            ? '<div class="combat-card black-side" style="width:24px;min-height:32px;font-size:0.625rem;"><div style="font-weight:700;">' + (c.faceDown ? '?' : c.value) + '</div></div>'
+            : '<div style="width:24px;height:32px;border-radius:3px;border:1px dashed rgba(139,26,26,0.3);"></div>';
+        }
+        html += '</div>';
+      } else if (questKey === 'saxonWar' || questKey === 'pictWar') {
+        const fc = questData.fightCards || [];
+        const mordredAttached = roomData?.persistentEffects?.mordred === questKey;
+        const maxF = mordredAttached ? 6 : 5;
+        html += '<div style="display:flex;gap:3px;justify-content:center;margin-bottom:4px;">';
+        for (let i = 0; i < maxF; i++) {
+          const c = fc[i];
+          html += c
+            ? '<div class="combat-card white-side" style="width:24px;min-height:32px;font-size:0.625rem;"><div style="font-weight:700;">' + c.value + '</div></div>'
+            : '<div style="width:24px;height:32px;border-radius:3px;border:1px dashed rgba(200,180,120,0.3);"></div>';
+        }
+        html += '</div>';
+        const w = questData.warriors || 0;
+        html += '<div style="font-size:0.8125rem;color:var(--red-bright);">' + '\u2694'.repeat(w) + '\u2501'.repeat(4 - w) + ' ' + w + '/4 Warriors</div>';
+      }
+
+      $('quest-update-content').innerHTML = html;
+      $('quest-update-desc').textContent = desc;
+
+      popup.classList.remove('hidden', 'fade-out');
+      if (questUpdatePopupTimer) clearTimeout(questUpdatePopupTimer);
+      questUpdatePopupTimer = setTimeout(() => {
+        popup.classList.add('fade-out');
+        setTimeout(() => popup.classList.add('hidden'), 500);
+      }, 3000);
     }
 
     // ═══════════════════════════════════════════════════════════════════
