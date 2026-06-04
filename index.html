@@ -824,7 +824,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v44';
+    const APP_VERSION = 'shadows-v45';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1385,8 +1385,14 @@
         const ost = [130.81, 98, 98, 130.81, 155.56, 146.83, 130.81, 98];
         const nd = 0.19; // note duration for staccato pulse
         const cycleLen = ost.length * nd;
-        for (let c = 0; c < 16; c++) {
-          const v = Math.min(0.12, 0.04 + c * 0.006); // Gradual volume build
+        const totalCycles = 18; // 16 main + 2 fade-out cycles
+        for (let c = 0; c < totalCycles; c++) {
+          let v;
+          if (c < 16) {
+            v = Math.min(0.12, 0.04 + c * 0.006); // Gradual build
+          } else {
+            v = 0.12 * (1 - (c - 15) / 3); // Fade out over last 2 cycles
+          }
           for (let i = 0; i < ost.length; i++) {
             cello(ost[i], now + c * cycleLen + i * nd, nd * 0.8, v, false);
           }
@@ -1409,8 +1415,8 @@
         let bt = 7.0;
         for (const [freq, dur] of bass) { cello(freq, now + bt, dur, 0.14, true); bt += dur; }
 
-        // Loop after ~25.8s (24.3s music + 1.5s gap)
-        lobbyMusicTimeout = setTimeout(playSequence, (16 * cycleLen + 1.5) * 1000);
+        // Loop seamlessly — next sequence starts at cycle 16 so new build-up overlaps fade-out
+        lobbyMusicTimeout = setTimeout(playSequence, (16 * cycleLen) * 1000);
       }
       playSequence();
     }
