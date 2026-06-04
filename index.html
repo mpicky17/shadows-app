@@ -136,6 +136,7 @@
     }
     .home-join-row {
       display: flex;
+      flex-direction: column;
       gap: 0.5rem;
     }
     .home-join-row .input {
@@ -255,6 +256,7 @@
     }
     .knight-tooltip strong { color: var(--gold); }
     .knight-tooltip em { color: var(--text-dim); font-size: 0.8125rem; }
+    .knight-card.random-highlight { border-color: var(--gold) !important; box-shadow: 0 0 15px rgba(212,168,67,0.6); transform: scale(1.05); transition: all 0.08s ease-out; }
 
     .lobby-players {
       display: flex;
@@ -574,9 +576,9 @@
     }
     .combat-overlay:not(.hidden) { animation: overlayFadeIn 0.3s ease-out; }
     .overlay-minimize-btn { position: absolute; top: 0.5rem; right: 0.75rem; background: var(--border); color: var(--text-dim); border: none; border-radius: 4px; padding: 0.25rem 0.5rem; font-size: 0.75rem; cursor: pointer; z-index: 10; }
-    .overlay-minimized { padding: 0.75rem; color: var(--gold); font-size: 1rem; cursor: pointer; text-align: center; }
+    .overlay-minimized { padding: 0.5rem 1rem; color: var(--gold); font-size: 0.875rem; cursor: pointer; text-align: center; white-space: nowrap; }
     .overlay-minimized.hidden { display: none; }
-    .combat-overlay.minimized, .card-reveal-overlay.minimized { justify-content: flex-start; padding-top: 0; align-items: stretch; }
+    .combat-overlay.minimized, .card-reveal-overlay.minimized { top: auto; left: auto; right: 0.75rem; bottom: 0.75rem; width: auto; height: auto; background: rgba(20,15,10,0.95); border: 2px solid var(--gold); border-radius: 24px; padding: 0; align-items: center; justify-content: center; box-shadow: 0 2px 12px rgba(0,0,0,0.6); }
     @keyframes cardPlayFlash {
       0% { opacity: 1; transform: scale(1); }
       50% { opacity: 0.8; transform: scale(1.05); }
@@ -822,7 +824,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v42';
+    const APP_VERSION = 'shadows-v43';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -908,6 +910,10 @@
     let mySetupShared = false;  // have I shared a card in setup?
     let prevCachedQuests = null;
     let questUpdatePopupTimer = null;
+    let excaliburAutoDecline = false;
+    let lobbyAudioCtx = null;
+    let lobbyMusicTimeout = null;
+    let lobbyMusicPlaying = false;
     let privateListener = null;
     let boardListener = null;
     let questsListener = null;
@@ -967,6 +973,7 @@
     function showScreen(id) {
       document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
       $(id).classList.add('active');
+      if (id !== 'lobby-screen') stopLobbyMusic();
     }
 
     function showToast(msg, duration = 3000) {
@@ -1320,6 +1327,85 @@
       enterLobby();
     }
 
+    // ── Lobby Background Music ────────────────────────────────────────
+    function startLobbyMusic() {
+      if (lobbyMusicPlaying) return;
+      lobbyMusicPlaying = true;
+      try {
+        if (!lobbyAudioCtx) lobbyAudioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        if (lobbyAudioCtx.state === 'suspended') lobbyAudioCtx.resume();
+      } catch (e) { lobbyMusicPlaying = false; return; }
+
+      // D minor melody — dark, moody, cello-like
+      const melody = [
+        { freq: 146.83, dur: 1.0 },   // D3
+        { freq: 174.61, dur: 0.75 },   // F3
+        { freq: 220.00, dur: 0.75 },   // A3
+        { freq: 293.66, dur: 1.2 },    // D4
+        { freq: 261.63, dur: 0.6 },    // C4
+        { freq: 233.08, dur: 0.8 },    // Bb3
+        { freq: 220.00, dur: 1.0 },    // A3
+        { freq: 196.00, dur: 0.6 },    // G3
+        { freq: 174.61, dur: 0.75 },   // F3
+        { freq: 164.81, dur: 0.5 },    // E3
+        { freq: 174.61, dur: 0.8 },    // F3
+        { freq: 220.00, dur: 0.6 },    // A3
+        { freq: 196.00, dur: 0.75 },   // G3
+        { freq: 174.61, dur: 0.6 },    // F3
+        { freq: 164.81, dur: 0.8 },    // E3
+        { freq: 146.83, dur: 1.5 },    // D3
+      ];
+
+      function playMelody() {
+        if (!lobbyMusicPlaying) return;
+        const ctx = lobbyAudioCtx;
+        const now = ctx.currentTime;
+        let offset = 0;
+
+        for (const note of melody) {
+          const osc = ctx.createOscillator();
+          const filter = ctx.createBiquadFilter();
+          const gain = ctx.createGain();
+
+          osc.type = 'sawtooth';
+          osc.frequency.value = note.freq;
+
+          // Lowpass filter for warm cello-like tone
+          filter.type = 'lowpass';
+          filter.frequency.value = 800;
+          filter.Q.value = 1.5;
+
+          // ADSR envelope
+          const t = now + offset;
+          gain.gain.setValueAtTime(0, t);
+          gain.gain.linearRampToValueAtTime(0.08, t + 0.12);       // Attack
+          gain.gain.linearRampToValueAtTime(0.05, t + 0.3);        // Decay to sustain
+          gain.gain.setValueAtTime(0.05, t + note.dur - 0.15);     // Hold sustain
+          gain.gain.linearRampToValueAtTime(0, t + note.dur);      // Release
+
+          osc.connect(filter);
+          filter.connect(gain);
+          gain.connect(ctx.destination);
+
+          osc.start(t);
+          osc.stop(t + note.dur + 0.05);
+          offset += note.dur;
+        }
+
+        // Loop after melody + 2s gap
+        lobbyMusicTimeout = setTimeout(playMelody, (offset + 2) * 1000);
+      }
+      playMelody();
+    }
+
+    function stopLobbyMusic() {
+      lobbyMusicPlaying = false;
+      if (lobbyMusicTimeout) { clearTimeout(lobbyMusicTimeout); lobbyMusicTimeout = null; }
+      if (lobbyAudioCtx && lobbyAudioCtx.state === 'running') {
+        lobbyAudioCtx.suspend();
+      }
+    }
+
     async function enterLobby() {
       $('lobby-code').textContent = currentRoom;
 
@@ -1332,6 +1418,9 @@
 
       // Listen for room updates
       listenToRoom();
+
+      // Start background music
+      startLobbyMusic();
     }
 
     function renderKnightGrid() {
@@ -1352,6 +1441,65 @@
         card.addEventListener('click', () => selectKnight(id));
         grid.appendChild(card);
       }
+
+      // Random Knight button
+      let randomBtn = document.getElementById('btn-random-knight');
+      if (!randomBtn) {
+        randomBtn = document.createElement('button');
+        randomBtn.id = 'btn-random-knight';
+        randomBtn.className = 'btn';
+        randomBtn.style.cssText = 'width:100%;margin-top:0.5rem;';
+        randomBtn.textContent = 'Random Knight';
+        randomBtn.addEventListener('click', randomKnightSelect);
+        grid.parentNode.insertBefore(randomBtn, grid.nextSibling);
+      }
+    }
+
+    async function randomKnightSelect() {
+      const btn = document.getElementById('btn-random-knight');
+      if (btn?.disabled) return;
+      if (!currentRoom || !myUid) return;
+
+      const playersSnap = await fbDb.ref('games/' + currentRoom + '/players').once('value');
+      const players = playersSnap.val() || {};
+      const available = Object.keys(KNIGHTS).filter(kid => {
+        const p = players[kid];
+        return !p || p.uid === myUid; // Available if not taken or taken by me
+      });
+      if (available.length === 0) { showToast('All knights are taken!'); return; }
+
+      btn.disabled = true;
+      const finalKnight = available[Math.floor(Math.random() * available.length)];
+
+      // Build cycling sequence: ~30 steps ending on finalKnight
+      const steps = [];
+      const totalSteps = 25 + available.indexOf(finalKnight);
+      for (let i = 0; i < totalSteps; i++) {
+        steps.push(available[i % available.length]);
+      }
+      steps.push(finalKnight); // Ensure last step is the chosen knight
+
+      let i = 0;
+      function animateStep() {
+        document.querySelectorAll('.knight-card').forEach(c => c.classList.remove('random-highlight'));
+        const card = document.querySelector('.knight-card[data-knight-id="' + steps[i] + '"]');
+        if (card) card.classList.add('random-highlight');
+
+        i++;
+        if (i < steps.length) {
+          const progress = i / steps.length;
+          const delay = 80 + Math.pow(progress, 2) * 350;
+          setTimeout(animateStep, delay);
+        } else {
+          // Animation done — select after brief pause
+          setTimeout(() => {
+            document.querySelectorAll('.knight-card').forEach(c => c.classList.remove('random-highlight'));
+            selectKnight(finalKnight);
+            btn.disabled = false;
+          }, 600);
+        }
+      }
+      animateStep();
     }
 
     async function enterSpectatorMode() {
@@ -2219,6 +2367,26 @@
           if (kid && KNIGHTS[kid]) showKnightTooltip(kid, chip);
         });
       });
+
+      // Excalibur auto-decline toggle (visible only to holder)
+      let excToggle = document.getElementById('excalibur-auto-decline');
+      if (cachedPlayers[myKnight]?.relics?.excalibur) {
+        if (!excToggle) {
+          excToggle = document.createElement('div');
+          excToggle.id = 'excalibur-auto-decline';
+          excToggle.style.cssText = 'display:flex;align-items:center;gap:0.5rem;justify-content:center;padding:0.375rem 0;font-size:0.875rem;color:var(--text-dim);';
+          excToggle.innerHTML = '<label style="display:flex;align-items:center;gap:0.375rem;cursor:pointer;">' +
+            '<input type="checkbox" id="exc-auto-chk" style="accent-color:var(--gold);width:1rem;height:1rem;">' +
+            '<span>Auto-skip Excalibur cancel</span></label>';
+          el.parentNode.insertBefore(excToggle, el.nextSibling);
+          document.getElementById('exc-auto-chk').addEventListener('change', e => {
+            excaliburAutoDecline = e.target.checked;
+          });
+        }
+        document.getElementById('exc-auto-chk').checked = excaliburAutoDecline;
+      } else if (excToggle) {
+        excToggle.remove();
+      }
 
       // Update turn info
       const current = cachedPlayers[roomData.currentTurnKnight];
@@ -3281,28 +3449,39 @@
       // Excalibur cancel prompt — any holder can cancel any black card
       const excHolder = findExcaliburHolder();
       if (excHolder && !roomData.excaliburPrompt) {
-        // Initiate the prompt (only active player sets it to avoid races)
-        if (isMyTurn()) {
-          fbDb.ref('games/' + currentRoom + '/meta/excaliburPrompt').set({
-            holderKnight: excHolder, pending: true,
-          });
-        }
-        // If I'm the holder, show decision UI immediately (don't wait for listener)
-        if (myKnight === excHolder) {
-          const cardName = getBlackCardDisplayName(card);
-          actionsEl.innerHTML =
-            '<p style="color:var(--gold);font-size:1rem;">Use Excalibur to cancel ' + cardName + '?</p>' +
-            '<p style="color:var(--text-dim);font-size:0.875rem;">Excalibur will be destroyed forever.</p>' +
-            '<button class="btn btn-heroic" id="btn-exc-accept">Cancel Card (lose Excalibur)</button>' +
-            '<button class="btn btn-evil" id="btn-exc-decline" style="margin-top:0.5rem;">Decline</button>';
-          document.getElementById('btn-exc-accept').addEventListener('click', () => resolveExcaliburPrompt(true));
-          document.getElementById('btn-exc-decline').addEventListener('click', () => resolveExcaliburPrompt(false));
+        // Auto-decline if holder has the toggle on
+        if (excHolder === myKnight && excaliburAutoDecline) {
+          fbDb.ref('games/' + currentRoom + '/meta/excaliburPrompt').set({ declined: true });
+          // Fall through to normal card resolution
+        } else {
+          // Initiate the prompt (only active player sets it to avoid races)
+          if (isMyTurn()) {
+            fbDb.ref('games/' + currentRoom + '/meta/excaliburPrompt').set({
+              holderKnight: excHolder, pending: true,
+            });
+          }
+          // If I'm the holder, show decision UI immediately (don't wait for listener)
+          if (myKnight === excHolder) {
+            const cardName = getBlackCardDisplayName(card);
+            actionsEl.innerHTML =
+              '<p style="color:var(--gold);font-size:1rem;">Use Excalibur to cancel ' + cardName + '?</p>' +
+              '<p style="color:var(--text-dim);font-size:0.875rem;">Excalibur will be destroyed forever.</p>' +
+              '<button class="btn btn-heroic" id="btn-exc-accept">Cancel Card (lose Excalibur)</button>' +
+              '<button class="btn btn-evil" id="btn-exc-decline" style="margin-top:0.5rem;">Decline</button>';
+            document.getElementById('btn-exc-accept').addEventListener('click', () => resolveExcaliburPrompt(true));
+            document.getElementById('btn-exc-decline').addEventListener('click', () => resolveExcaliburPrompt(false));
+            return;
+          }
+          actionsEl.innerHTML = '<p class="waiting-text">Excalibur holder deciding whether to cancel...</p>';
           return;
         }
-        actionsEl.innerHTML = '<p class="waiting-text">Excalibur holder deciding whether to cancel...</p>';
-        return;
       }
       if (roomData.excaliburPrompt?.pending) {
+        // Auto-decline if holder has the toggle on
+        if (myKnight === roomData.excaliburPrompt.holderKnight && excaliburAutoDecline) {
+          resolveExcaliburPrompt(false);
+          return;
+        }
         if (myKnight === roomData.excaliburPrompt.holderKnight) {
           const cardName = getBlackCardDisplayName(card);
           actionsEl.innerHTML =
@@ -3440,6 +3619,7 @@
       const prevBKB = (prev.blackKnight?.blackCards || []).length;
       const nextBKB = (next.blackKnight?.blackCards || []).length;
       if ((prevBKW !== nextBKW || prevBKB !== nextBKB) && next.blackKnight?.status === 'active') {
+        if (nextBKW === 0 && nextBKB === 0) return; // Quest reset — suppress popup
         showQuestUpdatePopup('blackKnight', next.blackKnight, nextBKW + '/4 White, ' + nextBKB + '/4 Black');
         return;
       }
@@ -3449,6 +3629,7 @@
       const prevLB = (prev.lancelot?.blackCards || []).length;
       const nextLB = (next.lancelot?.blackCards || []).length;
       if ((prevLW !== nextLW || prevLB !== nextLB) && next.lancelot?.status === 'active') {
+        if (nextLW === 0 && nextLB === 0) return; // Quest reset/transition — suppress popup
         const phase = next.lancelot.phase === 'dragon' ? 'Dragon' : 'Lancelot';
         const maxW = next.lancelot.phase === 'dragon' ? 9 : 5;
         showQuestUpdatePopup('lancelot', next.lancelot, phase + ' \u2014 ' + nextLW + '/' + maxW + ' White, ' + nextLB + '/5 Black');
@@ -3474,6 +3655,15 @@
       }
     }
 
+    function buildGrailSlotLayout(cards) {
+      const slots = new Array(7).fill(null);
+      const grails = cards.filter(c => c.type === 'grail');
+      const despairs = cards.filter(c => c.type !== 'grail');
+      for (let i = 0; i < grails.length && i < 7; i++) slots[i] = grails[i];
+      for (let i = 0; i < despairs.length && (6 - i) >= 0; i++) slots[6 - i] = despairs[i];
+      return slots;
+    }
+
     function showQuestUpdatePopup(questKey, questData, desc) {
       const popup = $('quest-update-popup');
       $('quest-update-title').textContent = getLocationLabel(questKey);
@@ -3492,9 +3682,9 @@
         html += '</div>';
       } else if (questKey === 'holyGrail') {
         html += '<div style="display:flex;gap:3px;justify-content:center;">';
-        const cards = questData.cards || [];
+        const slots = buildGrailSlotLayout(questData.cards || []);
         for (let i = 0; i < 7; i++) {
-          const c = cards[i];
+          const c = slots[i];
           if (!c) {
             html += '<div style="width:28px;height:36px;border-radius:3px;border:1px dashed var(--text-dim);opacity:0.3;"></div>';
           } else {
@@ -6193,11 +6383,17 @@
       let html = '';
       if (data.questKey === 'holyGrail') {
         html += '<p style="color:var(--text-dim);font-size:1rem;">Holy Grail Quest Board</p><div class="combat-cards">';
-        for (const card of (data.cards || [])) {
-          const isGrail = card.type === 'grail';
-          html += '<div class="combat-card ' + (isGrail ? 'white-side' : 'black-side') + '">' +
-            '<div class="cc-val">' + (isGrail ? 'G' : 'D') + '</div>' +
-            '<div style="font-size:0.625rem;">' + (isGrail ? 'Grail' : (card.type === 'desolation' ? 'Desolation' : 'Despair')) + '</div></div>';
+        const slots = buildGrailSlotLayout(data.cards || []);
+        for (let i = 0; i < 7; i++) {
+          const card = slots[i];
+          if (!card) {
+            html += '<div class="combat-card" style="opacity:0.2;border:1px dashed var(--text-dim);"><div class="cc-val">-</div></div>';
+          } else {
+            const isGrail = card.type === 'grail';
+            html += '<div class="combat-card ' + (isGrail ? 'white-side' : 'black-side') + '">' +
+              '<div class="cc-val">' + (isGrail ? 'G' : 'D') + '</div>' +
+              '<div style="font-size:0.625rem;">' + (isGrail ? 'Grail' : (card.type === 'desolation' ? 'Desolation' : 'Despair')) + '</div></div>';
+          }
         }
         html += '</div>';
         const gc = (data.cards || []).filter(c => c.type === 'grail').length;
@@ -6627,8 +6823,7 @@
         // Kay extra card prompt on loss
         if (heroicSubState.kayPending) {
           const hasFight = myHand.some(c => c.type === 'fight');
-          html += '<p style="color:var(--gold);font-size:1rem;margin-top:0.5rem;">Sir Kay — Play 1 extra Fight card?</p>';
-          html += '<button class="btn btn-heroic" id="btn-kay-siege-play"' + (hasFight ? '' : ' disabled') + '>Select Fight Card</button>';
+          html += '<p style="color:var(--gold);font-size:1rem;margin-top:0.5rem;">Sir Kay — ' + (hasFight ? 'Tap a Fight card to play, or skip' : 'No Fight cards available') + '</p>';
           html += '<button class="btn btn-heroic" id="btn-kay-siege-skip" style="margin-top:0.5rem;">Skip</button>';
         } else {
           html += '<button class="btn btn-heroic" id="btn-siege-done" style="margin-top:0.5rem;">Continue</button>';
@@ -6651,14 +6846,6 @@
       });
       const doneBtn = document.getElementById('btn-siege-done');
       if (doneBtn) doneBtn.addEventListener('click', finalizeSiegeResult);
-      const kayPlayBtn = document.getElementById('btn-kay-siege-play');
-      if (kayPlayBtn) kayPlayBtn.addEventListener('click', () => {
-        heroicSubState.kaySiegeSelect = true;
-        renderHand();
-        const actArea = $('turn-action-area');
-        actArea.querySelector('.siege-panel')?.insertAdjacentHTML('beforeend',
-          '<p style="color:var(--gold);font-size:0.875rem;margin-top:0.25rem;">Select a Fight card from your hand</p>');
-      });
       const kaySkipBtn = document.getElementById('btn-kay-siege-skip');
       if (kaySkipBtn) kaySkipBtn.addEventListener('click', async () => {
         heroicSubState.kayPending = false;
@@ -6711,6 +6898,7 @@
       if (!won && kayAtSiege && myKnight === 'kay') {
         // Kay is the active player and lost — show Kay prompt in the siege UI
         heroicSubState.kayPending = true;
+        heroicSubState.kaySiegeSelect = true;
         renderTurnActions();
         return; // Wait for Kay to play or skip
       }
