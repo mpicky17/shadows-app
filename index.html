@@ -344,6 +344,28 @@
     @keyframes notifIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
     @keyframes notifOut { from { opacity: 1; } to { opacity: 0; } }
 
+    /* ── Game Admin Buttons (premature death, host remove) ────────── */
+    .game-admin-btns { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 1rem; align-items: center; }
+    .game-admin-btns button { font-size: 0.875rem; padding: 0.375rem 0.75rem; opacity: 0.7; min-width: auto; }
+    .game-admin-btns button:active { opacity: 1; }
+
+    /* ── Remove Player Picker (Host) ──────────────────────────────── */
+    .remove-player-overlay {
+      position: fixed; inset: 0; z-index: 250; background: rgba(10,8,5,0.92);
+      display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 1rem;
+      padding: 1rem;
+    }
+    .remove-player-overlay h3 { color: var(--gold); margin: 0; font-size: 1.125rem; }
+    .remove-player-list { display: flex; flex-direction: column; gap: 0.5rem; width: 100%; max-width: 400px; }
+    .remove-player-row {
+      display: flex; align-items: center; gap: 0.75rem; background: var(--bg-card);
+      border: 2px solid var(--gold-dim); border-radius: var(--radius); padding: 0.75rem; cursor: pointer;
+    }
+    .remove-player-row:active { border-color: var(--red-bright); }
+    .remove-player-row img { width: 40px; height: 40px; }
+    .remove-player-row .rp-name { color: var(--parchment); font-size: 1rem; font-weight: 600; }
+    .remove-player-row .rp-knight { color: var(--text-dim); font-size: 0.875rem; }
+
     /* ── Join Request Popup (Host) ─────────────────────────────────── */
     .join-request-popup {
       position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
@@ -818,6 +840,10 @@
       <div id="turn-action-area"></div>
       <div id="interaction-area"></div>
       <div class="game-log" id="game-log"></div>
+      <div class="game-admin-btns" id="game-admin-btns">
+        <button class="btn btn-danger hidden" id="btn-premature-death">Permanently Leave Game</button>
+        <button class="btn btn-danger hidden" id="btn-host-remove-player">Remove Player From Game</button>
+      </div>
     </div>
 
     <div class="hand-area" id="hand-area">
@@ -887,7 +913,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v49';
+    const APP_VERSION = 'shadows-v50';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -2098,6 +2124,12 @@
     });
     $('btn-start').addEventListener('click', startGame);
     $('btn-join-as-player').addEventListener('click', showKnightPickerForJoin);
+    $('btn-premature-death').addEventListener('click', () => {
+      if (!myKnight || isSpectator) return;
+      if (!confirm('Are you sure you want to end your game? Your knight will die permanently.')) return;
+      prematureDeath(myKnight);
+    });
+    $('btn-host-remove-player').addEventListener('click', showRemovePlayerPicker);
 
     // Traitor toggle
     $('toggle-traitor').addEventListener('click', () => {
@@ -2281,6 +2313,14 @@
         // Auto-clear local hand when revealed as traitor (host clears private DB)
         if (myKnight && cachedPlayers[myKnight]?.isRevealed && myHand.length > 0) {
           myHand = [];
+          renderHand();
+        }
+        // Auto-discard hand when killed (handles host-initiated removal)
+        if (myKnight && cachedPlayers[myKnight]?.alive === false && myHand.length > 0 && !cachedPlayers[myKnight]?.isRevealed) {
+          const discardedHand = [...myHand];
+          myHand = [];
+          fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set([]);
+          requestWhiteDiscard(discardedHand);
           renderHand();
         }
         renderGamePlayers();
@@ -2967,6 +3007,29 @@
           joinBtn.classList.remove('hidden');
         } else {
           joinBtn.classList.add('hidden');
+        }
+      }
+
+      // Update premature death button visibility
+      const deathBtn = document.getElementById('btn-premature-death');
+      if (deathBtn) {
+        if (!isSpectator && myKnight && cachedPlayers[myKnight]?.alive !== false && roomData.status === 'playing') {
+          deathBtn.classList.remove('hidden');
+        } else {
+          deathBtn.classList.add('hidden');
+        }
+      }
+
+      // Update host remove player button visibility
+      const removeBtn = document.getElementById('btn-host-remove-player');
+      if (removeBtn) {
+        const aliveOthers = (roomData.turnOrder || []).filter(kid =>
+          cachedPlayers[kid]?.alive !== false && kid !== myKnight
+        );
+        if (isHost && roomData.status === 'playing' && aliveOthers.length > 0) {
+          removeBtn.classList.remove('hidden');
+        } else {
+          removeBtn.classList.add('hidden');
         }
       }
     }
@@ -6075,6 +6138,74 @@
           }
         }
       }
+    }
+
+    async function prematureDeath(knightId) {
+      // Set life to 0
+      await fbDb.ref('games/' + currentRoom + '/players/' + knightId + '/life').set(0);
+      // Kill directly — no Grail save for voluntary/forced departure
+      await killKnight(knightId);
+      await addLog('system', getKnightDisplayName(knightId) + ' has left the quest permanently.');
+      if (roomData?.status === 'ended') return;
+      // If dying knight was the current turn knight, advance turn
+      if (roomData?.currentTurnKnight === knightId) {
+        await finishTurnAdvance(knightId);
+      }
+    }
+
+    function showRemovePlayerPicker() {
+      if (!isHost || !roomData) return;
+      const turnOrder = roomData.turnOrder || [];
+      const alivePlayers = turnOrder.filter(kid =>
+        cachedPlayers[kid]?.alive !== false && kid !== myKnight
+      );
+      if (alivePlayers.length === 0) { showToast('No players to remove.'); return; }
+
+      const existing = document.querySelector('.remove-player-overlay');
+      if (existing) existing.remove();
+
+      const overlay = document.createElement('div');
+      overlay.className = 'remove-player-overlay';
+      overlay.innerHTML = '<h3>Remove Player From Game</h3>';
+
+      const list = document.createElement('div');
+      list.className = 'remove-player-list';
+
+      for (const kid of alivePlayers) {
+        const p = cachedPlayers[kid];
+        const knight = KNIGHTS[kid];
+        if (!p || !knight) continue;
+        const row = document.createElement('div');
+        row.className = 'remove-player-row';
+        row.innerHTML = `
+          <img src="${knight.icon}" alt="${knight.name}">
+          <div>
+            <div class="rp-name">${p.displayName}</div>
+            <div class="rp-knight">${knight.name}</div>
+          </div>
+        `;
+        row.addEventListener('click', () => {
+          overlay.remove();
+          if (!confirm('Are you sure you want to permanently remove ' + p.displayName + ' (' + knight.name + ')?')) return;
+          hostRemovePlayer(kid);
+        });
+        list.appendChild(row);
+      }
+      overlay.appendChild(list);
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'btn btn-danger';
+      cancelBtn.textContent = 'Cancel';
+      cancelBtn.style.marginTop = '0.5rem';
+      cancelBtn.addEventListener('click', () => overlay.remove());
+      overlay.appendChild(cancelBtn);
+
+      document.body.appendChild(overlay);
+    }
+
+    async function hostRemovePlayer(knightId) {
+      if (!isHost) return;
+      await prematureDeath(knightId);
     }
 
     async function advanceTurn() {
