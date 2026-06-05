@@ -500,6 +500,7 @@
     }
     .card-reveal-overlay.hidden { display: none; }
     .card-reveal-overlay h2 { color: var(--red-bright); font-size: 1.25rem; }
+    #reveal-body { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 0.75rem; }
     .revealed-card {
       width: 160px; min-height: 220px;
       background: linear-gradient(135deg, #1a1a1a, #2a1a1a);
@@ -823,7 +824,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v46';
+    const APP_VERSION = 'shadows-v47';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
