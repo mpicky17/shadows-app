@@ -628,6 +628,29 @@
     .log-entry.info { color: var(--text-dim); }
     .log-entry.quest { color: var(--gold); }
     .log-entry.system { color: var(--blue); }
+    .log-entry.chat { color: var(--parchment); font-style: italic; }
+    .chat-input-row {
+      display: flex; gap: 0.5rem; margin-top: 0.5rem;
+    }
+    .chat-input-row input {
+      flex: 1; background: var(--bg-card); border: 1px solid var(--gold-dim);
+      border-radius: var(--radius); color: var(--parchment); padding: 0.5rem;
+      font-size: 1rem; font-family: inherit;
+    }
+    .chat-input-row input::placeholder { color: var(--text-dim); }
+    .chat-input-row button {
+      padding: 0.5rem 1rem; font-size: 1rem;
+    }
+    .log-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 0.25rem;
+    }
+    .btn-download-log {
+      font-size: 0.75rem; padding: 0.125rem 0.5rem; cursor: pointer;
+      background: transparent; border: 1px solid var(--text-dim); color: var(--text-dim);
+      border-radius: var(--radius); font-family: inherit;
+    }
+    .btn-download-log:hover { background: var(--text-dim); color: var(--bg-dark); }
     /* ── Phase 4: Heroic Actions ─────────────────────────────────── */
     .heroic-menu { padding: 1rem; background: var(--bg-card); border-radius: var(--radius); border: 1px solid var(--gold-dim); }
     .heroic-menu h3 { color: var(--gold); font-size: 1rem; margin-bottom: 0.25rem; }
@@ -852,6 +875,10 @@
       <div id="turn-action-area"></div>
       <div id="interaction-area"></div>
       <div class="game-log" id="game-log"></div>
+      <div class="chat-input-row" id="chat-input-row" style="display:none;">
+        <input type="text" id="chat-input" placeholder="Type a message..." maxlength="200" autocomplete="off">
+        <button class="btn btn-heroic" id="btn-chat-send">Send</button>
+      </div>
       <div class="game-admin-btns" id="game-admin-btns">
         <button class="btn btn-danger" id="btn-premature-death" style="display:none;">Permanently Leave Game</button>
         <button class="btn btn-danger" id="btn-host-remove-player" style="display:none;">Remove Player From Game</button>
@@ -901,6 +928,7 @@
         <div class="results-stats" id="results-stats"></div>
         <h3 style="color:var(--gold);margin-bottom:0.5rem;font-size:1rem;">Knights of the Round Table</h3>
         <div class="results-knights" id="results-knights"></div>
+        <button class="btn" id="btn-results-download-log" style="width:100%;margin-top:0.5rem;font-size:1rem;">Download Log</button>
         <button class="btn btn-heroic" id="btn-results-lobby" style="width:100%;margin-top:0.5rem;">Return to Lobby</button>
       </div>
     </div>
@@ -927,7 +955,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v55';
+    const APP_VERSION = 'shadows-v56';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -2202,6 +2230,9 @@
         $('hand-area').style.display = 'none';
         $('loyalty-display').style.display = 'none';
       }
+
+      // Show chat input for all participants (players + spectators)
+      $('chat-input-row').style.display = 'flex';
 
       // Listen to own private data (loyalty + hand) — not for spectators
       if (!isSpectator) listenToPrivateData();
@@ -3595,6 +3626,12 @@
     //  SECTION 12A: Game Log
     // ═══════════════════════════════════════════════════════════════════
 
+    function escapeHtml(s) {
+      const d = document.createElement('div');
+      d.textContent = s;
+      return d.innerHTML;
+    }
+
     async function addLog(type, message) {
       if (!currentRoom) return;
       try {
@@ -3651,13 +3688,15 @@
       const showAll = logExpanded || total <= 5;
       const visible = showAll ? entries : entries.slice(-5);
 
-      let html = '';
+      let html = '<div class="log-header"><span style="font-size:0.75rem;color:var(--text-dim);text-transform:uppercase;">Game Log</span>' +
+        '<button class="btn-download-log" id="btn-download-log-inline">Download</button></div>';
       if (!showAll && total > 5) {
         html += '<div class="log-toggle" id="log-expand">Show All (' + total + ')</div>';
       }
-      html += visible.map(e =>
-        '<div class="log-entry ' + (e.type || 'info') + '">' + e.message + '</div>'
-      ).join('');
+      html += visible.map(e => {
+        const content = e.type === 'chat' ? escapeHtml(e.message) : e.message;
+        return '<div class="log-entry ' + (e.type || 'info') + '">' + content + '</div>';
+      }).join('');
       if (showAll && total > 5) {
         html += '<div class="log-toggle" id="log-collapse">Collapse</div>';
       }
@@ -3668,8 +3707,73 @@
       if (expandBtn) expandBtn.addEventListener('click', () => { logExpanded = true; renderLog(entries); });
       const collapseBtn = document.getElementById('log-collapse');
       if (collapseBtn) collapseBtn.addEventListener('click', () => { logExpanded = false; renderLog(entries); });
+      const dlBtn = document.getElementById('btn-download-log-inline');
+      if (dlBtn) dlBtn.addEventListener('click', downloadGameLog);
 
       el.scrollTop = el.scrollHeight;
+    }
+
+    // ── Chat Input ─────────────────────────────────────────────────
+    function sendChatMessage() {
+      const input = $('chat-input');
+      const text = input.value.trim();
+      if (!text || !currentRoom) return;
+      const msg = myKnight
+        ? myName + ' (' + (KNIGHTS[myKnight]?.name || myKnight) + '): ' + text
+        : myName + ': ' + text;
+      addLog('chat', msg);
+      input.value = '';
+    }
+
+    $('btn-chat-send').addEventListener('click', sendChatMessage);
+    $('chat-input').addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); sendChatMessage(); }
+    });
+
+    // ── Download Log ───────────────────────────────────────────────
+    async function downloadGameLog() {
+      if (!currentRoom) { showToast('No active game.'); return; }
+      try {
+        const snap = await fbDb.ref('games/' + currentRoom + '/log').orderByChild('timestamp').once('value');
+        if (!snap.exists()) { showToast('No log entries found.'); return; }
+        const entries = [];
+        snap.forEach(child => { entries.push(child.val()); });
+
+        const lines = entries.map(e => {
+          const dt = new Date(e.timestamp);
+          const ts = dt.toLocaleString();
+          const type = (e.type || 'info').toUpperCase();
+          return '[' + ts + '] [' + type + '] ' + e.message;
+        });
+        const text = lines.join('\n');
+
+        let fileTs = 'unknown';
+        const metaSnap = await fbDb.ref('games/' + currentRoom + '/meta/createdAt').once('value');
+        const createdAt = metaSnap.val();
+        if (createdAt) {
+          const d = new Date(createdAt);
+          fileTs = d.getFullYear().toString() +
+            String(d.getMonth() + 1).padStart(2, '0') +
+            String(d.getDate()).padStart(2, '0') + '_' +
+            String(d.getHours()).padStart(2, '0') +
+            String(d.getMinutes()).padStart(2, '0') +
+            String(d.getSeconds()).padStart(2, '0');
+        }
+        const filename = fileTs + '_Room_' + currentRoom + '.txt';
+
+        const blob = new Blob([text], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch (e) {
+        console.error('[SOC] Download log failed:', e);
+        showToast('Failed to download log.');
+      }
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -6031,6 +6135,9 @@
           '<span class="results-loyalty ' + loyalty + '">' + (loyalty === 'traitor' ? 'TRAITOR' : (loyalty === '?' ? 'Revealing...' : 'Loyal')) + '</span></div>';
       }
       $('results-knights').innerHTML = knightsHtml;
+
+      // Download Log button
+      $('btn-results-download-log').onclick = downloadGameLog;
 
       // Return to Lobby button
       $('btn-results-lobby').onclick = async () => {
