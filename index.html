@@ -795,6 +795,11 @@
         <label>Include Traitor Card</label>
         <div class="toggle on" id="toggle-traitor" role="button" tabindex="0"></div>
       </div>
+      <div class="setting-row" id="setting-traitor-among-us" style="display:none;">
+        <label>Traitor Among Us</label>
+        <div class="toggle" id="toggle-traitor-among-us" role="button" tabindex="0"></div>
+        <div style="font-size:0.75rem;color:var(--text-dim);width:100%;margin-top:0.25rem;">Guarantees a traitor — loyalty deck matches player count exactly</div>
+      </div>
     </div>
 
     <div class="lobby-actions">
@@ -913,7 +918,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v50';
+    const APP_VERSION = 'shadows-v51';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1373,6 +1378,7 @@
         hostUid: myUid,
         status: 'lobby',
         includeTraitor: true,
+        traitorAmongUs: false,
       });
 
       promptForName('create');
@@ -1737,12 +1743,20 @@
         }
         roomData = snap.val();
 
-        // Update traitor toggle
+        // Update traitor toggles
         const toggle = $('toggle-traitor');
         if (roomData.includeTraitor) {
           toggle.classList.add('on');
         } else {
           toggle.classList.remove('on');
+        }
+        // Show/hide "Traitor Among Us" sub-option
+        $('setting-traitor-among-us').style.display = roomData.includeTraitor ? '' : 'none';
+        const tauToggle = $('toggle-traitor-among-us');
+        if (roomData.traitorAmongUs) {
+          tauToggle.classList.add('on');
+        } else {
+          tauToggle.classList.remove('on');
         }
 
         // If game started or in setup, switch to game screen
@@ -1952,11 +1966,19 @@
         let loyaltyDeck;
         let unusedLoyalties = [];
         if (roomData.includeTraitor) {
-          loyaltyDeck = Array(7).fill('loyal');
-          loyaltyDeck.push('traitor');
-          shuffle(loyaltyDeck);
-          unusedLoyalties = loyaltyDeck.slice(count);
-          loyaltyDeck = loyaltyDeck.slice(0, count);
+          if (roomData.traitorAmongUs) {
+            // Traitor Among Us: exactly count cards (count-1 loyal + 1 traitor) — guarantees a traitor
+            loyaltyDeck = Array(count - 1).fill('loyal');
+            loyaltyDeck.push('traitor');
+            shuffle(loyaltyDeck);
+          } else {
+            // Standard: 8-card pool (7 loyal + 1 traitor), deal count
+            loyaltyDeck = Array(7).fill('loyal');
+            loyaltyDeck.push('traitor');
+            shuffle(loyaltyDeck);
+            unusedLoyalties = loyaltyDeck.slice(count);
+            loyaltyDeck = loyaltyDeck.slice(0, count);
+          }
         } else {
           loyaltyDeck = Array(count).fill('loyal');
         }
@@ -2131,12 +2153,20 @@
     });
     $('btn-host-remove-player').addEventListener('click', showRemovePlayerPicker);
 
-    // Traitor toggle
+    // Traitor toggles
     $('toggle-traitor').addEventListener('click', () => {
       if (!isHost || !currentRoom) return;
       const toggle = $('toggle-traitor');
       const newVal = !toggle.classList.contains('on');
-      fbDb.ref('games/' + currentRoom + '/meta/includeTraitor').set(newVal);
+      const updates = { includeTraitor: newVal };
+      if (!newVal) updates.traitorAmongUs = false; // disable sub-option when traitor turned off
+      fbDb.ref('games/' + currentRoom + '/meta').update(updates);
+    });
+    $('toggle-traitor-among-us').addEventListener('click', () => {
+      if (!isHost || !currentRoom) return;
+      const toggle = $('toggle-traitor-among-us');
+      const newVal = !toggle.classList.contains('on');
+      fbDb.ref('games/' + currentRoom + '/meta/traitorAmongUs').set(newVal);
     });
 
     // Copy room code on tap
