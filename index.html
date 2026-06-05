@@ -918,7 +918,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v53';
+    const APP_VERSION = 'shadows-v54';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -3118,10 +3118,16 @@
     }
 
     async function reshuffleDecksIfNeeded(deckPath) {
-      const whiteDiscSnap = await fbDb.ref(deckPath + 'whiteDiscard').once('value');
-      const blackDiscSnap = await fbDb.ref(deckPath + 'blackDiscard').once('value');
+      const [whiteDiscSnap, blackDiscSnap, whiteDrawSnap, blackDrawSnap] = await Promise.all([
+        fbDb.ref(deckPath + 'whiteDiscard').once('value'),
+        fbDb.ref(deckPath + 'blackDiscard').once('value'),
+        fbDb.ref(deckPath + 'whiteDraw').once('value'),
+        fbDb.ref(deckPath + 'blackDraw').once('value'),
+      ]);
       let whiteDisc = whiteDiscSnap.val() || [];
       let blackDisc = blackDiscSnap.val() || [];
+      const whiteDraw = whiteDrawSnap.val() || [];
+      const blackDraw = blackDrawSnap.val() || [];
       if (whiteDisc.length === 0 && blackDisc.length === 0) {
         await addLog('system', 'Warning: All card piles are empty — cannot draw!');
         return false;
@@ -3150,13 +3156,16 @@
       }
       shuffle(whiteDisc);
       shuffle(blackDisc);
+      // Merge: reshuffled discard at bottom, existing draw on top (pop draws from top)
+      const newWhiteDraw = [...whiteDisc, ...whiteDraw];
+      const newBlackDraw = [...blackDisc, ...blackDraw];
       const reshuffleUpdates = {};
-      reshuffleUpdates[deckPath + 'whiteDraw'] = whiteDisc;
-      reshuffleUpdates[deckPath + 'blackDraw'] = blackDisc;
+      reshuffleUpdates[deckPath + 'whiteDraw'] = newWhiteDraw;
+      reshuffleUpdates[deckPath + 'blackDraw'] = newBlackDraw;
       reshuffleUpdates[deckPath + 'whiteDiscard'] = [];
       reshuffleUpdates[deckPath + 'blackDiscard'] = held;
-      reshuffleUpdates['games/' + currentRoom + '/decks/whiteDrawCount'] = whiteDisc.length;
-      reshuffleUpdates['games/' + currentRoom + '/decks/blackDrawCount'] = blackDisc.length;
+      reshuffleUpdates['games/' + currentRoom + '/decks/whiteDrawCount'] = newWhiteDraw.length;
+      reshuffleUpdates['games/' + currentRoom + '/decks/blackDrawCount'] = newBlackDraw.length;
       await fbDb.ref().update(reshuffleUpdates);
       await addLog('system', 'Draw piles reshuffled from discard piles.');
       return true;
@@ -3321,30 +3330,12 @@
       let drawPile = deckSnap.val() || [];
 
       if (drawPile.length === 0) {
-        // Per rules: when either draw pile runs out, reshuffle BOTH discard piles
-        const whiteDiscSnap = await fbDb.ref(deckPath + 'whiteDiscard').once('value');
-        const blackDiscSnap = await fbDb.ref(deckPath + 'blackDiscard').once('value');
-        let whiteDisc = whiteDiscSnap.val() || [];
-        let blackDisc = blackDiscSnap.val() || [];
-        if (whiteDisc.length === 0 && blackDisc.length === 0) {
-          // Truly empty — nothing to reshuffle
-          console.warn('Both discard piles empty, cannot reshuffle for', deckType);
-          await addLog('system', 'Warning: All card piles are empty — cannot draw!');
+        const reshuffled = await reshuffleDecksIfNeeded(deckPath);
+        if (!reshuffled) {
+          console.warn('Cannot reshuffle for', deckType);
           await fbDb.ref('games/' + currentRoom + '/drawRequests/' + requestId).remove();
           return;
         }
-        shuffle(whiteDisc);
-        shuffle(blackDisc);
-        const reshuffleUpdates = {};
-        reshuffleUpdates[deckPath + 'whiteDraw'] = whiteDisc;
-        reshuffleUpdates[deckPath + 'blackDraw'] = blackDisc;
-        reshuffleUpdates[deckPath + 'whiteDiscard'] = [];
-        reshuffleUpdates[deckPath + 'blackDiscard'] = [];
-        reshuffleUpdates['games/' + currentRoom + '/decks/whiteDrawCount'] = whiteDisc.length;
-        reshuffleUpdates['games/' + currentRoom + '/decks/blackDrawCount'] = blackDisc.length;
-        await fbDb.ref().update(reshuffleUpdates);
-        await addLog('system', 'Draw piles reshuffled from discard piles.');
-        // Retry the draw with reshuffled pile
         await processDrawRequest(request, requestId);
         return;
       }
@@ -3356,28 +3347,14 @@
 
       // If pile exhausted mid-draw, reshuffle and draw remainder
       if (drawnCards.length < count && drawPile.length === 0) {
-        const whiteDiscSnap2 = await fbDb.ref(deckPath + 'whiteDiscard').once('value');
-        const blackDiscSnap2 = await fbDb.ref(deckPath + 'blackDiscard').once('value');
-        let whiteDisc2 = whiteDiscSnap2.val() || [];
-        let blackDisc2 = blackDiscSnap2.val() || [];
-        if (whiteDisc2.length > 0 || blackDisc2.length > 0) {
-          shuffle(whiteDisc2);
-          shuffle(blackDisc2);
-          const reshuffleUpd = {};
-          reshuffleUpd[deckPath + 'whiteDraw'] = whiteDisc2;
-          reshuffleUpd[deckPath + 'blackDraw'] = blackDisc2;
-          reshuffleUpd[deckPath + 'whiteDiscard'] = [];
-          reshuffleUpd[deckPath + 'blackDiscard'] = [];
-          reshuffleUpd['games/' + currentRoom + '/decks/whiteDrawCount'] = whiteDisc2.length;
-          reshuffleUpd['games/' + currentRoom + '/decks/blackDrawCount'] = blackDisc2.length;
-          await fbDb.ref().update(reshuffleUpd);
-          await addLog('system', 'Draw piles reshuffled from discard piles.');
-          const freshPile = deckType === 'white' ? whiteDisc2 : blackDisc2;
+        const reshuffled = await reshuffleDecksIfNeeded(deckPath);
+        if (reshuffled) {
+          const freshSnap = await fbDb.ref(deckPath + drawKey).once('value');
+          drawPile = freshSnap.val() || [];
           const remaining = count - drawnCards.length;
-          for (let i = 0; i < remaining && freshPile.length > 0; i++) {
-            drawnCards.push(freshPile.pop());
+          for (let i = 0; i < remaining && drawPile.length > 0; i++) {
+            drawnCards.push(drawPile.pop());
           }
-          drawPile = freshPile;
         }
       }
 
@@ -3403,6 +3380,7 @@
         const newCards = result.cards || [];
         console.log('[SOC] drawResult received', { knightId: result.knightId, cardCount: newCards.length, newHandSize: myHand.length + newCards.length });
         myHand = [...myHand, ...newCards];
+        renderHand();
 
         // Write updated hand to my private path & remove the result
         const updates = {};
