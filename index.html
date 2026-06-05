@@ -576,9 +576,8 @@
     }
     .combat-overlay:not(.hidden) { animation: overlayFadeIn 0.3s ease-out; }
     .overlay-minimize-btn { position: absolute; top: 0.5rem; right: 0.75rem; background: var(--border); color: var(--text-dim); border: none; border-radius: 4px; padding: 0.25rem 0.5rem; font-size: 0.75rem; cursor: pointer; z-index: 10; }
-    .overlay-minimized { padding: 0.5rem 1rem; color: var(--gold); font-size: 0.875rem; cursor: pointer; text-align: center; white-space: nowrap; }
+    .overlay-minimized { position: fixed; right: 0.75rem; bottom: 0.75rem; z-index: 201; padding: 0.5rem 1rem; color: var(--gold); font-size: 1rem; cursor: pointer; white-space: nowrap; background: rgba(20,15,10,0.95); border: 2px solid var(--gold); border-radius: 24px; box-shadow: 0 2px 12px rgba(0,0,0,0.6); }
     .overlay-minimized.hidden { display: none; }
-    .combat-overlay.minimized, .card-reveal-overlay.minimized { top: auto; left: auto; right: 0.75rem; bottom: 0.75rem; width: auto; height: auto; background: rgba(20,15,10,0.95); border: 2px solid var(--gold); border-radius: 24px; padding: 0; align-items: center; justify-content: center; box-shadow: 0 2px 12px rgba(0,0,0,0.6); }
     @keyframes cardPlayFlash {
       0% { opacity: 1; transform: scale(1); }
       50% { opacity: 0.8; transform: scale(1.05); }
@@ -778,8 +777,8 @@
         <p id="reveal-effect-desc"></p>
         <div class="card-reveal-actions" id="reveal-actions"></div>
       </div>
-      <div class="overlay-minimized hidden" id="reveal-minimized">Tap to expand Black Card</div>
     </div>
+    <div class="overlay-minimized hidden" id="reveal-minimized">Black Card ▸</div>
     <div class="combat-overlay hidden" id="combat-overlay">
       <button class="overlay-minimize-btn" id="btn-minimize-combat">Minimize</button>
       <div id="combat-body">
@@ -787,8 +786,8 @@
         <div id="combat-content"></div>
         <div id="combat-actions"></div>
       </div>
-      <div class="overlay-minimized hidden" id="combat-minimized">Tap to expand Quest Result</div>
     </div>
+    <div class="overlay-minimized hidden" id="combat-minimized">Quest Result ▸</div>
     <div id="quest-update-popup" class="quest-update-popup hidden">
       <div id="quest-update-title" style="font-weight:700;font-size:1rem;margin-bottom:0.5rem;"></div>
       <div id="quest-update-content"></div>
@@ -824,7 +823,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v45';
+    const APP_VERSION = 'shadows-v46';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -2063,26 +2062,21 @@
       listenToLog();
 
       // Overlay minimize/maximize
-      function setupOverlayMinimize(overlayId, bodyId, minimizedId, btnId) {
+      function setupOverlayMinimize(overlayId, minimizedId, btnId) {
         const btn = $(btnId);
-        const body = $(bodyId);
         const mini = $(minimizedId);
         const overlay = $(overlayId);
         btn.addEventListener('click', () => {
-          body.classList.add('hidden');
-          btn.classList.add('hidden');
+          overlay.classList.add('hidden');
           mini.classList.remove('hidden');
-          overlay.classList.add('minimized');
         });
         mini.addEventListener('click', () => {
-          body.classList.remove('hidden');
-          btn.classList.remove('hidden');
+          overlay.classList.remove('hidden');
           mini.classList.add('hidden');
-          overlay.classList.remove('minimized');
         });
       }
-      setupOverlayMinimize('card-reveal-overlay', 'reveal-body', 'reveal-minimized', 'btn-minimize-reveal');
-      setupOverlayMinimize('combat-overlay', 'combat-body', 'combat-minimized', 'btn-minimize-combat');
+      setupOverlayMinimize('card-reveal-overlay', 'reveal-minimized', 'btn-minimize-reveal');
+      setupOverlayMinimize('combat-overlay', 'combat-minimized', 'btn-minimize-combat');
     }
 
     function listenToPrivateData() {
@@ -3418,15 +3412,13 @@
     function renderCardRevealOverlay(data) {
       if (!data || !data.card) {
         $('card-reveal-overlay').classList.add('hidden');
+        $('reveal-minimized').classList.add('hidden');
         return;
       }
 
       const card = data.card;
       const overlay = $('card-reveal-overlay');
       overlay.classList.remove('hidden');
-      overlay.classList.remove('minimized');
-      $('reveal-body').classList.remove('hidden');
-      $('btn-minimize-reveal').classList.remove('hidden');
       $('reveal-minimized').classList.add('hidden');
 
       const drawnByName = getKnightDisplayName(data.drawnBy);
@@ -3600,6 +3592,7 @@
       const data = roomData?.revealedBlackCard;
       if (!data) {
         $('card-reveal-overlay').classList.add('hidden');
+        $('reveal-minimized').classList.add('hidden');
         return;
       }
       renderCardRevealOverlay(data);
@@ -6365,10 +6358,6 @@
     }
 
     function resetCombatOverlayMinimize() {
-      const overlay = $('combat-overlay');
-      overlay.classList.remove('minimized');
-      $('combat-body').classList.remove('hidden');
-      $('btn-minimize-combat').classList.remove('hidden');
       $('combat-minimized').classList.add('hidden');
     }
 
@@ -6377,7 +6366,7 @@
       const overlay = $('combat-overlay');
       if (!resolution) {
         // Don't hide if a quest result is showing
-        if (!roomData?.questResult) overlay.classList.add('hidden');
+        if (!roomData?.questResult) { overlay.classList.add('hidden'); $('combat-minimized').classList.add('hidden'); }
         return;
       }
       overlay.classList.remove('hidden');
@@ -6389,7 +6378,7 @@
       const result = roomData?.questResult;
       const overlay = $('combat-overlay');
       if (!result) {
-        if (!roomData?.combatResolution) overlay.classList.add('hidden');
+        if (!roomData?.combatResolution) { overlay.classList.add('hidden'); $('combat-minimized').classList.add('hidden'); }
         return;
       }
       overlay.classList.remove('hidden');
