@@ -837,7 +837,7 @@
 
       <div class="game-players" id="game-players"></div>
       <div id="board-summary"></div>
-      <button class="btn btn-primary hidden" id="btn-join-as-player">Join as Player</button>
+      <button class="btn btn-primary" id="btn-join-as-player" style="display:none;">Join as Player</button>
 
       <h3>Quests</h3>
       <div class="quest-grid" id="quest-summary"></div>
@@ -846,8 +846,8 @@
       <div id="interaction-area"></div>
       <div class="game-log" id="game-log"></div>
       <div class="game-admin-btns" id="game-admin-btns">
-        <button class="btn btn-danger hidden" id="btn-premature-death">Permanently Leave Game</button>
-        <button class="btn btn-danger hidden" id="btn-host-remove-player">Remove Player From Game</button>
+        <button class="btn btn-danger" id="btn-premature-death" style="display:none;">Permanently Leave Game</button>
+        <button class="btn btn-danger" id="btn-host-remove-player" style="display:none;">Remove Player From Game</button>
       </div>
     </div>
 
@@ -918,7 +918,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v51';
+    const APP_VERSION = 'shadows-v52';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -2186,13 +2186,10 @@
       inGameScreen = true;
       showScreen('game-screen');
 
-      // Spectators: hide hand and loyalty areas, show join button
+      // Spectators: hide hand and loyalty areas
       if (isSpectator) {
         $('hand-area').style.display = 'none';
         $('loyalty-display').style.display = 'none';
-        $('btn-join-as-player').classList.remove('hidden');
-      } else {
-        $('btn-join-as-player').classList.add('hidden');
       }
 
       // Listen to own private data (loyalty + hand) — not for spectators
@@ -3033,21 +3030,13 @@
       const joinBtn = document.getElementById('btn-join-as-player');
       if (joinBtn) {
         const playerCount = (roomData.turnOrder || []).length;
-        if (isSpectator && playerCount < 7 && roomData.status === 'playing') {
-          joinBtn.classList.remove('hidden');
-        } else {
-          joinBtn.classList.add('hidden');
-        }
+        joinBtn.style.display = (isSpectator && playerCount < 7 && roomData.status === 'playing') ? '' : 'none';
       }
 
       // Update premature death button visibility
       const deathBtn = document.getElementById('btn-premature-death');
       if (deathBtn) {
-        if (!isSpectator && myKnight && cachedPlayers[myKnight]?.alive !== false && roomData.status === 'playing') {
-          deathBtn.classList.remove('hidden');
-        } else {
-          deathBtn.classList.add('hidden');
-        }
+        deathBtn.style.display = (!isSpectator && myKnight && cachedPlayers[myKnight]?.alive !== false && roomData.status === 'playing') ? '' : 'none';
       }
 
       // Update host remove player button visibility
@@ -3056,11 +3045,7 @@
         const aliveOthers = (roomData.turnOrder || []).filter(kid =>
           cachedPlayers[kid]?.alive !== false && kid !== myKnight
         );
-        if (isHost && roomData.status === 'playing' && aliveOthers.length > 0) {
-          removeBtn.classList.remove('hidden');
-        } else {
-          removeBtn.classList.add('hidden');
-        }
+        removeBtn.style.display = (isHost && roomData.status === 'playing' && aliveOthers.length > 0) ? '' : 'none';
       }
     }
 
