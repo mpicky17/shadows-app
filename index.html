@@ -344,6 +344,44 @@
     @keyframes notifIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
     @keyframes notifOut { from { opacity: 1; } to { opacity: 0; } }
 
+    /* ── Join Request Popup (Host) ─────────────────────────────────── */
+    .join-request-popup {
+      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      z-index: 300; background: var(--bg-card); border: 2px solid var(--gold);
+      border-radius: var(--radius); padding: 1.5rem; max-width: 320px; width: 90%;
+      text-align: center; box-shadow: 0 4px 24px rgba(0,0,0,0.6);
+    }
+    .join-request-popup h3 { color: var(--gold); margin: 0 0 0.75rem; font-size: 1.125rem; }
+    .join-request-popup p { color: var(--parchment); margin: 0 0 1rem; font-size: 1rem; }
+    .join-request-popup .join-req-btns { display: flex; gap: 0.75rem; justify-content: center; }
+    .join-request-popup .join-req-btns button { min-width: 100px; font-size: 1rem; }
+    .join-request-backdrop { position: fixed; inset: 0; z-index: 299; background: rgba(0,0,0,0.5); }
+    /* ── Spectator Join Button ─────────────────────────────────────── */
+    #btn-join-as-player { margin: 0.75rem auto; display: block; font-size: 1rem; }
+    /* ── Knight Picker Overlay (mid-game join) ────────────────────── */
+    .knight-picker-overlay {
+      position: fixed; inset: 0; z-index: 250; background: rgba(10,8,5,0.92);
+      display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 1rem;
+      padding: 1rem; overflow-y: auto;
+    }
+    .knight-picker-overlay h3 { color: var(--gold); margin: 0; font-size: 1.125rem; }
+    .knight-picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 0.75rem; width: 100%; max-width: 500px; }
+    .knight-picker-card {
+      background: var(--bg-card); border: 2px solid var(--gold-dim); border-radius: var(--radius);
+      padding: 0.75rem; text-align: center; cursor: pointer; transition: border-color 0.2s;
+    }
+    .knight-picker-card:active { border-color: var(--gold); }
+    .knight-picker-card img { width: 48px; height: 48px; }
+    .knight-picker-card .kp-name { color: var(--parchment); font-size: 1rem; font-weight: 600; margin-top: 0.25rem; }
+    .knight-picker-card.taken { opacity: 0.35; pointer-events: none; border-color: var(--text-dim); }
+    /* ── Join Waiting Overlay ──────────────────────────────────────── */
+    .join-waiting-overlay {
+      position: fixed; inset: 0; z-index: 250; background: rgba(10,8,5,0.85);
+      display: flex; align-items: center; justify-content: center; flex-direction: column; gap: 1rem;
+    }
+    .join-waiting-overlay p { color: var(--gold); font-size: 1.125rem; }
+    .join-waiting-overlay button { font-size: 1rem; }
+
     /* ── Game Screen ────────────────────────────────────────────────── */
     #game-screen { flex-direction: column; padding: 0; gap: 0; position: relative; }
 
@@ -772,6 +810,7 @@
 
       <div class="game-players" id="game-players"></div>
       <div id="board-summary"></div>
+      <button class="btn btn-primary hidden" id="btn-join-as-player">Join as Player</button>
 
       <h3>Quests</h3>
       <div class="quest-grid" id="quest-summary"></div>
@@ -848,7 +887,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v48';
+    const APP_VERSION = 'shadows-v49';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -956,6 +995,9 @@
     let logExpanded = false;
     let previousLogKeys = new Set();
     let dragState = null;
+    let joinRequestListener = null;
+    let joinResponseListener = null;
+    let pendingJoinKnight = null;
     let discardMode = null;
     let discardCount = 0;
     let heroicMode = null;       // 'move'|'playCard'|'fightSiege'|'heal'|'specialWhite'|null
@@ -1320,7 +1362,8 @@
       if (!snap.exists()) { showToast('Room not found.'); return; }
 
       const meta = snap.val();
-      if (meta.status !== 'lobby') { showToast('Game already in progress.'); return; }
+      if (meta.status === 'ended') { showToast('Game has already ended.'); return; }
+      if (meta.status === 'setup') { showToast('Game is starting — try again in a moment.'); return; }
 
       // Check player count
       const playersSnap = await fbDb.ref('games/' + code + '/players').once('value');
@@ -1330,7 +1373,11 @@
       currentRoom = code;
       isHost = false;
 
-      promptForName('join');
+      if (meta.status === 'playing') {
+        promptForName('midgame');
+      } else {
+        promptForName('join');
+      }
     }
 
     function promptForName(action) {
@@ -1350,8 +1397,22 @@
       myName = name;
       localStorage.setItem('shadows-player-name', name);
 
-      showScreen('lobby-screen');
-      enterLobby();
+      const action = $('btn-confirm-name').dataset.action;
+      if (action === 'midgame') {
+        // Mid-game join: enter as spectator, game screen will show "Join as Player" button
+        myKnight = null;
+        isSpectator = true;
+        const specRef = fbDb.ref('games/' + currentRoom + '/spectators/' + myUid);
+        await specRef.set({ displayName: myName, uid: myUid });
+        specRef.onDisconnect().remove();
+        saveSession();
+        showScreen('lobby-screen');
+        enterLobby();
+        showToast('Watching game — tap "Join as Player" to request entry.');
+      } else {
+        showScreen('lobby-screen');
+        enterLobby();
+      }
     }
 
     // ── Lobby Background Music ────────────────────────────────────────
@@ -1782,6 +1843,8 @@
         if (drawResultListener) { fbDb.ref('games/' + currentRoom + '/drawResults').off('child_added', drawResultListener); drawResultListener = null; }
         if (setupListener) { fbDb.ref('games/' + currentRoom + '/setup').off('value', setupListener); setupListener = null; }
         if (logListener) { fbDb.ref('games/' + currentRoom + '/log').off('value', logListener); logListener = null; }
+        if (joinRequestListener) { fbDb.ref('games/' + currentRoom + '/joinRequests').off('child_added', joinRequestListener); joinRequestListener = null; }
+        if (joinResponseListener && pendingJoinKnight) { fbDb.ref('games/' + currentRoom + '/joinRequests/' + pendingJoinKnight).off('value', joinResponseListener); joinResponseListener = null; }
       }
 
       // If host and no other players, delete the room
@@ -1815,6 +1878,7 @@
       prevCachedQuests = null;
       cachedDecks = null;
       cachedPlayers = {};
+      pendingJoinKnight = null;
       discardMode = null;
       discardCount = 0;
       heroicMode = null;
@@ -1858,12 +1922,14 @@
         const turnOrder = KNIGHT_ORDER.filter(k => validPlayerIds.includes(k));
         const firstKnight = turnOrder[0];
 
-        // Create & shuffle loyalty deck
+        // Create & shuffle loyalty deck (store unused for mid-game joiners)
         let loyaltyDeck;
+        let unusedLoyalties = [];
         if (roomData.includeTraitor) {
           loyaltyDeck = Array(7).fill('loyal');
           loyaltyDeck.push('traitor');
           shuffle(loyaltyDeck);
+          unusedLoyalties = loyaltyDeck.slice(count);
           loyaltyDeck = loyaltyDeck.slice(0, count);
         } else {
           loyaltyDeck = Array(count).fill('loyal');
@@ -1940,6 +2006,7 @@
               whiteDiscard: [],
               blackDiscard: [],
               loyalties: Object.fromEntries(turnOrder.map((k, j) => [k, loyaltyDeck[j]])),
+              unusedLoyalties: unusedLoyalties,
             };
           }
           updates[pp + kid] = pdata;
@@ -1955,6 +2022,7 @@
               whiteDiscard: [],
               blackDiscard: [],
               loyalties: Object.fromEntries(turnOrder.map((k, j) => [k, loyaltyDeck[j]])),
+              unusedLoyalties: unusedLoyalties,
             },
           };
         }
@@ -2029,6 +2097,7 @@
       }
     });
     $('btn-start').addEventListener('click', startGame);
+    $('btn-join-as-player').addEventListener('click', showKnightPickerForJoin);
 
     // Traitor toggle
     $('toggle-traitor').addEventListener('click', () => {
@@ -2055,10 +2124,13 @@
       inGameScreen = true;
       showScreen('game-screen');
 
-      // Spectators: hide hand and loyalty areas
+      // Spectators: hide hand and loyalty areas, show join button
       if (isSpectator) {
         $('hand-area').style.display = 'none';
         $('loyalty-display').style.display = 'none';
+        $('btn-join-as-player').classList.remove('hidden');
+      } else {
+        $('btn-join-as-player').classList.add('hidden');
       }
 
       // Listen to own private data (loyalty + hand) — not for spectators
@@ -2070,10 +2142,11 @@
       listenToDecks();
       listenToGamePlayers();
 
-      // Host: set deck key and listen for draw requests (spectator host processes draws too)
+      // Host: set deck key and listen for draw requests + join requests
       if (isHost) {
         hostDeckKey = myKnight || '_host';
         listenForDrawRequests();
+        listenForJoinRequests();
       }
 
       // Players: listen for draw results (cards dealt to me) — not for spectators
@@ -2212,6 +2285,289 @@
         }
         renderGamePlayers();
       });
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SECTION 8b: Mid-Game Join — Host Approval & Joiner Request
+    // ═══════════════════════════════════════════════════════════════════
+
+    function listenForJoinRequests() {
+      if (joinRequestListener) return;
+      const ref = fbDb.ref('games/' + currentRoom + '/joinRequests');
+      joinRequestListener = ref.on('child_added', snap => {
+        const data = snap.val();
+        if (!data || data.status !== 'pending') return;
+        showJoinRequestPopup(snap.key, data);
+      });
+    }
+
+    function showJoinRequestPopup(knightId, requestData) {
+      // Remove any existing popup
+      const existing = document.querySelector('.join-request-backdrop');
+      if (existing) existing.remove();
+      const existingPopup = document.querySelector('.join-request-popup');
+      if (existingPopup) existingPopup.remove();
+
+      const knightName = KNIGHTS[knightId]?.name || knightId;
+      const playerName = requestData.displayName || 'Someone';
+
+      const backdrop = document.createElement('div');
+      backdrop.className = 'join-request-backdrop';
+
+      const popup = document.createElement('div');
+      popup.className = 'join-request-popup';
+      popup.innerHTML = `
+        <h3>Join Request</h3>
+        <p><strong>${playerName}</strong> wants to join as <strong>${knightName}</strong></p>
+        <div class="join-req-btns">
+          <button class="btn btn-primary" id="btn-accept-join">Accept</button>
+          <button class="btn btn-danger" id="btn-reject-join">Reject</button>
+        </div>
+      `;
+
+      document.body.appendChild(backdrop);
+      document.body.appendChild(popup);
+
+      document.getElementById('btn-accept-join').addEventListener('click', async () => {
+        backdrop.remove();
+        popup.remove();
+        await approveJoinRequest(knightId, requestData);
+      });
+      document.getElementById('btn-reject-join').addEventListener('click', async () => {
+        backdrop.remove();
+        popup.remove();
+        await rejectJoinRequest(knightId);
+      });
+    }
+
+    async function approveJoinRequest(knightId, requestData) {
+      const deckPath = 'private/' + currentRoom + '/' + hostDeckKey + '/hostDecks/';
+
+      // 1. Validate knight is not already in turnOrder
+      const metaSnap = await fbDb.ref('games/' + currentRoom + '/meta/turnOrder').once('value');
+      const currentTurnOrder = metaSnap.val() || [];
+      if (currentTurnOrder.includes(knightId)) {
+        showToast(KNIGHTS[knightId].name + ' is already in the game.');
+        await fbDb.ref('games/' + currentRoom + '/joinRequests/' + knightId).remove();
+        return;
+      }
+
+      // 2. Draw 5 white cards from deck
+      const whiteSnap = await fbDb.ref(deckPath + 'whiteDraw').once('value');
+      let whiteDraw = whiteSnap.val() || [];
+      if (whiteDraw.length < 5) {
+        const reshuffled = await reshuffleDecksIfNeeded(deckPath);
+        if (!reshuffled) {
+          showToast('Not enough cards to deal — cannot approve join.');
+          await rejectJoinRequest(knightId);
+          return;
+        }
+        const refreshSnap = await fbDb.ref(deckPath + 'whiteDraw').once('value');
+        whiteDraw = refreshSnap.val() || [];
+      }
+      const hand = [];
+      for (let i = 0; i < 5 && whiteDraw.length > 0; i++) {
+        hand.push(whiteDraw.pop());
+      }
+
+      // 3. Assign loyalty from unusedLoyalties
+      const loyaltySnap = await fbDb.ref(deckPath + 'unusedLoyalties').once('value');
+      const unusedLoyalties = loyaltySnap.val() || [];
+      let loyalty;
+      if (unusedLoyalties.length > 0) {
+        loyalty = unusedLoyalties.pop();
+      } else {
+        loyalty = 'loyal';
+      }
+
+      // 4. Insert into turnOrder at canonical position
+      const newTurnOrder = [...currentTurnOrder];
+      const canonicalIdx = KNIGHT_ORDER.indexOf(knightId);
+      let insertIdx = newTurnOrder.length;
+      for (let i = 0; i < newTurnOrder.length; i++) {
+        if (KNIGHT_ORDER.indexOf(newTurnOrder[i]) > canonicalIdx) {
+          insertIdx = i;
+          break;
+        }
+      }
+      newTurnOrder.splice(insertIdx, 0, knightId);
+
+      // 5. Build atomic update
+      const updates = {};
+      // Private data for joining knight
+      updates['private/' + currentRoom + '/' + knightId] = {
+        uid: requestData.uid,
+        loyalty: loyalty,
+        hand: hand,
+      };
+      // Update host decks
+      updates[deckPath + 'whiteDraw'] = whiteDraw;
+      updates[deckPath + 'unusedLoyalties'] = unusedLoyalties;
+      updates[deckPath + 'loyalties/' + knightId] = loyalty;
+      // Update public deck count
+      updates['games/' + currentRoom + '/decks/whiteDrawCount'] = whiteDraw.length;
+      // Player entry
+      updates['games/' + currentRoom + '/players/' + knightId] = {
+        uid: requestData.uid,
+        displayName: requestData.displayName,
+        knightId: knightId,
+        life: 4,
+        location: 'roundTable',
+        alive: true,
+        hasAccused: false,
+        relics: { excalibur: false, holyGrail: false, lancelotArmor: false },
+        isRevealed: false,
+      };
+      // Update turnOrder
+      updates['games/' + currentRoom + '/meta/turnOrder'] = newTurnOrder;
+      // Mark request as accepted
+      updates['games/' + currentRoom + '/joinRequests/' + knightId + '/status'] = 'accepted';
+
+      await fbDb.ref().update(updates);
+      await addLog('system', KNIGHTS[knightId].name + ' has joined the quest!');
+      showToast(requestData.displayName + ' joined as ' + KNIGHTS[knightId].name);
+    }
+
+    async function rejectJoinRequest(knightId) {
+      await fbDb.ref('games/' + currentRoom + '/joinRequests/' + knightId + '/status').set('rejected');
+    }
+
+    // ── Joiner: submit request + listen for response ──────────────────
+
+    async function submitJoinRequest(knightId) {
+      if (!currentRoom || !myUid) return;
+      pendingJoinKnight = knightId;
+
+      // Write join request
+      await fbDb.ref('games/' + currentRoom + '/joinRequests/' + knightId).set({
+        uid: myUid,
+        displayName: myName || 'Player',
+        knightId: knightId,
+        timestamp: firebase.database.ServerValue.TIMESTAMP,
+        status: 'pending',
+      });
+
+      // Show waiting overlay
+      showJoinWaitingOverlay(knightId);
+
+      // Listen for host response
+      if (joinResponseListener) {
+        fbDb.ref('games/' + currentRoom + '/joinRequests/' + pendingJoinKnight).off('value', joinResponseListener);
+      }
+      const ref = fbDb.ref('games/' + currentRoom + '/joinRequests/' + knightId);
+      joinResponseListener = ref.on('value', async snap => {
+        const data = snap.val();
+        if (!data) return;
+        if (data.status === 'accepted') {
+          ref.off('value', joinResponseListener);
+          joinResponseListener = null;
+          // Clean up request
+          await fbDb.ref('games/' + currentRoom + '/joinRequests/' + knightId).remove();
+          // Remove spectator entry if was spectating
+          fbDb.ref('games/' + currentRoom + '/spectators/' + myUid).remove();
+          // Transition to player
+          myKnight = knightId;
+          isSpectator = false;
+          pendingJoinKnight = null;
+          saveSession();
+          dismissJoinWaitingOverlay();
+          // Show hand and loyalty areas
+          $('hand-area').style.display = '';
+          $('loyalty-display').style.display = '';
+          // Hide spectator join button
+          const joinBtn = document.getElementById('btn-join-as-player');
+          if (joinBtn) joinBtn.style.display = 'none';
+          // Start private data listener
+          listenToPrivateData();
+          listenForDrawResults();
+          showToast('Welcome to the quest, ' + KNIGHTS[knightId].name + '!');
+        } else if (data.status === 'rejected') {
+          ref.off('value', joinResponseListener);
+          joinResponseListener = null;
+          // Clean up request
+          await fbDb.ref('games/' + currentRoom + '/joinRequests/' + knightId).remove();
+          pendingJoinKnight = null;
+          dismissJoinWaitingOverlay();
+          showToast('Host declined your request to join.');
+        }
+      });
+    }
+
+    function showJoinWaitingOverlay(knightId) {
+      dismissJoinWaitingOverlay();
+      const knightName = KNIGHTS[knightId]?.name || knightId;
+      const overlay = document.createElement('div');
+      overlay.className = 'join-waiting-overlay';
+      overlay.id = 'join-waiting-overlay';
+      overlay.innerHTML = `
+        <p>Requesting to join as <strong>${knightName}</strong>...</p>
+        <p style="font-size:0.875rem;color:var(--text-dim);">Waiting for host approval</p>
+        <button class="btn btn-danger" id="btn-cancel-join">Cancel</button>
+      `;
+      document.body.appendChild(overlay);
+      document.getElementById('btn-cancel-join').addEventListener('click', async () => {
+        if (pendingJoinKnight) {
+          if (joinResponseListener) {
+            fbDb.ref('games/' + currentRoom + '/joinRequests/' + pendingJoinKnight).off('value', joinResponseListener);
+            joinResponseListener = null;
+          }
+          await fbDb.ref('games/' + currentRoom + '/joinRequests/' + pendingJoinKnight).remove();
+          pendingJoinKnight = null;
+        }
+        dismissJoinWaitingOverlay();
+        showToast('Join request cancelled.');
+      });
+    }
+
+    function dismissJoinWaitingOverlay() {
+      const el = document.getElementById('join-waiting-overlay');
+      if (el) el.remove();
+    }
+
+    function showKnightPickerForJoin() {
+      // Get taken knights from turnOrder
+      const turnOrder = roomData?.turnOrder || [];
+      const takenKnights = new Set(turnOrder);
+      const available = KNIGHT_ORDER.filter(k => !takenKnights.has(k));
+      if (available.length === 0) { showToast('Game is full — no available knights.'); return; }
+
+      // Remove any existing picker
+      const existing = document.querySelector('.knight-picker-overlay');
+      if (existing) existing.remove();
+
+      const overlay = document.createElement('div');
+      overlay.className = 'knight-picker-overlay';
+      overlay.innerHTML = '<h3>Choose a Knight to Join</h3>';
+
+      const grid = document.createElement('div');
+      grid.className = 'knight-picker-grid';
+
+      for (const kid of KNIGHT_ORDER) {
+        const knight = KNIGHTS[kid];
+        const card = document.createElement('div');
+        card.className = 'knight-picker-card' + (takenKnights.has(kid) ? ' taken' : '');
+        card.innerHTML = `
+          <img src="${knight.icon}" alt="${knight.name}">
+          <div class="kp-name">${knight.name}</div>
+        `;
+        if (!takenKnights.has(kid)) {
+          card.addEventListener('click', () => {
+            overlay.remove();
+            submitJoinRequest(kid);
+          });
+        }
+        grid.appendChild(card);
+      }
+      overlay.appendChild(grid);
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'btn btn-danger';
+      cancelBtn.textContent = 'Cancel';
+      cancelBtn.style.marginTop = '0.5rem';
+      cancelBtn.addEventListener('click', () => overlay.remove());
+      overlay.appendChild(cancelBtn);
+
+      document.body.appendChild(overlay);
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -2602,6 +2958,17 @@
 
       // Render turn actions (Phase 3)
       renderTurnActions();
+
+      // Update spectator join button visibility
+      const joinBtn = document.getElementById('btn-join-as-player');
+      if (joinBtn) {
+        const playerCount = (roomData.turnOrder || []).length;
+        if (isSpectator && playerCount < 7 && roomData.status === 'playing') {
+          joinBtn.classList.remove('hidden');
+        } else {
+          joinBtn.classList.add('hidden');
+        }
+      }
     }
 
     function renderBoardSummary() {
