@@ -1,9 +1,30 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 64" fill="none">
-  <!-- Holy Grail: golden chalice -->
-  <ellipse cx="24" cy="12" rx="16" ry="6" fill="none" stroke="#D4A843" stroke-width="2"/>
-  <path d="M8 12c0 0 2 20 8 28h16c6-8 8-28 8-28" fill="#D4A843" stroke="#B8860B" stroke-width="1"/>
-  <ellipse cx="24" cy="12" rx="14" ry="4" fill="#F0C040"/>
-  <rect x="20" y="40" width="8" height="8" rx="1" fill="#D4A843"/>
-  <ellipse cx="24" cy="52" rx="10" ry="4" fill="#D4A843" stroke="#B8860B" stroke-width="1"/>
-  <path d="M18 24c2-2 4 0 6-2s4 0 6 2" stroke="#B8860B" stroke-width="1" fill="none"/>
+  <!-- Holy Grail: ornate golden goblet -->
+  <!-- Radiance lines -->
+  <line x1="24" y1="2" x2="24" y2="6" stroke="#F0C040" stroke-width="1" opacity="0.6"/>
+  <line x1="16" y1="4" x2="18" y2="7" stroke="#F0C040" stroke-width="1" opacity="0.4"/>
+  <line x1="32" y1="4" x2="30" y2="7" stroke="#F0C040" stroke-width="1" opacity="0.4"/>
+  <!-- Cup bowl -->
+  <path d="M10 14 Q10 8 24 8 Q38 8 38 14 L36 34 Q36 36 24 36 Q12 36 12 34 Z" fill="#D4A843" stroke="#B8860B" stroke-width="1.5"/>
+  <!-- Cup interior/rim highlight -->
+  <ellipse cx="24" cy="12" rx="13" ry="4" fill="#F0C040" opacity="0.7"/>
+  <!-- Decorative rim -->
+  <ellipse cx="24" cy="12" rx="14.5" ry="5" fill="none" stroke="#B8860B" stroke-width="2"/>
+  <!-- Ornamental bands on cup -->
+  <path d="M14 22 h20" stroke="#B8860B" stroke-width="0.8"/>
+  <path d="M15 24 h18" stroke="#B8860B" stroke-width="0.8"/>
+  <!-- Cross engraving on cup -->
+  <line x1="24" y1="26" x2="24" y2="32" stroke="#B8860B" stroke-width="1.2"/>
+  <line x1="21" y1="29" x2="27" y2="29" stroke="#B8860B" stroke-width="1.2"/>
+  <!-- Stem -->
+  <rect x="21" y="36" width="6" height="10" rx="1" fill="#D4A843" stroke="#B8860B" stroke-width="1"/>
+  <!-- Stem knob -->
+  <ellipse cx="24" cy="41" rx="4" ry="2" fill="#D4A843" stroke="#B8860B" stroke-width="0.8"/>
+  <!-- Base -->
+  <ellipse cx="24" cy="50" rx="12" ry="4" fill="#D4A843" stroke="#B8860B" stroke-width="1.5"/>
+  <ellipse cx="24" cy="49" rx="10" ry="3" fill="#F0C040" opacity="0.3"/>
+  <!-- Base decorative dots -->
+  <circle cx="18" cy="50" r="1" fill="#B8860B"/>
+  <circle cx="24" cy="51" r="1" fill="#B8860B"/>
+  <circle cx="30" cy="50" r="1" fill="#B8860B"/>
 </svg>
