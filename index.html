@@ -334,6 +334,16 @@
     }
     .toast.show { opacity: 1; }
 
+    #action-notifications { position: fixed; top: 0.75rem; left: 50%; transform: translateX(-50%); z-index: 190; display: flex; flex-direction: column; gap: 0.375rem; pointer-events: none; width: 90%; max-width: 360px; }
+    .action-notif { padding: 0.5rem 0.75rem; border-radius: var(--radius); font-size: 0.875rem; text-align: center; animation: notifIn 0.3s ease-out; }
+    .action-notif.evil { background: rgba(139,26,26,0.9); border: 1px solid var(--red-bright); color: var(--parchment); }
+    .action-notif.quest { background: rgba(80,60,20,0.9); border: 1px solid var(--gold); color: var(--gold); }
+    .action-notif.info { background: rgba(30,40,60,0.9); border: 1px solid var(--blue); color: var(--parchment); }
+    .action-notif.system { background: rgba(30,40,60,0.9); border: 1px solid var(--blue); color: var(--blue); }
+    .action-notif.fade-out { animation: notifOut 0.5s ease-in forwards; }
+    @keyframes notifIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+    @keyframes notifOut { from { opacity: 1; } to { opacity: 0; } }
+
     /* ── Game Screen ────────────────────────────────────────────────── */
     #game-screen { flex-direction: column; padding: 0; gap: 0; position: relative; }
 
@@ -391,6 +401,12 @@
     .gp-relic { width: 16px; height: 16px; vertical-align: middle; }
     .gp-host { font-size: 0.625rem; color: var(--gold); border: 1px solid var(--gold); border-radius: 3px; padding: 0 3px; margin-left: 4px; vertical-align: middle; font-weight: 700; }
 
+    .board-summary { display: flex; flex-wrap: wrap; gap: 0.375rem; padding: 0.5rem 0; }
+    .board-loc { display: flex; align-items: center; gap: 0.25rem; padding: 0.25rem 0.5rem; background: var(--bg-card); border-radius: var(--radius); font-size: 0.8125rem; border: 1px solid var(--border); }
+    .board-loc-name { color: var(--text-dim); margin-right: 0.25rem; }
+    .board-loc img { width: 20px; height: 20px; }
+    .board-loc-knight { font-size: 0.75rem; }
+
     .quest-grid {
       display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 0.5rem;
     }
@@ -442,6 +458,9 @@
     .hand-card.special-white { background: linear-gradient(135deg, #C5CAE9, #7986CB); color: #1A237E; }
     .card-value { font-size: 1.25rem; font-weight: 700; }
     .card-type { font-size: 0.625rem; text-transform: uppercase; opacity: 0.7; }
+    .hand-card.dragging { opacity: 0.3; }
+    .drag-clone { position: fixed; z-index: 300; opacity: 0.85; pointer-events: none; transform: scale(1.1); border: 2px solid var(--gold); border-radius: 6px; box-shadow: 0 4px 16px rgba(0,0,0,0.5); }
+    .drop-indicator { width: 3px; min-height: 80px; background: var(--gold); border-radius: 2px; flex-shrink: 0; align-self: center; }
     .card-name { font-size: 0.625rem; font-weight: 600; line-height: 1.1; }
 
     /* ── Setup Overlay ──────────────────────────────────────────────── */
@@ -535,10 +554,12 @@
 
     /* ── Game Log ───────────────────────────────────────────────────── */
     .game-log {
-      max-height: 150px; overflow-y: auto; font-size: 0.875rem;
+      font-size: 0.875rem;
       padding: 0.5rem; background: rgba(0,0,0,0.15); border-radius: var(--radius);
     }
     .game-log:empty { display: none; }
+    .game-log.expanded { max-height: 300px; overflow-y: auto; }
+    .log-toggle { font-size: 0.75rem; color: var(--gold-dim); cursor: pointer; text-align: center; padding: 0.25rem 0; }
     .log-entry {
       padding: 0.25rem 0; border-bottom: 1px solid rgba(255,255,255,0.05);
       font-size: 0.875rem;
@@ -706,6 +727,7 @@
 
     <h3>Players (<span id="player-count">0</span>/7)</h3>
     <div class="lobby-players" id="player-list"></div>
+    <div id="spectator-list" style="display:none;font-size:1rem;color:var(--text-dim);padding:0.5rem 0;"></div>
 
     <div class="lobby-settings" id="host-settings" style="display:none;">
       <h3>Game Settings</h3>
@@ -749,6 +771,7 @@
       <div class="loyalty-badge" id="loyalty-display"></div>
 
       <div class="game-players" id="game-players"></div>
+      <div id="board-summary"></div>
 
       <h3>Quests</h3>
       <div class="quest-grid" id="quest-summary"></div>
@@ -817,6 +840,7 @@
   </div>
 
   <!-- Toast -->
+  <div id="action-notifications"></div>
   <div class="toast" id="toast"></div>
 
   <!-- Version -->
@@ -824,7 +848,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v47';
+    const APP_VERSION = 'shadows-v48';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -929,6 +953,9 @@
     let cachedDecks = null;
     let cachedPlayers = {};
     let logListener = null;
+    let logExpanded = false;
+    let previousLogKeys = new Set();
+    let dragState = null;
     let discardMode = null;
     let discardCount = 0;
     let heroicMode = null;       // 'move'|'playCard'|'fightSiege'|'heal'|'specialWhite'|null
@@ -1427,6 +1454,26 @@
       if (lobbyAudioCtx) { lobbyAudioCtx.close().catch(() => {}); lobbyAudioCtx = null; }
     }
 
+    // iOS Safari suspends AudioContext when backgrounded — resume on visibility change or touch
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && lobbyMusicPlaying && lobbyAudioCtx) {
+        if (lobbyAudioCtx.state === 'suspended') {
+          lobbyAudioCtx.resume().then(() => {
+            // Restart sequence if timeout was throttled
+            if (lobbyMusicTimeout) clearTimeout(lobbyMusicTimeout);
+            // playSequence is defined inside startLobbyMusic scope, so restart music cleanly
+            stopLobbyMusic();
+            startLobbyMusic();
+          }).catch(() => {});
+        }
+      }
+    });
+    document.addEventListener('touchstart', function resumeMusicOnTouch() {
+      if (lobbyMusicPlaying && lobbyAudioCtx && lobbyAudioCtx.state === 'suspended') {
+        lobbyAudioCtx.resume().catch(() => {});
+      }
+    }, { passive: true });
+
     async function enterLobby() {
       $('lobby-code').textContent = currentRoom;
 
@@ -1533,6 +1580,10 @@
       isSpectator = true;
       document.querySelectorAll('.knight-card').forEach(c => c.classList.remove('selected'));
       saveSession();
+      // Register spectator in Firebase for host visibility
+      const specRef = fbDb.ref('games/' + currentRoom + '/spectators/' + myUid);
+      await specRef.set({ displayName: myName || 'Spectator', uid: myUid });
+      specRef.onDisconnect().remove();
       showToast('You are now spectating.');
     }
 
@@ -1561,6 +1612,8 @@
 
       myKnight = knightId;
       isSpectator = false;
+      // Remove spectator entry if switching from spectator to player
+      fbDb.ref('games/' + currentRoom + '/spectators/' + myUid).remove();
 
       await fbDb.ref('games/' + currentRoom + '/players/' + knightId).set({
         uid: myUid,
@@ -1620,6 +1673,19 @@
           renderPendingInteraction();
           onCombatResolutionChanged();
           onQuestResultChanged();
+        }
+      });
+
+      // Listen to spectators (for lobby display)
+      fbDb.ref('games/' + currentRoom + '/spectators').on('value', snap => {
+        const specs = snap.val() || {};
+        const specEl = $('spectator-list');
+        const names = Object.values(specs).map(s => s.displayName);
+        if (names.length > 0) {
+          specEl.style.display = '';
+          specEl.textContent = 'Spectators: ' + names.join(', ');
+        } else {
+          specEl.style.display = 'none';
         }
       });
 
@@ -2201,9 +2267,123 @@
           inner += '<div class="card-name">' + name + '</div>';
         }
         el.innerHTML = inner;
+        el.dataset.cardIndex = myHand.indexOf(card);
         el.addEventListener('click', () => onCardTap(card.id));
+        // Long-press drag to reorder
+        el.addEventListener('touchstart', onHandCardTouchStart, { passive: true });
         container.appendChild(el);
       }
+    }
+
+    function onHandCardTouchStart(e) {
+      const touch = e.touches[0];
+      const el = e.currentTarget;
+      const cardIndex = parseInt(el.dataset.cardIndex);
+      const startX = touch.clientX, startY = touch.clientY;
+      let longPressTimer = setTimeout(() => {
+        longPressTimer = null;
+        startDrag(el, cardIndex, startX, startY);
+      }, 600);
+
+      function onMove(ev) {
+        const t = ev.touches[0];
+        if (longPressTimer) {
+          // Cancel if moved too far before long-press fires
+          if (Math.abs(t.clientX - startX) > 10 || Math.abs(t.clientY - startY) > 10) {
+            clearTimeout(longPressTimer); longPressTimer = null;
+            cleanup();
+          }
+          return;
+        }
+        if (dragState) {
+          ev.preventDefault();
+          updateDrag(t.clientX, t.clientY);
+        }
+      }
+      function onEnd() {
+        if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+        if (dragState) finishDrag();
+        cleanup();
+      }
+      function cleanup() {
+        document.removeEventListener('touchmove', onMove);
+        document.removeEventListener('touchend', onEnd);
+        document.removeEventListener('touchcancel', onEnd);
+      }
+      document.addEventListener('touchmove', onMove, { passive: false });
+      document.addEventListener('touchend', onEnd);
+      document.addEventListener('touchcancel', onEnd);
+    }
+
+    function startDrag(el, cardIndex, x, y) {
+      // Create floating clone
+      const rect = el.getBoundingClientRect();
+      const clone = el.cloneNode(true);
+      clone.className = el.className.replace('selected', '') + ' drag-clone';
+      clone.style.width = rect.width + 'px';
+      clone.style.height = rect.height + 'px';
+      clone.style.left = (x - rect.width / 2) + 'px';
+      clone.style.top = (y - rect.height - 10) + 'px';
+      document.body.appendChild(clone);
+      el.classList.add('dragging');
+
+      dragState = { fromIndex: cardIndex, el, clone, dropIndex: cardIndex };
+      // Haptic feedback if available
+      if (navigator.vibrate) navigator.vibrate(30);
+    }
+
+    function updateDrag(x, y) {
+      if (!dragState) return;
+      const clone = dragState.clone;
+      const rect = clone.getBoundingClientRect();
+      clone.style.left = (x - rect.width / 2) + 'px';
+      clone.style.top = (y - rect.height - 10) + 'px';
+
+      // Find drop position based on x coordinate
+      const container = $('hand-cards');
+      const cards = Array.from(container.querySelectorAll('.hand-card:not(.dragging)'));
+      // Remove old indicators
+      container.querySelectorAll('.drop-indicator').forEach(d => d.remove());
+
+      let dropIndex = myHand.length; // default: end
+      for (let i = 0; i < cards.length; i++) {
+        const cr = cards[i].getBoundingClientRect();
+        const mid = cr.left + cr.width / 2;
+        if (x < mid) {
+          const actualIndex = parseInt(cards[i].dataset.cardIndex);
+          dropIndex = actualIndex <= dragState.fromIndex ? actualIndex : actualIndex;
+          // Insert indicator before this card
+          const indicator = document.createElement('div');
+          indicator.className = 'drop-indicator';
+          cards[i].parentNode.insertBefore(indicator, cards[i]);
+          dragState.dropIndex = dropIndex;
+          return;
+        }
+      }
+      // After last card
+      dragState.dropIndex = myHand.length;
+      const indicator = document.createElement('div');
+      indicator.className = 'drop-indicator';
+      container.appendChild(indicator);
+    }
+
+    function finishDrag() {
+      if (!dragState) return;
+      const { fromIndex, dropIndex, clone, el } = dragState;
+      clone.remove();
+      el.classList.remove('dragging');
+      $('hand-cards').querySelectorAll('.drop-indicator').forEach(d => d.remove());
+
+      if (fromIndex !== dropIndex && dropIndex !== fromIndex + 1) {
+        // Reorder myHand
+        const card = myHand.splice(fromIndex, 1)[0];
+        const insertAt = dropIndex > fromIndex ? dropIndex - 1 : dropIndex;
+        myHand.splice(insertAt, 0, card);
+        // Save to Firebase
+        fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
+        renderHand();
+      }
+      dragState = null;
     }
 
     function onCardTap(cardId) {
@@ -2417,8 +2597,44 @@
         renderResultsScreen();
       }
 
+      // Render board summary
+      renderBoardSummary();
+
       // Render turn actions (Phase 3)
       renderTurnActions();
+    }
+
+    function renderBoardSummary() {
+      if (!cachedPlayers || !roomData) return;
+      const el = $('board-summary');
+      const turnOrder = roomData.turnOrder || [];
+
+      // Group knights by location
+      const locGroups = {};
+      for (const kid of turnOrder) {
+        const p = cachedPlayers[kid];
+        if (!p || p.alive === false) continue;
+        const loc = p.location || 'roundTable';
+        if (!locGroups[loc]) locGroups[loc] = [];
+        locGroups[loc].push(kid);
+      }
+
+      // Ordered locations
+      const locOrder = ['roundTable', 'siege', 'holyGrail', 'excalibur', 'blackKnight', 'lancelot', 'saxonWar', 'pictWar'];
+      let html = '<div class="board-summary">';
+      for (const loc of locOrder) {
+        const knights = locGroups[loc];
+        if (!knights || knights.length === 0) continue;
+        const label = getLocationLabel(loc);
+        const knightHtml = knights.map(kid => {
+          const k = KNIGHTS[kid];
+          return '<img src="' + k.icon + '" title="' + k.name + '">' +
+            '<span class="board-loc-knight" style="color:' + k.color + ';">' + k.name.replace('Sir ', '') + '</span>';
+        }).join(' ');
+        html += '<div class="board-loc"><span class="board-loc-name">' + label + ':</span>' + knightHtml + '</div>';
+      }
+      html += '</div>';
+      el.innerHTML = html;
     }
 
     function showKnightTooltip(knightId, anchorEl) {
@@ -2943,16 +3159,65 @@
       const ref = fbDb.ref('games/' + currentRoom + '/log').orderByChild('timestamp').limitToLast(50);
       logListener = ref.on('value', snap => {
         const entries = [];
-        snap.forEach(child => entries.push(child.val()));
+        const newKeys = new Set();
+        snap.forEach(child => {
+          newKeys.add(child.key);
+          const entry = child.val();
+          entry._key = child.key;
+          entries.push(entry);
+        });
+        // Show notifications for new entries from other players
+        if (previousLogKeys.size > 0) {
+          for (const entry of entries) {
+            if (!previousLogKeys.has(entry._key) && entry.knight !== myKnight) {
+              showActionNotification(entry);
+            }
+          }
+        }
+        previousLogKeys = newKeys;
         renderLog(entries);
       });
     }
 
+    function showActionNotification(entry) {
+      const container = $('action-notifications');
+      const div = document.createElement('div');
+      div.className = 'action-notif ' + (entry.type || 'info');
+      div.textContent = entry.message;
+      container.appendChild(div);
+      // Limit to 3 visible notifications
+      while (container.children.length > 3) container.removeChild(container.firstChild);
+      // Auto-dismiss after 3.5s
+      setTimeout(() => {
+        div.classList.add('fade-out');
+        setTimeout(() => { if (div.parentNode) div.remove(); }, 500);
+      }, 3500);
+    }
+
     function renderLog(entries) {
       const el = $('game-log');
-      el.innerHTML = entries.map(e =>
+      const total = entries.length;
+      const showAll = logExpanded || total <= 5;
+      const visible = showAll ? entries : entries.slice(-5);
+
+      let html = '';
+      if (!showAll && total > 5) {
+        html += '<div class="log-toggle" id="log-expand">Show All (' + total + ')</div>';
+      }
+      html += visible.map(e =>
         '<div class="log-entry ' + (e.type || 'info') + '">' + e.message + '</div>'
       ).join('');
+      if (showAll && total > 5) {
+        html += '<div class="log-toggle" id="log-collapse">Collapse</div>';
+      }
+      el.innerHTML = html;
+      el.classList.toggle('expanded', showAll && total > 5);
+
+      const expandBtn = document.getElementById('log-expand');
+      if (expandBtn) expandBtn.addEventListener('click', () => { logExpanded = true; renderLog(entries); });
+      const collapseBtn = document.getElementById('log-collapse');
+      if (collapseBtn) collapseBtn.addEventListener('click', () => { logExpanded = false; renderLog(entries); });
+
       el.scrollTop = el.scrollHeight;
     }
 
@@ -3043,7 +3308,13 @@
       // Disable buttons immediately to prevent double-tap
       document.querySelectorAll('.btn-evil').forEach(b => b.disabled = true);
       try {
-        if (actionType === 'drawBlack') await drawBlackCard();
+        if (actionType === 'drawBlack') {
+          if (myKnight === 'percival' && !roomData.percivalPeeked) {
+            await percivalPeekAction();
+          } else {
+            await drawBlackCard();
+          }
+        }
         else if (actionType === 'siegeEngine') await addSiegeEngineAction();
         else if (actionType === 'loseLife') await loseOneLifeAction();
       } catch (err) {
@@ -4316,6 +4587,13 @@
       if (!myDone && cachedPlayers[myKnight]?.isRevealed) {
         // Revealed traitor auto-passes — no white cards to offer
         html += '<p style="color:var(--text-dim);font-size:1rem;">You are revealed — auto-passing...</p>';
+        if (!overlayVisible) html += '</div>';
+        area.innerHTML = html;
+        fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
+          .set({ done: true, merlinsOffered: 0 });
+        return;
+      } else if (!myDone && merlinCount === 0) {
+        // No Merlins — auto-pass
         if (!overlayVisible) html += '</div>';
         area.innerHTML = html;
         fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
@@ -5677,7 +5955,6 @@
       // Knight powers (free actions)
       html += renderKnightPowerButtons();
 
-      html += '<button class="btn btn-heroic" id="btn-end-turn" style="margin-top:0.5rem;opacity:0.7;">End Turn (skip action)</button>';
       html += '</div></div>';
       area.innerHTML = html;
 
@@ -5696,7 +5973,6 @@
       if (healBtn) healBtn.addEventListener('click', startHealAction);
       const accuseBtn = document.getElementById('btn-accuse');
       if (accuseBtn) accuseBtn.addEventListener('click', () => { heroicMode = 'accuse'; renderTurnActions(); });
-      document.getElementById('btn-end-turn').addEventListener('click', advanceTurn);
       bindKnightPowerListeners();
 
       // Free move listeners
@@ -6087,6 +6363,16 @@
 
     async function performMove(destination) {
       const currentLoc = getMyLocation();
+
+      // Warn if leaving solo quest with placed white cards
+      if (isSoloQuest(currentLoc) && (cachedQuests[currentLoc]?.whiteCards || []).length > 0) {
+        const n = cachedQuests[currentLoc].whiteCards.length;
+        const qName = getLocationLabel(currentLoc);
+        if (!confirm('Leaving ' + qName + ' will discard your ' + n + ' placed card' + (n > 1 ? 's' : '') + '. Continue?')) {
+          return;
+        }
+      }
+
       const updates = {};
 
       // Remove from old quest's knightsPresent
@@ -6125,6 +6411,16 @@
 
     async function performFreeMove(destination) {
       const currentLoc = getMyLocation();
+
+      // Warn if leaving solo quest with placed white cards
+      if (isSoloQuest(currentLoc) && (cachedQuests[currentLoc]?.whiteCards || []).length > 0) {
+        const n = cachedQuests[currentLoc].whiteCards.length;
+        const qName = getLocationLabel(currentLoc);
+        if (!confirm('Leaving ' + qName + ' will discard your ' + n + ' placed card' + (n > 1 ? 's' : '') + '. Continue?')) {
+          return;
+        }
+      }
+
       const updates = {};
       // Remove from old
       if (currentLoc !== 'roundTable' && currentLoc !== 'siege' && cachedQuests?.[currentLoc]) {
