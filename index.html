@@ -918,7 +918,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v52';
+    const APP_VERSION = 'shadows-v53';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1403,7 +1403,7 @@
       if (playerCount >= 7) { showToast('Room is full (7/7 players).'); return; }
 
       currentRoom = code;
-      isHost = false;
+      isHost = (meta.hostUid === myUid);
 
       if (meta.status === 'playing') {
         promptForName('midgame');
