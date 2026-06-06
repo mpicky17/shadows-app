@@ -955,7 +955,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v62';
+    const APP_VERSION = 'shadows-v63';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -7555,7 +7555,7 @@
         if (questKey === 'blackKnight') {
           await addSword('white', 'blackKnight');
           for (const kid of knightsOnQuest) {
-            let life = Math.min(6, (cachedPlayers[kid]?.life || 4) + 1);
+            let life = Math.min(6, (cachedPlayers[kid]?.life ?? 4) + 1);
             if (kid === 'palamedes') life = Math.min(6, life + 1);
             updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
           }
@@ -7567,7 +7567,7 @@
             updates['games/' + currentRoom + '/players/' + knightsOnQuest[0] + '/relics/lancelotArmor'] = true;
           }
           for (const kid of knightsOnQuest) {
-            let life = Math.min(6, (cachedPlayers[kid]?.life || 4) + 1);
+            let life = Math.min(6, (cachedPlayers[kid]?.life ?? 4) + 1);
             if (kid === 'palamedes') life = Math.min(6, life + 1);
             updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
           }
@@ -7576,7 +7576,7 @@
         } else if (questKey === 'lancelot' && q.phase === 'dragon') {
           for (let i = 0; i < 2; i++) await addSword('white', 'dragon');
           for (const kid of knightsOnQuest) {
-            let life = Math.min(6, (cachedPlayers[kid]?.life || 4) + 2);
+            let life = Math.min(6, (cachedPlayers[kid]?.life ?? 4) + 2);
             if (kid === 'palamedes') life = Math.min(6, life + 1);
             updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
           }
@@ -7588,19 +7588,19 @@
         if (questKey === 'blackKnight') {
           await addSword('black', 'blackKnight');
           for (const kid of knightsOnQuest) {
-            updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.max(0, (cachedPlayers[kid]?.life || 4) - 1);
+            updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.max(0, (cachedPlayers[kid]?.life ?? 4) - 1);
           }
           await addLog('quest', 'Black Knight Tournament LOST! 1 Black Sword, -1 LP.');
         } else if (questKey === 'lancelot' && q.phase === 'lancelot') {
           await addSword('black', 'lancelot');
           for (const kid of knightsOnQuest) {
-            updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.max(0, (cachedPlayers[kid]?.life || 4) - 1);
+            updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.max(0, (cachedPlayers[kid]?.life ?? 4) - 1);
           }
           await addLog('quest', 'Quest for Lancelot LOST! 1 Black Sword, -1 LP.');
         } else if (questKey === 'lancelot' && q.phase === 'dragon') {
           for (let i = 0; i < 2; i++) await addSword('black', 'dragon');
           for (const kid of knightsOnQuest) {
-            updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.max(0, (cachedPlayers[kid]?.life || 4) - 2);
+            updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.max(0, (cachedPlayers[kid]?.life ?? 4) - 2);
           }
           await addLog('quest', "Dragon's Quest LOST! 2 Black Swords, -2 LP.");
         }
@@ -7697,7 +7697,7 @@
         for (let i = 0; i < 2; i++) await addSword('white', 'excalibur');
         updates['games/' + currentRoom + '/players/' + myKnight + '/relics/excalibur'] = true;
         for (const kid of knightsOnQuest) {
-          let life = Math.min(6, (cachedPlayers[kid]?.life || 4) + 1);
+          let life = Math.min(6, (cachedPlayers[kid]?.life ?? 4) + 1);
           if (kid === 'palamedes') life = Math.min(6, life + 1);
           updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
           updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
@@ -7716,7 +7716,7 @@
         for (let i = 0; i < 3; i++) await addSword('white', 'holyGrail');
         updates['games/' + currentRoom + '/players/' + myKnight + '/relics/holyGrail'] = true;
         for (const kid of knightsOnQuest) {
-          let life = Math.min(6, (cachedPlayers[kid]?.life || 4) + 1);
+          let life = Math.min(6, (cachedPlayers[kid]?.life ?? 4) + 1);
           if (kid === 'palamedes') life = Math.min(6, life + 1);
           updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
           updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
@@ -7737,7 +7737,7 @@
         const warName = questKey === 'saxonWar' ? 'Saxon War' : 'Pict War';
         await addSword('white', questKey);
         for (const kid of knightsOnQuest) {
-          let life = Math.min(6, (cachedPlayers[kid]?.life || 4) + 1);
+          let life = Math.min(6, (cachedPlayers[kid]?.life ?? 4) + 1);
           if (kid === 'palamedes') life = Math.min(6, life + 1);
           updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
           updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
@@ -7893,7 +7893,7 @@
       if (won) {
         updates['games/' + currentRoom + '/board/siegeEngines'] = Math.max(0, (cachedBoard?.siegeEngines || 0) - 1);
       } else {
-        const life = Math.max(0, (cachedPlayers[myKnight]?.life || 4) - 1);
+        const life = Math.max(0, (cachedPlayers[myKnight]?.life ?? 4) - 1);
         updates['games/' + currentRoom + '/players/' + myKnight + '/life'] = life;
       }
       await fbDb.ref().update(updates);
@@ -7950,7 +7950,7 @@
 
     function renderHealUI(area) {
       const sets = findHealSets();
-      const life = cachedPlayers[myKnight]?.life || 4;
+      const life = cachedPlayers[myKnight]?.life ?? 4;
       let html = '<div class="quest-play-panel"><h3>Heal</h3>' +
         '<p style="color:var(--text-dim);font-size:1rem;">Discard 3 identical cards to gain 1 LP (current: ' + life + '/6)</p>';
 
@@ -7977,7 +7977,7 @@
     }
 
     async function performHeal(cardType, cardValue) {
-      const life = cachedPlayers[myKnight]?.life || 4;
+      const life = cachedPlayers[myKnight]?.life ?? 4;
       if (life >= 6) { showToast('Already at max life!'); return; }
 
       // Find 3 matching cards
@@ -8005,7 +8005,7 @@
     // ═══════════════════════════════════════════════════════════════════
 
     async function performSacrifice() {
-      const life = cachedPlayers[myKnight]?.life || 4;
+      const life = cachedPlayers[myKnight]?.life ?? 4;
       if (life <= 0) { showToast('Not enough life to sacrifice!'); return; }
 
       const updates = {};
@@ -8301,7 +8301,7 @@
         document.getElementById('btn-piety-self').addEventListener('click', async () => {
           document.getElementById('btn-piety-self').disabled = true;
           document.getElementById('btn-piety-others').disabled = true;
-          const life = Math.min(6, (cachedPlayers[myKnight]?.life || 4) + 3);
+          const life = Math.min(6, (cachedPlayers[myKnight]?.life ?? 4) + 3);
           await fbDb.ref('games/' + currentRoom + '/players/' + myKnight + '/life').set(life);
           await addLog('info', getKnightDisplayName(myKnight) + ' gained 3 LP from Piety');
           await completeSWAction();
@@ -8315,7 +8315,7 @@
             if (kid === myKnight) continue;
             const p = cachedPlayers[kid];
             if (p && p.alive !== false) {
-              updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.min(6, (p.life || 4) + 1);
+              updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.min(6, (p.life ?? 4) + 1);
             }
           }
           await fbDb.ref().update(updates);
@@ -8360,7 +8360,7 @@
           await addLog('quest', 'Lady of the Lake moved Excalibur toward the knights (position ' + pos + ')');
           if (pos >= 5) await resolveQuestVictory('excalibur');
         } else {
-          const life = Math.min(6, (cachedPlayers[myKnight]?.life || 4) + 2);
+          const life = Math.min(6, (cachedPlayers[myKnight]?.life ?? 4) + 2);
           await fbDb.ref('games/' + currentRoom + '/players/' + myKnight + '/life').set(life);
           await addLog('info', getKnightDisplayName(myKnight) + ' gained 2 LP from Lady of the Lake');
         }
