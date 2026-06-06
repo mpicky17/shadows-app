@@ -955,7 +955,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v58';
+    const APP_VERSION = 'shadows-v59';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1072,6 +1072,7 @@
     let skipNextQuestRender = false;
     let heroicSubState = {};     // context for current heroic sub-action
     let lastHeroicAction = null; // track first action type for sacrifice restriction
+    let galahadPowerUsedLocal = false; // local flag to prevent race condition with Firebase listener
 
     // ═══════════════════════════════════════════════════════════════════
     //  SECTION 3: Firebase Setup
@@ -1779,6 +1780,7 @@
           return;
         }
         roomData = snap.val();
+        if (!roomData.galahadPowerUsed) galahadPowerUsedLocal = false;
 
         // Update traitor toggles
         const toggle = $('toggle-traitor');
@@ -6411,6 +6413,7 @@
       heroicSubState = {};
       lastHeroicAction = null;
       selectedCardId = null;
+      galahadPowerUsedLocal = false;
 
       await addLog('info', 'Turn ' + ((roomData.turnNumber || 1) + 1) + ': ' + getKnightDisplayName(nextKnight) + '\'s turn');
     }
@@ -6606,7 +6609,7 @@
       let html = '';
       console.log('[SOC] renderKnightPowerButtons', { myKnight, arthurPowerUsed: roomData.arthurPowerUsed, galahadPowerUsed: roomData.galahadPowerUsed, handLength: myHand.length, location: getMyLocation() });
       // Galahad: free Special White
-      if (myKnight === 'galahad' && !roomData.galahadPowerUsed && heroicMode !== 'galahadFreeSpecial') {
+      if (myKnight === 'galahad' && !roomData.galahadPowerUsed && !galahadPowerUsedLocal && heroicMode !== 'galahadFreeSpecial') {
         const hasGalahadSW = myHand.some(c => c.type === 'special');
         if (hasGalahadSW) {
           html += '<button class="btn btn-heroic" id="btn-galahad-sw" style="border-color:var(--gold);">Galahad: Free Special White</button>';
@@ -7978,7 +7981,11 @@
     // ═══════════════════════════════════════════════════════════════════
 
     function startSpecialWhitePlay() {
-      heroicMode = 'specialWhite';
+      if (myKnight === 'galahad' && !roomData.galahadPowerUsed && !galahadPowerUsedLocal) {
+        heroicMode = 'galahadFreeSpecial';
+      } else {
+        heroicMode = 'specialWhite';
+      }
       selectedCardId = null;
       renderHand();
       renderTurnActions();
@@ -8031,6 +8038,7 @@
     // ═══════════════════════════════════════════════════════════════════
 
     const RULES_TABS = [
+      { id: 'objective', label: 'Objective' },
       { id: 'turn', label: 'Turn' },
       { id: 'quests', label: 'Quests' },
       { id: 'cards', label: 'Cards' },
@@ -8038,9 +8046,15 @@
       { id: 'relics', label: 'Relics' },
       { id: 'end', label: 'End Game' },
     ];
-    let currentRulesTab = 'turn';
+    let currentRulesTab = 'objective';
 
     function getRulesContent(tabId) {
+      if (tabId === 'objective') return '' +
+        '<h4>Object of the Game</h4>' +
+        '<p>You and your fellow knights must work together to defeat the forces of evil in Camelot. ' +
+        'Good will only prevail if honorable knights are able to successfully complete more quests than they fail. ' +
+        'However, beware: there may be a traitor lurking amongst you...</p>';
+
       if (tabId === 'turn') return '' +
         '<h4>Phase 1: Progression of Evil</h4>' +
         '<p>Choose ONE:</p><ul>' +
@@ -8162,6 +8176,7 @@
         heroicMode = null;
         heroicSubState = {};
         selectedCardId = null;
+        galahadPowerUsedLocal = true;
         await fbDb.ref('games/' + currentRoom + '/meta/galahadPowerUsed').set(true);
         renderHand();
         renderTurnActions();
