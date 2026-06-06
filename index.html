@@ -891,11 +891,13 @@
     </div>
 
     <div class="setup-overlay" id="setup-overlay">
+      <button class="overlay-minimize-btn" id="btn-minimize-setup">Minimize</button>
       <h2>Card Sharing Phase</h2>
       <p id="setup-message">Select 1 card from your hand to share with the Round Table, then tap "Share Card"</p>
       <div class="setup-shared" id="setup-shared"></div>
       <div class="setup-actions" id="setup-actions"></div>
     </div>
+    <div class="overlay-minimized hidden" id="setup-minimized">Card Sharing ▸</div>
 
     <div class="card-reveal-overlay hidden" id="card-reveal-overlay">
       <button class="overlay-minimize-btn" id="btn-minimize-reveal">Minimize</button>
@@ -955,7 +957,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v63';
+    const APP_VERSION = 'shadows-v64';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1039,6 +1041,8 @@
     let myHand = [];
     let selectedCardId = null;  // card selected in hand (for setup)
     let mySetupShared = false;  // have I shared a card in setup?
+    let setupMinimized = false; // setup overlay minimized so player can peek at loyalty
+    let cardShareResolving = false; // re-entry guard for collaborative card-share finalization
     let prevCachedQuests = null;
     let questUpdatePopupTimer = null;
     let excaliburAutoDecline = false;
@@ -1802,9 +1806,15 @@
         if ((roomData.status === 'setup' || roomData.status === 'playing') && !inGameScreen) {
           enterGameScreen();
         }
-        // Update setup overlay visibility if already in game
+        // Update setup overlay visibility if already in game.
+        // Hidden when: not in setup, the player minimized it to peek at loyalty, or a
+        // collaborative card-share is active (so its panel is visible behind the overlay).
         if (inGameScreen) {
-          $('setup-overlay').classList.toggle('hidden', roomData.status !== 'setup');
+          const cardShareActive = roomData.pendingInteraction && roomData.pendingInteraction.type === 'cardShare';
+          const hideSetup = roomData.status !== 'setup' || setupMinimized || cardShareActive;
+          $('setup-overlay').classList.toggle('hidden', hideSetup);
+          // Keep the minimized pill in sync: only show it while genuinely minimized in setup.
+          $('setup-minimized').classList.toggle('hidden', !(roomData.status === 'setup' && setupMinimized && !cardShareActive));
           // Re-render game UI whenever meta changes (turn phase, current player, etc.)
           renderGamePlayers();
           renderQuests();
@@ -1952,6 +1962,8 @@
       myHand = [];
       selectedCardId = null;
       mySetupShared = false;
+      setupMinimized = false;
+      cardShareResolving = false;
       cachedBoard = null;
       cachedQuests = null;
       prevCachedQuests = null;
@@ -2320,6 +2332,22 @@
       }
       setupOverlayMinimize('card-reveal-overlay', 'reveal-minimized', 'btn-minimize-reveal');
       setupOverlayMinimize('combat-overlay', 'combat-minimized', 'btn-minimize-combat');
+      // Setup overlay: minimize so players can peek at their loyalty card behind it.
+      // Tracks setupMinimized so the meta-status listener doesn't re-open it.
+      {
+        const setupBtn = $('btn-minimize-setup');
+        const setupMini = $('setup-minimized');
+        if (setupBtn) setupBtn.addEventListener('click', () => {
+          setupMinimized = true;
+          $('setup-overlay').classList.add('hidden');
+          setupMini.classList.remove('hidden');
+        });
+        if (setupMini) setupMini.addEventListener('click', () => {
+          setupMinimized = false;
+          $('setup-overlay').classList.remove('hidden');
+          setupMini.classList.add('hidden');
+        });
+      }
     }
 
     function listenToPrivateData() {
@@ -3327,6 +3355,44 @@
         return;
       }
 
+      // Card share: reveal N white cards face-up into the pending interaction pool
+      if (deckType === 'sharePool') {
+        const deckSnap = await fbDb.ref(deckPath + 'whiteDraw').once('value');
+        let drawPile = deckSnap.val() || [];
+        if (drawPile.length === 0) {
+          const reshuffled = await reshuffleDecksIfNeeded(deckPath);
+          if (!reshuffled) {
+            // No cards anywhere — mark the pool empty so the distributor can finalize a no-op.
+            // (Firebase drops empty arrays, so use an explicit flag rather than pool=[].)
+            await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/poolEmpty').set(true);
+            await fbDb.ref('games/' + currentRoom + '/drawRequests/' + requestId).remove();
+            return;
+          }
+          await processDrawRequest(request, requestId);
+          return;
+        }
+        const pool = [];
+        for (let i = 0; i < count && drawPile.length > 0; i++) pool.push(drawPile.pop());
+        // If pile exhausted mid-draw, reshuffle and draw remainder
+        if (pool.length < count && drawPile.length === 0) {
+          const reshuffled = await reshuffleDecksIfNeeded(deckPath);
+          if (reshuffled) {
+            const freshSnap = await fbDb.ref(deckPath + 'whiteDraw').once('value');
+            drawPile = freshSnap.val() || [];
+            const remaining = count - pool.length;
+            for (let i = 0; i < remaining && drawPile.length > 0; i++) pool.push(drawPile.pop());
+          }
+        }
+        const updates = {};
+        updates[deckPath + 'whiteDraw'] = drawPile;
+        updates['games/' + currentRoom + '/decks/whiteDrawCount'] = drawPile.length;
+        updates['games/' + currentRoom + '/meta/pendingInteraction/pool'] = pool;
+        if (pool.length === 0) updates['games/' + currentRoom + '/meta/pendingInteraction/poolEmpty'] = true;
+        updates['games/' + currentRoom + '/drawRequests/' + requestId] = null;
+        await fbDb.ref().update(updates);
+        return;
+      }
+
       // Clairvoyance: read top 5 black cards without removing
       if (deckType === 'clairvoyance') {
         const deckSnap = await fbDb.ref(deckPath + 'blackDraw').once('value');
@@ -3572,7 +3638,7 @@
         $('setup-message').textContent = 'Waiting for other players to share...';
       } else if (allShared) {
         $('setup-message').textContent = 'All cards shared! ' +
-          (isHost ? 'Redistribute to begin the game.' : 'Waiting for host to redistribute.');
+          (isHost ? 'Divide the cards to begin the game.' : 'Waiting for host to divide the cards.');
       }
     }
 
@@ -3584,7 +3650,7 @@
         html += '<button class="btn btn-primary" id="btn-share-card">Share Selected Card</button>';
       }
       if (allShared && isHost) {
-        html += '<button class="btn btn-primary" id="btn-redistribute">Shuffle & Redistribute</button>';
+        html += '<button class="btn btn-primary" id="btn-redistribute">Divide the Cards</button>';
       }
 
       actionsEl.innerHTML = html;
@@ -3619,7 +3685,7 @@
     async function redistributeCards() {
       if (!isHost) return;
 
-      // Collect all shared cards
+      // Collect all shared cards (already public/face-up)
       const setupSnap = await fbDb.ref('games/' + currentRoom + '/setup').once('value');
       const selections = setupSnap.val() || {};
       const turnOrder = roomData.turnOrder || [];
@@ -3630,24 +3696,9 @@
         return;
       }
 
-      // Shuffle and assign 1 to each player
-      shuffle(sharedCards);
-      const updates = {};
-      for (let i = 0; i < turnOrder.length; i++) {
-        const kid = turnOrder[i];
-        updates['games/' + currentRoom + '/drawResults/setup_' + kid] = {
-          knightId: kid,
-          cards: [sharedCards[i]],
-        };
-      }
-
-      // Clear setup data and transition to playing
-      updates['games/' + currentRoom + '/setup'] = null;
-      updates['games/' + currentRoom + '/meta/status'] = 'playing';
-      updates['games/' + currentRoom + '/meta/turnPhase'] = 'evil';
-
-      await fbDb.ref().update(updates);
-      showToast('Cards redistributed! Game begins!');
+      // Launch collaborative distribution (host divides; group accepts). The setup
+      // cleanup + transition to 'playing' happens in finishCardShareMoment.
+      await launchCardShare({ moment: 'setup', distributor: '_host', participants: turnOrder, pool: sharedCards });
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -5473,6 +5524,11 @@
         return;
       }
 
+      if (interaction.type === 'cardShare') {
+        renderCardSharePanel(interaction);
+        return;
+      }
+
       if (interaction.type === 'mordredChoice') {
         renderMordredChoicePanel(interaction);
         return;
@@ -6008,12 +6064,279 @@
       updates['games/' + currentRoom + '/meta/pendingInteraction'] = null;
       await fbDb.ref().update(updates);
 
-      // Distribute cards equally among returners
-      if (returners.length > 0) {
-        await distributeCardsAmongKnights(returners.length, returners);
+      // Share white cards among the gathered knights — collaborative (Option A).
+      // The pool size equals the number of gathered knights (movers + already-present).
+      const count = returners.length;
+      if (count === 0) {
+        // Nobody gathered — no cards to share.
+        await addLog('info', 'No knights returned to Camelot via Convocation.');
+        await completeSWAction();
+      } else if (count === 1) {
+        // Only one knight — nothing to divide; deal directly.
+        await distributeCardsAmongKnights(count, returners);
+        await addLog('info', '1 knight returned to Camelot via Convocation, 1 card distributed.');
+        await completeSWAction();
+      } else {
+        await addLog('info', count + ' knights returned to Camelot via Convocation — dividing ' + count + ' cards.');
+        await launchCardShare({ moment: 'convocation', distributor: myKnight, participants: returners, count });
       }
-      await addLog('info', returners.length + ' knight(s) returned to Camelot via Convocation, ' + returners.length + ' cards distributed');
-      await completeSWAction();
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  Collaborative Card Sharing (Option A — distributor decides)
+    // ═══════════════════════════════════════════════════════════════════
+
+    // Launch a collaborative card-share interaction. `pool` is supplied directly
+    // (setup, where the shared cards are already public); otherwise `count` white
+    // cards are revealed face-up into the pool by the host. Callers must apply the
+    // bypass guard (participants.length <= 1) BEFORE calling this.
+    async function launchCardShare({ moment, distributor, participants, count, pool }) {
+      const interaction = {
+        type: 'cardShare', mode: 'distributor', moment,
+        distributor, participants, assignment: {}, stage: 'assigning',
+      };
+      if (pool) interaction.pool = pool;
+      await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set(interaction);
+      if (!pool) {
+        await fbDb.ref('games/' + currentRoom + '/drawRequests').push().set({
+          knightId: myKnight, deckType: 'sharePool', count,
+          timestamp: firebase.database.ServerValue.TIMESTAMP,
+        });
+      }
+    }
+
+    function cardShareDistributorName(interaction) {
+      return interaction.distributor === '_host' ? 'The host' : getKnightDisplayName(interaction.distributor);
+    }
+
+    // Quest-victory spoils: collaborative share among 2+ knights, direct deal for a
+    // lone knight, nothing for none. The quest completer (turn player) distributes.
+    async function shareQuestSpoils(count, knightsOnQuest) {
+      const participants = (knightsOnQuest || []).filter(kid => {
+        const p = cachedPlayers[kid];
+        return p && p.alive !== false && !p.isRevealed;
+      });
+      if (participants.length === 0) return;
+      if (participants.length === 1) {
+        await distributeCardsAmongKnights(count, participants);
+        return;
+      }
+      await launchCardShare({ moment: 'questVictory', distributor: myKnight, participants, count });
+    }
+
+    function renderCardSharePanel(interaction) {
+      const area = $('interaction-area');
+      const participants = interaction.participants || [];
+      const pool = interaction.pool || [];
+      const poolRevealed = interaction.pool !== undefined || interaction.poolEmpty;
+      const assignment = interaction.assignment || {};
+      const responses = interaction.responses || {};
+      const stage = interaction.stage || 'assigning';
+      const amDistributor = interaction.distributor === '_host' ? isHost : interaction.distributor === myKnight;
+      const amParticipant = participants.includes(myKnight);
+      const distName = cardShareDistributorName(interaction);
+
+      // Distributor drives finalization/resolution.
+      if (amDistributor) checkCardShareResolution(interaction);
+
+      // Pool not yet revealed (host still drawing for quest/convocation).
+      if (!poolRevealed) {
+        area.innerHTML = '<div class="interaction-panel"><h3>Card Sharing</h3>' +
+          '<p>Revealing cards…</p></div>';
+        return;
+      }
+
+      const knightOptions = (selectedKid) => participants.map(kid =>
+        '<option value="' + kid + '"' + (kid === selectedKid ? ' selected' : '') + '>' +
+        escapeHtml(getKnightDisplayName(kid)) + '</option>').join('');
+
+      // Build the visible pool: each card with its currently-assigned knight.
+      const poolHtml = pool.map(card => {
+        const assignedKid = assignment[card.id];
+        const assignedName = assignedKid ? getKnightDisplayName(assignedKid) : '—';
+        let inner = '<div class="card-value">' + (getCardValueDisplay(card) || '') + '</div>' +
+          '<div class="card-name">' + escapeHtml(getCardDisplayName(card)) + '</div>';
+        if (amDistributor && stage === 'assigning') {
+          inner += '<select class="cardshare-assign" data-card="' + card.id + '" ' +
+            'style="font-size:1rem;margin-top:0.25rem;max-width:68px;">' +
+            '<option value="">—</option>' + knightOptions(assignedKid) + '</select>';
+        } else {
+          inner += '<div class="card-name" style="color:var(--gold);margin-top:0.25rem;">' +
+            escapeHtml(assignedName) + '</div>';
+        }
+        return '<div class="shared-slot filled ' + getCardCSSClass(card) + '">' + inner + '</div>';
+      }).join('');
+
+      // Per-knight running counts.
+      const counts = {};
+      for (const kid of participants) counts[kid] = 0;
+      for (const card of pool) { const k = assignment[card.id]; if (k && counts[k] !== undefined) counts[k]++; }
+      const countsHtml = participants.map(kid =>
+        escapeHtml(getKnightDisplayName(kid)) + ': ' + counts[kid]).join(' · ');
+
+      const allAssigned = pool.length > 0 && pool.every(c => assignment[c.id]);
+      const randomizeBtn = amParticipant
+        ? '<button class="btn btn-danger" id="btn-cardshare-random" style="margin-top:0.5rem;">Do Random Draw Instead</button>'
+        : '';
+
+      let html = '<div class="interaction-panel"><h3>Card Sharing</h3>';
+
+      if (stage === 'assigning') {
+        if (amDistributor) {
+          html += '<p>Assign each card to a knight, then confirm. (A knight may receive any number — or none.)</p>';
+          html += '<div class="setup-shared">' + poolHtml + '</div>';
+          html += '<p style="font-size:0.75rem;margin:0.5rem 0;">' + countsHtml + '</p>';
+          html += '<button class="btn btn-primary" id="btn-cardshare-confirm"' +
+            (allAssigned ? '' : ' disabled') + '>Confirm Distribution</button>';
+          html += randomizeBtn;
+        } else {
+          html += '<p>' + escapeHtml(distName) + ' is dividing the cards…</p>';
+          html += '<div class="setup-shared">' + poolHtml + '</div>';
+          html += randomizeBtn;
+        }
+      } else { // voting
+        html += '<p>' + escapeHtml(distName) + ' proposes this split. All gathered knights must accept.</p>';
+        html += '<div class="setup-shared">' + poolHtml + '</div>';
+        // Who has voted
+        const votedHtml = participants.map(kid => {
+          const r = responses[kid];
+          const mark = r === true ? '✓' : (r === false ? '✗' : '…');
+          return escapeHtml(getKnightDisplayName(kid)) + ' ' + mark;
+        }).join(' · ');
+        html += '<p style="font-size:0.75rem;margin:0.5rem 0;">' + votedHtml + '</p>';
+        if (amParticipant && responses[myKnight] === undefined) {
+          html += '<button class="btn btn-primary" id="btn-cardshare-accept">Accept</button>';
+          html += '<button class="btn btn-danger" id="btn-cardshare-reject" style="margin-top:0.5rem;">Reject</button>';
+        } else if (amParticipant) {
+          html += '<p style="font-size:0.875rem;">You voted to ' + (responses[myKnight] ? 'accept' : 'reject') + '. Waiting for others…</p>';
+        } else {
+          html += '<p style="font-size:0.875rem;">Waiting for the gathered knights…</p>';
+        }
+        html += randomizeBtn;
+      }
+      html += '</div>';
+      area.innerHTML = html;
+
+      // ── Handlers ──
+      area.querySelectorAll('.cardshare-assign').forEach(sel => {
+        sel.addEventListener('change', () => {
+          const cardId = sel.getAttribute('data-card');
+          const kid = sel.value;
+          const ref = fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/assignment/' + cardId);
+          if (kid) ref.set(kid); else ref.remove();
+        });
+      });
+      const confirmBtn = document.getElementById('btn-cardshare-confirm');
+      if (confirmBtn) confirmBtn.addEventListener('click', () => {
+        fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/stage').set('voting');
+      });
+      const acceptBtn = document.getElementById('btn-cardshare-accept');
+      if (acceptBtn) acceptBtn.addEventListener('click', () => {
+        fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight).set(true);
+      });
+      const rejectBtn = document.getElementById('btn-cardshare-reject');
+      if (rejectBtn) rejectBtn.addEventListener('click', () => {
+        if (!confirm('Reject this split and force the cards to be distributed at random?')) return;
+        fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight).set(false);
+      });
+      const randomBtn = document.getElementById('btn-cardshare-random');
+      if (randomBtn) randomBtn.addEventListener('click', () => {
+        if (!confirm('Force the cards to be distributed at random?')) return;
+        fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/forceRandom').set({ by: myKnight });
+      });
+    }
+
+    // Distributor-only: decide when/how the share is finalized.
+    async function checkCardShareResolution(interaction) {
+      const amDistributor = interaction.distributor === '_host' ? isHost : interaction.distributor === myKnight;
+      if (!amDistributor || cardShareResolving) return;
+      // Pool must be revealed before we can act.
+      if (interaction.pool === undefined && !interaction.poolEmpty) return;
+
+      // Guard 1: any participant forced a random draw.
+      if (interaction.forceRandom) {
+        cardShareResolving = true;
+        try { await finalizeCardShareRandom(interaction, interaction.forceRandom.by); }
+        finally { cardShareResolving = false; }
+        return;
+      }
+      // Empty pool (deck exhausted) — nothing to divide.
+      if ((interaction.pool || []).length === 0) {
+        cardShareResolving = true;
+        try { await finalizeCardShareAssignment(interaction); }
+        finally { cardShareResolving = false; }
+        return;
+      }
+      // Guard 2: unanimous accept gate (only in the voting stage).
+      if (interaction.stage !== 'voting') return;
+      const participants = interaction.participants || [];
+      const responses = interaction.responses || {};
+      if (participants.some(kid => responses[kid] === undefined)) return;
+      cardShareResolving = true;
+      try {
+        const rejecter = participants.find(kid => responses[kid] === false);
+        if (rejecter) await finalizeCardShareRandom(interaction, rejecter);
+        else await finalizeCardShareAssignment(interaction);
+      } finally { cardShareResolving = false; }
+    }
+
+    // Write each recipient's cards into the existing drawResults pipeline, clear the
+    // interaction, log, then run the moment-specific cleanup.
+    async function dealPoolAndFinish(interaction, byKnight, logMsg) {
+      const updates = {};
+      for (const kid of Object.keys(byKnight)) {
+        const cards = byKnight[kid];
+        if (!cards || cards.length === 0) continue;
+        const key = fbDb.ref('games/' + currentRoom + '/drawResults').push().key;
+        updates['games/' + currentRoom + '/drawResults/' + key] = { knightId: kid, cards };
+      }
+      updates['games/' + currentRoom + '/meta/pendingInteraction'] = null;
+      await fbDb.ref().update(updates);
+      await addLog('info', logMsg);
+      await finishCardShareMoment(interaction);
+    }
+
+    async function finalizeCardShareAssignment(interaction) {
+      const pool = interaction.pool || [];
+      const assignment = interaction.assignment || {};
+      const byKnight = {};
+      for (const card of pool) {
+        const kid = assignment[card.id];
+        if (!kid) continue;
+        (byKnight[kid] = byKnight[kid] || []).push(card);
+      }
+      const msg = pool.length === 0
+        ? 'No cards to share.'
+        : cardShareDistributorName(interaction) + ' divided ' + pool.length + ' cards among the knights.';
+      await dealPoolAndFinish(interaction, byKnight, msg);
+    }
+
+    async function finalizeCardShareRandom(interaction, forcedByKnight) {
+      const pool = [...(interaction.pool || [])];
+      const participants = interaction.participants || [];
+      shuffle(pool);
+      const byKnight = {};
+      for (let i = 0; i < pool.length; i++) {
+        const kid = participants[i % participants.length];
+        (byKnight[kid] = byKnight[kid] || []).push(pool[i]);
+      }
+      const who = forcedByKnight ? getKnightDisplayName(forcedByKnight) : 'A knight';
+      await dealPoolAndFinish(interaction, byKnight,
+        who + ' forced a random distribution of ' + pool.length + ' cards.');
+    }
+
+    // Moment-specific cleanup after a share completes.
+    async function finishCardShareMoment(interaction) {
+      if (interaction.moment === 'setup') {
+        const updates = {};
+        updates['games/' + currentRoom + '/setup'] = null;
+        updates['games/' + currentRoom + '/meta/status'] = 'playing';
+        updates['games/' + currentRoom + '/meta/turnPhase'] = 'evil';
+        await fbDb.ref().update(updates);
+      } else if (interaction.moment === 'convocation') {
+        await completeSWAction();
+      }
+      // questVictory: no extra cleanup (swords/LP/relics already applied).
     }
 
     async function checkInteractionResolution(interaction) {
@@ -7580,7 +7903,7 @@
             if (kid === 'palamedes') life = Math.min(6, life + 1);
             updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
           }
-          await distributeCardsAmongKnights(7, knightsOnQuest);
+          await shareQuestSpoils(7, knightsOnQuest);
           await addLog('quest', "Dragon's Quest WON! 2 White Swords, +2 LP, 7 cards shared.");
         }
       } else {
@@ -7709,7 +8032,7 @@
           summary: '2 White Swords, +1 LP each, 7 cards, Excalibur relic to ' + getKnightDisplayName(myKnight),
         };
         await fbDb.ref().update(updates);
-        await distributeCardsAmongKnights(7, knightsOnQuest);
+        await shareQuestSpoils(7, knightsOnQuest);
         await addLog('quest', 'Quest for Excalibur WON! 2 White Swords, +1 LP each, 7 cards, Excalibur relic to ' + getKnightDisplayName(myKnight));
 
       } else if (questKey === 'holyGrail') {
@@ -7730,7 +8053,7 @@
           summary: '3 White Swords, +1 LP, 7 cards, Holy Grail relic to ' + getKnightDisplayName(myKnight),
         };
         await fbDb.ref().update(updates);
-        await distributeCardsAmongKnights(7, knightsOnQuest);
+        await shareQuestSpoils(7, knightsOnQuest);
         await addLog('quest', 'Quest for the Holy Grail WON! 3 White Swords, +1 LP, 7 cards, Holy Grail relic to ' + getKnightDisplayName(myKnight));
 
       } else if (questKey === 'saxonWar' || questKey === 'pictWar') {
@@ -7750,7 +8073,7 @@
         };
         updates['games/' + currentRoom + '/quests/' + questKey] = { status: 'active', warriors: 0, fightCards: [], knightsPresent: [] };
         await fbDb.ref().update(updates);
-        await distributeCardsAmongKnights(4, knightsOnQuest);
+        await shareQuestSpoils(4, knightsOnQuest);
         await addLog('quest', warName + ' WON! 1 White Sword, +1 LP each, 4 cards drawn.');
       }
 
