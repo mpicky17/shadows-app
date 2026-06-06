@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Excalibur — Quest Lost</title>
+<!--
+  STANDALONE comic-book animation: Excalibur sinking into the lake (Quest LOST).
+  Pure CSS + inline SVG, no dependencies. Auto-plays on load; "Replay" restarts it.
+
+  To embed in the game later: lift the .panel markup + this <style> (scoped under
+  .panel) into an overlay element, show it when the Excalibur quest is LOST, then call
+  panel.classList.add('play') to trigger. Remove the overlay when the existing
+  questResult overlay is dismissed. Palette/font match index.html.
+-->
+<style>
+  :root {
+    --gold: #D4A843; --bg-dark: #1A1A2E; --bg-card: #16213E;
+    --blue: #1565C0; --blue-lt: #5b8fd4; --parchment: #F5F0E1; --ink: #0a0f16;
+    --deep: #06121f;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body {
+    height: 100%;
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: #05080e;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 1.25rem;
+    -webkit-user-select: none; user-select: none;
+  }
+
+  /* ── Comic panel ─────────────────────────────────────────── */
+  .panel {
+    position: relative;
+    width: min(92vw, 420px);
+    height: min(115vw, 520px);
+    border: 6px solid var(--ink);
+    border-radius: 4px;
+    overflow: hidden;
+    box-shadow: 0 10px 0 rgba(0,0,0,0.55), 0 18px 40px rgba(0,0,0,0.75);
+    transform: rotate(0.6deg);
+    background: #06121f;
+  }
+  .layer { position: absolute; inset: 0; }
+
+  /* Cold radial background (sky over a dark lake) */
+  .bg { background: radial-gradient(120% 80% at 50% 25%, #233a55 0%, var(--bg-card) 45%, var(--deep) 100%); }
+
+  /* Downward comic motion lines while the sword falls */
+  .fall-lines {
+    background-image: repeating-linear-gradient(90deg,
+      rgba(190,215,245,0.0) 0px, rgba(190,215,245,0.0) 22px,
+      rgba(190,215,245,0.35) 23px, rgba(190,215,245,0.0) 25px);
+    -webkit-mask-image: linear-gradient(to bottom, #000 0%, #000 38%, transparent 52%);
+    mask-image: linear-gradient(to bottom, #000 0%, #000 38%, transparent 52%);
+    opacity: 0; z-index: 3;
+  }
+  .panel.play .fall-lines { animation: fallLines 3.6s ease-out both; }
+  @keyframes fallLines {
+    0%, 16% { opacity: 0; }
+    24% { opacity: 0.5; }
+    44% { opacity: 0.5; }
+    52% { opacity: 0; }
+    100% { opacity: 0; }
+  }
+
+  /* The sword falls tip-first (rotated 180deg) */
+  .lose-sword {
+    left: 50%; top: 50%;
+    width: 60px; height: 256px;
+    z-index: 2;
+    transform: translate(-50%, -180px) rotate(180deg);
+  }
+  .panel.play .lose-sword { animation: sink 3.6s cubic-bezier(.45,.05,.6,1) both; }
+  @keyframes sink {
+    0%   { transform: translate(-50%, -185px) rotate(180deg) scale(1); opacity: 1; }
+    12%  { transform: translate(-50%, -174px) rotate(180deg) scale(1); opacity: 1; }
+    22%  { transform: translate(-50%, -188px) rotate(180deg) scale(1); opacity: 1; }
+    46%  { transform: translate(-50%, -102px) rotate(180deg) scale(1); opacity: 1; }
+    60%  { transform: translate(-50%, -30px)  rotate(180deg) scale(0.98); opacity: 0.85; }
+    100% { transform: translate(-50%, 175px)  rotate(180deg) scale(0.9); opacity: 0.1; }
+  }
+
+  /* Water — sits ABOVE the sword so the submerged part reads as underwater */
+  .water {
+    top: 55%; bottom: 0; left: 0; right: 0;
+    z-index: 4;
+    background: linear-gradient(to bottom, rgba(30,75,120,0.55) 0%, rgba(10,40,70,0.78) 45%, rgba(4,18,31,0.92) 100%);
+    -webkit-backdrop-filter: blur(1.6px); backdrop-filter: blur(1.6px);
+    border-top: 2px solid rgba(160,200,240,0.7);
+    overflow: hidden;
+  }
+  /* moving caustic shimmer on the water */
+  .water::after {
+    content: ''; position: absolute; inset: -20% -20% 0 -20%;
+    background: repeating-linear-gradient(100deg,
+      rgba(150,195,240,0.0) 0px, rgba(150,195,240,0.10) 20px, rgba(150,195,240,0.0) 40px);
+    animation: shimmer 6s linear infinite;
+  }
+  @keyframes shimmer { to { transform: translateX(40px); } }
+
+  /* Surface ripple rings + bubbles (created in JS) */
+  .fx { z-index: 5; pointer-events: none; }
+  .ring {
+    position: absolute; left: 50%; top: 55%;
+    width: 26px; height: 10px; margin: -5px 0 0 -13px;
+    border: 2px solid rgba(170,210,245,0.85);
+    border-radius: 50%;
+    opacity: 0;
+    animation: ripple 1.8s ease-out both;
+  }
+  @keyframes ripple {
+    0% { opacity: 0; transform: scale(0.3); }
+    20% { opacity: 0.9; }
+    100% { opacity: 0; transform: scale(7); }
+  }
+  .bubble {
+    position: absolute;
+    background: radial-gradient(circle at 35% 30%, rgba(220,240,255,0.95), rgba(120,170,220,0.5) 70%, transparent);
+    border-radius: 50%; opacity: 0;
+    animation: rise 2.2s ease-in both;
+  }
+  @keyframes rise {
+    0% { opacity: 0; transform: translateY(20px) scale(0.6); }
+    25% { opacity: 0.9; }
+    100% { opacity: 0; transform: translateY(-70px) scale(1); }
+  }
+
+  /* Halftone comic shading */
+  .halftone {
+    background-image: radial-gradient(circle, rgba(0,0,0,0.4) 1px, transparent 1.6px);
+    background-size: 6px 6px;
+    mix-blend-mode: multiply; opacity: 0.2; z-index: 7;
+  }
+
+  /* Cold vignette darkens as the blade is lost */
+  .darken {
+    background: radial-gradient(circle at 50% 60%, transparent 30%, rgba(2,8,16,0.85) 100%);
+    opacity: 0; z-index: 8;
+  }
+  .panel.play .darken { animation: darken 3.6s ease-in both; }
+  @keyframes darken { 0%, 62% { opacity: 0; } 100% { opacity: 0.9; } }
+
+  .replay {
+    font-family: inherit; font-size: 1rem; cursor: pointer;
+    background: transparent; color: var(--blue-lt);
+    border: 2px solid var(--blue-lt); border-radius: 8px;
+    padding: 0.5rem 1.5rem; letter-spacing: 0.08em; text-transform: uppercase;
+  }
+  .replay:hover, .replay:focus { background: var(--blue-lt); color: var(--bg-dark); }
+</style>
+</head>
+<body>
+  <div class="panel" id="panel">
+    <div class="layer bg"></div>
+    <div class="layer fall-lines"></div>
+
+    <div class="layer lose-sword">
+      <svg viewBox="0 0 64 256" width="100%" height="100%" fill="none">
+        <!-- blade -->
+        <path d="M32 6 L40 30 L40 150 L24 150 L24 30 Z" fill="#D8DEE6" stroke="var(--ink)" stroke-width="2.5" stroke-linejoin="round"/>
+        <line x1="32" y1="22" x2="32" y2="146" stroke="#9aa6b4" stroke-width="2"/>
+        <!-- crossguard -->
+        <rect x="8" y="150" width="48" height="14" rx="5" fill="var(--gold)" stroke="var(--ink)" stroke-width="2.5"/>
+        <circle cx="18" cy="157" r="4" fill="#C62828" stroke="var(--ink)" stroke-width="1.5"/>
+        <circle cx="46" cy="157" r="4" fill="var(--blue)" stroke="var(--ink)" stroke-width="1.5"/>
+        <!-- grip -->
+        <rect x="25" y="164" width="14" height="46" rx="4" fill="#6b4019" stroke="var(--ink)" stroke-width="2.5"/>
+        <line x1="26" y1="172" x2="38" y2="176" stroke="#D4A843" stroke-width="1.5"/>
+        <line x1="26" y1="182" x2="38" y2="186" stroke="#D4A843" stroke-width="1.5"/>
+        <line x1="26" y1="192" x2="38" y2="196" stroke="#D4A843" stroke-width="1.5"/>
+        <!-- pommel -->
+        <circle cx="32" cy="218" r="9" fill="var(--gold)" stroke="var(--ink)" stroke-width="2.5"/>
+      </svg>
+    </div>
+
+    <div class="layer water"></div>
+    <div class="layer fx" id="fx"></div>
+    <div class="layer halftone"></div>
+    <div class="layer darken"></div>
+  </div>
+
+  <button class="replay" id="replay">Replay</button>
+
+<script>
+  const panel = document.getElementById('panel');
+  const fx = document.getElementById('fx');
+
+  function buildFx() {
+    fx.innerHTML = '';
+    // splash rings appear when the tip pierces the surface (~1.6s)
+    const ringDelays = [1.6, 1.85, 2.15];
+    for (const d of ringDelays) {
+      const r = document.createElement('div');
+      r.className = 'ring';
+      r.style.animationDelay = d.toFixed(2) + 's';
+      fx.appendChild(r);
+    }
+    // bubbles rising near the entry point, staggered after the splash
+    const n = 9;
+    for (let i = 0; i < n; i++) {
+      const b = document.createElement('div');
+      b.className = 'bubble';
+      const size = 4 + Math.random() * 8;
+      b.style.width = b.style.height = size + 'px';
+      b.style.left = (50 + (Math.random() * 22 - 11)) + '%';
+      b.style.top = (56 + Math.random() * 10) + '%';
+      b.style.animationDelay = (1.75 + Math.random() * 1.1).toFixed(2) + 's';
+      fx.appendChild(b);
+    }
+  }
+
+  function play() {
+    panel.classList.remove('play');
+    void panel.offsetWidth; // force reflow so animations restart
+    buildFx();
+    panel.classList.add('play');
+  }
+
+  document.getElementById('replay').addEventListener('click', play);
+  window.addEventListener('load', play);
+</script>
+</body>
+</html>
