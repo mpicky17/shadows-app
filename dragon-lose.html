@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Dragon's Quest — Lost</title>
 <!--
-  STANDALONE comic-book animation (BLACK & WHITE): the Dragon rears and unleashes a
-  giant fireball that engulfs the screen (Dragon's Quest LOST).
+  STANDALONE comic-book animation (BLACK & WHITE): a realistic dragon rears and
+  unleashes a giant fireball that engulfs the screen (Dragon's Quest LOST).
   Pure CSS + inline SVG, no dependencies. Auto-plays on load; "Replay" restarts it.
 
   To embed in the game: lift the .panel markup + this <style> into an overlay, show on
@@ -29,19 +29,18 @@
     transform: rotate(-0.6deg); background: #0c0c0c;
   }
   .layer { position: absolute; inset: 0; }
-  .scene { position: absolute; inset: 0; } /* shaken during the blast */
-  .panel.play .scene { animation: quake 0.5s 1.65s ease-in-out 3; }
+  .scene { position: absolute; inset: 0; }
+  .panel.play .scene { animation: quake 0.5s 1.7s ease-in-out 3; }
   @keyframes quake {
     0%,100% { transform: translate(0,0); } 20% { transform: translate(-4px,3px);} 40% { transform: translate(4px,-3px);}
     60% { transform: translate(-3px,-2px);} 80% { transform: translate(3px,2px);}
   }
 
-  .bg { background: radial-gradient(120% 100% at 62% 52%, #3a3a3a 0%, #1c1c1c 50%, #050505 100%); }
+  .bg { background: radial-gradient(120% 100% at 64% 50%, #3a3a3a 0%, #1b1b1b 50%, #050505 100%); }
 
-  /* radial speed lines from the blast point */
-  .rays-wrap { display:flex; align-items:center; justify-content:center; opacity:0; z-index:5;
-    left: 18%; top: 6%; } /* center roughly on the maw */
-  .panel.play .rays-wrap { animation: raysIn 2.4s 1.6s ease-out both; }
+  /* radial speed lines from the blast point (the maw) */
+  .rays-wrap { display:flex; align-items:center; justify-content:center; opacity:0; z-index:5; left: 22%; top: 6%; }
+  .panel.play .rays-wrap { animation: raysIn 2.4s 1.65s ease-out both; }
   @keyframes raysIn { 0% { opacity:0; transform: scale(0.2);} 30% { opacity:0.9; transform: scale(1.3);} 100% { opacity:0.4; transform: scale(1.7);} }
   .rays { width: 200%; height: 200%; border-radius:50%;
     background: repeating-conic-gradient(from 0deg at 50% 50%, rgba(255,255,255,0) 0deg, rgba(255,255,255,0.5) 3deg, rgba(255,255,255,0) 7deg, rgba(255,255,255,0) 12deg);
@@ -53,21 +52,21 @@
   .dragon { z-index: 3; }
   .panel.play .dragon { animation: dragonRear 4.2s ease-in-out both; }
   @keyframes dragonRear {
-    0% { transform: translateY(14px) scale(0.98); }
-    18% { transform: translateY(-4px) scale(1.0); }   /* rear up */
-    40% { transform: translateY(2px) scale(1.02); }   /* lunge forward to breathe */
-    60% { transform: translateY(0) scale(1.0); }
-    100% { transform: translateY(0) scale(1.0); }
+    0% { transform: translateY(16px) scale(0.99) rotate(0.5deg); }
+    20% { transform: translateY(-6px) scale(1.01) rotate(-0.5deg); }  /* rear up + inhale */
+    40% { transform: translateY(3px) scale(1.03) rotate(0.4deg); }    /* lunge to breathe */
+    60% { transform: translateY(0) scale(1.0) rotate(0deg); }
+    100% { transform: translateY(0) scale(1.0) rotate(0deg); }
   }
 
-  /* throat / maw glow that builds before the blast */
-  .maw { z-index: 4; background: radial-gradient(circle at 31% 30%, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.3) 8%, transparent 22%); opacity: 0; }
-  .panel.play .maw { animation: mawGlow 2.0s 0.5s ease-in both; }
-  @keyframes mawGlow { 0% { opacity: 0;} 70% { opacity: 0.5;} 100% { opacity: 1;} }
+  /* throat / maw glow that builds before the blast (over the open mouth) */
+  .maw { z-index: 4; background: radial-gradient(circle at 67% 55%, rgba(255,255,255,0.95) 0%, rgba(255,255,255,0.35) 7%, transparent 20%); opacity: 0; }
+  .panel.play .maw { animation: mawGlow 2.05s 0.55s ease-in both; }
+  @keyframes mawGlow { 0% { opacity: 0;} 70% { opacity: 0.55;} 100% { opacity: 1;} }
 
   /* fireball erupts from the maw and engulfs the panel */
-  .fire { z-index: 6; transform-origin: 31% 30%; transform: scale(0); opacity: 0; }
-  .panel.play .fire { animation: blast 2.6s 1.62s cubic-bezier(.3,.1,.3,1) both; }
+  .fire { z-index: 6; transform-origin: 67% 55%; transform: scale(0); opacity: 0; }
+  .panel.play .fire { animation: blast 2.6s 1.66s cubic-bezier(.3,.1,.3,1) both; }
   @keyframes blast {
     0% { transform: scale(0.05); opacity: 0; }
     8% { opacity: 1; }
@@ -80,7 +79,7 @@
   .panel.play .flash { animation: flash 4.2s ease-out both; }
   @keyframes flash { 0%, 62% { opacity: 0;} 72% { opacity: 0.95;} 86% { opacity: 0.8;} 100% { opacity: 0.78; } }
 
-  .halftone { z-index: 8; background-image: radial-gradient(circle, rgba(0,0,0,.42) 1px, transparent 1.6px); background-size: 6px 6px; mix-blend-mode: multiply; opacity: 0.2; }
+  .halftone { z-index: 8; background-image: radial-gradient(circle, rgba(0,0,0,.4) 1px, transparent 1.6px); background-size: 6px 6px; mix-blend-mode: multiply; opacity: 0.16; }
 
   .replay { font-family: inherit; font-size: 1rem; cursor: pointer; background: transparent; color: #fff;
     border: 2px solid #fff; border-radius: 8px; padding: 0.5rem 1.5rem; letter-spacing: 0.08em; text-transform: uppercase; }
@@ -92,69 +91,128 @@
     <div class="scene">
       <div class="layer bg"></div>
 
-      <!-- DRAGON head + neck (facing right, jaws agape) -->
+      <!-- REALISTIC DRAGON head + neck (facing right, jaws agape) -->
       <svg class="layer dragon" viewBox="0 0 420 520" preserveAspectRatio="xMidYMid slice" fill="none">
         <defs>
-          <linearGradient id="hide" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stop-color="#8a8a8a"/><stop offset="0.5" stop-color="#535353"/><stop offset="1" stop-color="#232323"/>
+          <radialGradient id="head" cx="40%" cy="32%" r="75%">
+            <stop offset="0" stop-color="#cfcfcf"/><stop offset="0.4" stop-color="#8c8c8c"/>
+            <stop offset="0.75" stop-color="#4d4d4d"/><stop offset="1" stop-color="#222222"/>
+          </radialGradient>
+          <linearGradient id="snout" x1="0" y1="0" x2="0.2" y2="1">
+            <stop offset="0" stop-color="#c4c4c4"/><stop offset="0.5" stop-color="#7a7a7a"/><stop offset="1" stop-color="#363636"/>
           </linearGradient>
-          <linearGradient id="wing" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0" stop-color="#3a3a3a"/><stop offset="1" stop-color="#161616"/>
+          <linearGradient id="neck" x1="0.2" y1="0" x2="0.8" y2="1">
+            <stop offset="0" stop-color="#7a7a7a"/><stop offset="0.55" stop-color="#3f3f3f"/><stop offset="1" stop-color="#161616"/>
           </linearGradient>
+          <linearGradient id="lowjaw" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stop-color="#9a9a9a"/><stop offset="1" stop-color="#2a2a2a"/>
+          </linearGradient>
+          <linearGradient id="horn" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#dcdcdc"/><stop offset="0.5" stop-color="#8a8a8a"/><stop offset="1" stop-color="#3a3a3a"/>
+          </linearGradient>
+          <radialGradient id="throat" cx="40%" cy="45%" r="65%">
+            <stop offset="0" stop-color="#3a3a3a"/><stop offset="1" stop-color="#000000"/>
+          </radialGradient>
+          <radialGradient id="eyeg" cx="38%" cy="34%" r="70%">
+            <stop offset="0" stop-color="#ffffff"/><stop offset="0.5" stop-color="#d8d8d8"/><stop offset="1" stop-color="#7c7c7c"/>
+          </radialGradient>
+          <!-- procedural scaly-hide texture -->
+          <filter id="scaleTex" x="-6%" y="-6%" width="112%" height="112%">
+            <feTurbulence type="turbulence" baseFrequency="0.045 0.11" numOctaves="3" seed="11" result="t"/>
+            <feDiffuseLighting in="t" surfaceScale="2.4" diffuseConstant="1.05" lighting-color="#ffffff" result="l">
+              <feDistantLight azimuth="232" elevation="58"/>
+            </feDiffuseLighting>
+            <feColorMatrix in="l" type="saturate" values="0" result="g"/>
+            <feComponentTransfer in="g" result="g2"><feFuncA type="linear" slope="0.35"/></feComponentTransfer>
+            <feComposite in="g2" in2="SourceAlpha" operator="in" result="tex"/>
+            <feBlend in="SourceGraphic" in2="tex" mode="multiply"/>
+          </filter>
         </defs>
 
-        <!-- wing membrane silhouette behind -->
-        <path d="M150 250 L40 80 L70 175 L20 150 L80 240 L30 250 L120 300 Z" fill="url(#wing)" stroke="#0c0c0c" stroke-width="3" stroke-linejoin="round" opacity="0.9"/>
-        <g stroke="#0c0c0c" stroke-width="2" opacity="0.7">
-          <path d="M120 300 L48 95"/><path d="M120 300 L66 190"/><path d="M120 300 L78 245"/>
+        <!-- ===== WING membrane far behind ===== -->
+        <path d="M150 250 L36 70 L74 168 L18 140 L92 232 L26 246 L130 296 Z" fill="#1c1c1c" stroke="#0c0c0c" stroke-width="3" stroke-linejoin="round" opacity="0.92"/>
+        <g stroke="#0c0c0c" stroke-width="2" opacity="0.6"><path d="M130 296 L46 86"/><path d="M130 296 L70 184"/><path d="M130 296 L86 238"/></g>
+
+        <!-- ===== HIDE (textured) ===== -->
+        <g filter="url(#scaleTex)">
+          <!-- neck -->
+          <path d="M36 520 C66 432 60 356 150 312 C188 292 196 262 214 244 L268 300
+                   C232 332 206 392 198 452 C192 488 180 510 178 520 Z"
+                fill="url(#neck)" stroke="#0c0c0c" stroke-width="4" stroke-linejoin="round"/>
+          <!-- cranium + cheek + upper jaw (one mass) -->
+          <path d="M150 258 C150 214 168 188 206 184 C236 182 256 196 268 214
+                   C300 220 332 232 380 256 L360 264 C356 258 348 258 344 262
+                   L322 258 L312 270 L292 264 L276 276 L256 268 C232 280 198 286 178 276
+                   C160 270 150 264 150 258 Z"
+                fill="url(#head)" stroke="#0c0c0c" stroke-width="4" stroke-linejoin="round"/>
+          <!-- snout top plane (lighter) -->
+          <path d="M268 214 C300 220 332 232 380 256 L360 264 L330 252 L300 232 L274 224 Z" fill="url(#snout)"/>
+          <!-- lower jaw (dropped, open) -->
+          <path d="M214 290 C236 312 286 322 344 312 L372 300 L344 296 L312 304 L286 296 L256 304 L230 292 Z"
+                fill="url(#lowjaw)" stroke="#0c0c0c" stroke-width="4" stroke-linejoin="round"/>
+          <!-- jaw / cheek muscle bulge -->
+          <path d="M168 244 C150 256 148 286 168 300 C190 312 214 300 216 280 C218 262 196 240 168 244 Z"
+                fill="url(#head)" stroke="#0c0c0c" stroke-width="3.5" stroke-linejoin="round" opacity="0.98"/>
         </g>
 
-        <!-- neck -->
-        <path d="M40 520 C70 430 70 360 150 312 C 188 286 196 250 214 232 L256 300 C220 330 196 392 188 452 C182 488 170 510 168 520 Z"
-              fill="url(#hide)" stroke="#0c0c0c" stroke-width="4" stroke-linejoin="round"/>
+        <!-- ===== OPEN MOUTH interior (dark throat, where fire builds) ===== -->
+        <path d="M250 258 C236 268 232 286 244 298 C266 306 300 308 330 304 L336 286 C312 290 282 288 264 280 C254 274 250 266 252 260 Z"
+              fill="url(#throat)"/>
 
-        <!-- head: upper jaw + skull -->
-        <path d="M196 250 C188 214 196 188 226 182 L262 188 C300 196 332 214 372 244 L330 256 L300 250 L286 262 L262 258 L244 268 L224 260 Z"
-              fill="url(#hide)" stroke="#0c0c0c" stroke-width="4" stroke-linejoin="round"/>
-        <!-- lower jaw (open) -->
-        <path d="M232 286 C250 300 288 306 330 300 L356 292 L330 286 L300 292 L276 286 L252 292 Z"
-              fill="#3b3b3b" stroke="#0c0c0c" stroke-width="4" stroke-linejoin="round"/>
-
-        <!-- horns -->
-        <path d="M226 182 C206 150 170 132 120 132 C162 142 180 168 208 188 Z" fill="url(#hide)" stroke="#0c0c0c" stroke-width="3.5" stroke-linejoin="round"/>
-        <path d="M244 184 C232 156 206 138 176 132 C206 150 214 172 234 192 Z" fill="#6a6a6a" stroke="#0c0c0c" stroke-width="3" stroke-linejoin="round"/>
-
-        <!-- brow + eye -->
-        <path d="M214 214 C224 206 240 206 250 212" stroke="#0c0c0c" stroke-width="3" fill="none"/>
-        <ellipse cx="232" cy="224" rx="11" ry="8" fill="#f2f2f2" stroke="#0c0c0c" stroke-width="2.5"/>
-        <path d="M232 217 L236 224 L232 231 L228 224 Z" fill="#0c0c0c"/>
-
-        <!-- upper teeth -->
-        <g fill="#efefef" stroke="#0c0c0c" stroke-width="1.5">
-          <path d="M262 258 L268 274 L274 258 Z"/><path d="M286 262 L292 280 L298 262 Z"/>
-          <path d="M312 256 L318 272 L324 256 Z"/><path d="M336 254 L341 268 L346 254 Z"/>
+        <!-- ===== HORNS (ridged pair) ===== -->
+        <path d="M206 184 C188 150 150 122 96 116 C140 130 162 158 192 188 C200 196 206 192 206 184 Z"
+              fill="url(#horn)" stroke="#0c0c0c" stroke-width="3.5" stroke-linejoin="round"/>
+        <g stroke="#0c0c0c" stroke-width="1.6" opacity="0.7" fill="none">
+          <path d="M120 124 C150 140 168 160 188 184"/><path d="M138 122 C164 138 178 156 196 180"/>
         </g>
-        <!-- lower teeth -->
-        <g fill="#e6e6e6" stroke="#0c0c0c" stroke-width="1.5">
-          <path d="M276 286 L281 274 L287 286 Z"/><path d="M300 290 L305 278 L311 290 Z"/><path d="M326 287 L331 276 L337 287 Z"/>
+        <path d="M230 186 C220 158 198 138 168 128 C196 148 206 168 224 192 C230 198 232 192 230 186 Z"
+              fill="#6f6f6f" stroke="#0c0c0c" stroke-width="3" stroke-linejoin="round"/>
+        <!-- brow / jaw frill spikes -->
+        <g fill="#2a2a2a" stroke="#0c0c0c" stroke-width="2">
+          <path d="M158 250 L140 238 L162 240 Z"/><path d="M156 268 L136 262 L160 258 Z"/><path d="M160 286 L142 286 L164 276 Z"/>
         </g>
 
-        <!-- nostril -->
-        <path d="M352 246 C358 244 362 248 360 252" stroke="#0c0c0c" stroke-width="3" fill="none"/>
+        <!-- ===== BROW RIDGE + EYE ===== -->
+        <path d="M176 206 C190 196 214 196 230 206 C224 212 214 214 204 214 C194 214 184 212 176 206 Z" fill="#1a1a1a"/>
+        <ellipse cx="200" cy="220" rx="15" ry="10.5" fill="url(#eyeg)" stroke="#0c0c0c" stroke-width="2.5" transform="rotate(-12 200 220)"/>
+        <path d="M200 211 L205 220 L200 229 L195 220 Z" fill="#0c0c0c"/>
+        <circle cx="195.5" cy="216" r="2.4" fill="#ffffff"/>
+        <!-- deep socket shadow under brow -->
+        <path d="M178 210 C190 204 214 204 226 210 C220 208 210 209 202 210 C192 211 184 211 178 210 Z" fill="#000" opacity="0.5"/>
 
-        <!-- neck spines -->
-        <g fill="#1c1c1c" stroke="#0c0c0c" stroke-width="2">
-          <path d="M150 312 L132 286 L168 300 Z"/><path d="M120 360 L98 338 L140 348 Z"/>
-          <path d="M86 416 L62 398 L104 404 Z"/><path d="M66 470 L42 456 L84 458 Z"/>
+        <!-- ===== NOSTRIL ===== -->
+        <path d="M356 252 C364 248 372 252 370 260 C366 258 360 256 356 258 Z" fill="#0c0c0c"/>
+
+        <!-- ===== TEETH ===== -->
+        <g fill="#f0f0f0" stroke="#0c0c0c" stroke-width="1.5">
+          <!-- upper fangs (hang down) -->
+          <path d="M276 276 L282 298 L290 276 Z"/><path d="M300 270 L306 294 L314 270 Z"/>
+          <path d="M324 264 L330 286 L338 264 Z"/><path d="M346 262 L351 280 L356 262 Z"/>
+          <path d="M256 268 L261 286 L268 270 Z"/>
         </g>
-        <!-- scale texture on neck/cheek -->
-        <g stroke="#2a2a2a" stroke-width="2" fill="none" opacity="0.8">
-          <path d="M150 360 q12 10 24 0 M176 366 q12 10 24 0"/>
-          <path d="M132 404 q12 10 24 0 M158 410 q12 10 24 0"/>
-          <path d="M112 448 q12 10 24 0 M138 454 q12 10 24 0"/>
+        <g fill="#e4e4e4" stroke="#0c0c0c" stroke-width="1.5">
+          <!-- lower fangs (point up) -->
+          <path d="M262 300 L268 284 L274 300 Z"/><path d="M288 304 L294 288 L300 304 Z"/>
+          <path d="M316 304 L322 288 L328 304 Z"/><path d="M342 300 L348 286 L354 300 Z"/>
         </g>
-        <!-- jaw underside shadow -->
-        <path d="M232 286 C250 300 288 306 330 300 L330 306 C288 312 250 306 232 292 Z" fill="#101010" opacity="0.6"/>
+
+        <!-- ===== DORSAL spines down the neck ===== -->
+        <g fill="#1a1a1a" stroke="#0c0c0c" stroke-width="2">
+          <path d="M150 312 L130 282 L170 300 Z"/><path d="M120 360 L96 334 L142 346 Z"/>
+          <path d="M92 414 L66 392 L112 402 Z"/><path d="M72 466 L46 450 L92 454 Z"/>
+        </g>
+
+        <!-- ===== throat scutes (belly plates) along the front of the neck ===== -->
+        <g stroke="#111" stroke-width="2" fill="none" opacity="0.85">
+          <path d="M236 300 q16 8 30 -2 M226 326 q16 9 31 -2 M214 356 q17 9 32 -2 M204 388 q17 9 32 -2 M196 420 q16 9 31 -2 M190 452 q16 9 30 -2"/>
+        </g>
+
+        <!-- ===== shading: shadows ===== -->
+        <path d="M214 290 C236 312 286 322 344 312 L344 320 C286 330 236 320 212 298 Z" fill="#000" opacity="0.5"/>
+        <path d="M150 312 C120 340 96 392 88 452 L104 452 C112 396 132 348 162 320 Z" fill="#000" opacity="0.32"/>
+        <!-- ===== shading: highlights ===== -->
+        <path d="M268 214 C300 220 332 232 372 252 L368 256 C334 238 300 226 270 220 Z" fill="#f2f2f2" opacity="0.5"/>
+        <path d="M176 200 C196 190 222 192 236 202 C220 196 198 196 180 204 Z" fill="#e8e8e8" opacity="0.45"/>
       </svg>
 
       <div class="layer maw"></div>
@@ -168,20 +226,16 @@
             <stop offset="0.7" stop-color="#cfcfcf"/><stop offset="1" stop-color="#8f8f8f"/>
           </radialGradient>
         </defs>
-        <!-- billowing smoke/flame clusters (outer, darker) -->
         <g fill="#9a9a9a" stroke="#0c0c0c" stroke-width="3">
           <circle cx="150" cy="150" r="60"/><circle cx="250" cy="120" r="70"/><circle cx="320" cy="200" r="66"/>
           <circle cx="300" cy="300" r="74"/><circle cx="200" cy="320" r="70"/><circle cx="110" cy="250" r="64"/>
           <circle cx="210" cy="220" r="90"/>
         </g>
-        <!-- inner hot billows -->
         <g fill="#dcdcdc">
           <circle cx="180" cy="180" r="48"/><circle cx="250" cy="170" r="54"/><circle cx="270" cy="250" r="52"/>
           <circle cx="190" cy="260" r="50"/><circle cx="215" cy="215" r="64"/>
         </g>
-        <!-- white-hot core -->
         <circle cx="212" cy="215" r="74" fill="url(#core)"/>
-        <!-- flame tongues licking outward -->
         <g fill="#e9e9e9" stroke="#0c0c0c" stroke-width="2.5">
           <path d="M212 60 L232 130 L192 130 Z"/><path d="M360 215 L290 235 L290 195 Z"/>
           <path d="M212 370 L232 300 L192 300 Z"/><path d="M64 215 L134 235 L134 195 Z"/>
