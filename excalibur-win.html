@@ -57,27 +57,29 @@
   .stone-back { z-index: 3; }
 
   /* sword drawn point-DOWN; bottom-anchored so its tip sits in the stone's top */
+  /* sized relative to the panel (so the pull is consistent at any window size);
+     translateY is a % of the sword's own height */
   .sword {
     position: absolute; left: 50%; bottom: 33%;
-    width: 92px; height: 246px; z-index: 4;
-    transform: translateX(-50%) translateY(170px); /* starts deep in the stone */
+    width: 22%; height: 47%; z-index: 4;
+    transform: translateX(-50%) translateY(70%); /* starts deep in the stone */
   }
   .panel.play .sword { animation: heroPull 3.0s cubic-bezier(.18,.7,.2,1) both; }
   @keyframes heroPull {
-    /* starts deep in the stone (only the hilt showing), then pulled all the way up */
-    0%   { transform: translateX(-50%) translateY(170px); }
-    9%   { transform: translateX(-50%) translateY(166px); }
-    16%  { transform: translateX(-50%) translateY(174px); }
-    24%  { transform: translateX(-50%) translateY(166px); }
-    32%  { transform: translateX(-50%) translateY(173px); }
-    40%  { transform: translateX(-50%) translateY(170px); }
-    58%  { transform: translateX(-50%) translateY(-118px); }  /* yank up + overshoot */
-    66%  { transform: translateX(-50%) translateY(-106px); }
-    100% { transform: translateX(-50%) translateY(-106px); }
+    /* starts deep in the stone (only the hilt showing), then pulled up — whole sword stays visible */
+    0%   { transform: translateX(-50%) translateY(70%); }
+    9%   { transform: translateX(-50%) translateY(68%); }
+    16%  { transform: translateX(-50%) translateY(72%); }
+    24%  { transform: translateX(-50%) translateY(68%); }
+    32%  { transform: translateX(-50%) translateY(71%); }
+    40%  { transform: translateX(-50%) translateY(70%); }
+    58%  { transform: translateX(-50%) translateY(-38%); }  /* yank up + overshoot */
+    66%  { transform: translateX(-50%) translateY(-31%); }
+    100% { transform: translateX(-50%) translateY(-31%); }
   }
   .sword-art { width: 100%; height: 100%; }
   .panel.play .sword-art { animation: bob 2.6s 2.15s ease-in-out infinite; }
-  @keyframes bob { 0%,100% { transform: translateY(0);} 50% { transform: translateY(-7px);} }
+  @keyframes bob { 0%,100% { transform: translateY(0);} 50% { transform: translateY(-3%);} }
 
   .stone-front { z-index: 5; }
 
