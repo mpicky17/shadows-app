@@ -472,7 +472,7 @@
     }
     .quest-chip {
       padding: 0.5rem; background: var(--bg-card);
-      border-radius: var(--radius); text-align: center;
+      border-radius: var(--radius); text-align: center; cursor: pointer;
     }
     .quest-chip .qname { font-weight: 600; color: var(--gold); font-size: 0.75rem; margin-bottom: 0.25rem; }
     .quest-chip .qinfo { font-size: 0.75rem; color: var(--text-dim); }
@@ -500,7 +500,7 @@
       -webkit-overflow-scrolling: touch; scrollbar-width: thin;
     }
     .hand-card {
-      flex-shrink: 0; width: 72px; min-height: 100px;
+      flex-shrink: 0; width: 72px; min-height: 100px; position: relative;
       border-radius: 6px; display: flex; flex-direction: column;
       align-items: center; justify-content: center; gap: 0.25rem;
       padding: 0.375rem; cursor: pointer;
@@ -699,6 +699,42 @@
     .quest-update-popup.hidden { display: none; }
     .quest-update-popup.fade-out { animation: popupFadeOut 0.5s ease-out forwards; }
     @keyframes popupFadeOut { 0% { opacity: 1; } 100% { opacity: 0; } }
+
+    /* ── Info / Quest-detail modals ─────────────────────────────────── */
+    .info-modal {
+      position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 210;
+      background: rgba(0,0,0,0.75); display: flex; align-items: center; justify-content: center;
+      padding: 1rem; animation: overlayFadeIn 0.2s ease-out;
+    }
+    .info-modal.hidden { display: none; }
+    .info-panel {
+      background: rgba(20,15,10,0.98); border: 2px solid var(--gold); border-radius: 12px;
+      padding: 1rem 1.25rem; max-width: 92vw; width: 360px; max-height: 80vh; overflow-y: auto;
+      text-align: center;
+    }
+    .info-header { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 0.5rem; }
+    .info-header h3 { color: var(--gold); font-size: 1.0625rem; margin: 0; text-align: left; }
+    .info-header-btns { display: flex; gap: 0.375rem; flex-shrink: 0; }
+    .info-help-btn, .info-close-btn {
+      width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--text-dim);
+      background: var(--bg-card); cursor: pointer; font-size: 1rem; line-height: 1;
+      display: flex; align-items: center; justify-content: center; padding: 0;
+    }
+    .info-help-btn { color: var(--text-dim); }
+    .info-close-btn { color: var(--red-bright); border-color: var(--red-bright); font-size: 1.25rem; }
+    .info-body { font-size: 1rem; color: var(--text); line-height: 1.5; text-align: left; }
+    .info-body h4 { color: var(--gold); margin: 0.5rem 0 0.25rem; font-size: 1rem; }
+    .info-pattern { font-size: 0.9375rem; color: var(--gold); margin-top: 0.75rem; font-weight: 600; }
+    .info-status { font-size: 0.875rem; color: var(--text-dim); margin-top: 0.5rem; }
+
+    /* Per-card help badge on hand cards */
+    .card-help {
+      position: absolute; top: 2px; right: 2px; width: 18px; height: 18px;
+      border-radius: 50%; border: none; background: rgba(0,0,0,0.45); color: #fff;
+      font-size: 0.75rem; font-weight: 700; line-height: 1; cursor: pointer; padding: 0;
+      display: flex; align-items: center; justify-content: center;
+      pointer-events: auto; z-index: 2;
+    }
     .btn-rules-corner {
       position: absolute; top: 0.75rem; right: 0.75rem;
       font-size: 0.875rem; padding: 0.25rem 0.75rem; min-width: auto;
@@ -923,6 +959,29 @@
       <div id="quest-update-content"></div>
       <div id="quest-update-desc" style="color:var(--text-dim);font-size:0.875rem;margin-top:0.5rem;"></div>
     </div>
+    <div class="info-modal hidden" id="quest-detail-overlay">
+      <div class="info-panel">
+        <div class="info-header">
+          <h3 id="quest-detail-title"></h3>
+          <div class="info-header-btns">
+            <button class="info-help-btn" id="btn-quest-detail-help" title="Quest rules">?</button>
+            <button class="info-close-btn" id="btn-quest-detail-close" title="Close">&times;</button>
+          </div>
+        </div>
+        <div id="quest-detail-board"></div>
+        <div id="quest-detail-pattern" class="info-pattern"></div>
+        <div id="quest-detail-status" class="info-status"></div>
+      </div>
+    </div>
+    <div class="info-modal hidden" id="info-modal">
+      <div class="info-panel">
+        <div class="info-header">
+          <h3 id="info-modal-title"></h3>
+          <button class="info-close-btn" id="btn-info-modal-close" title="Close">&times;</button>
+        </div>
+        <div id="info-modal-body" class="info-body"></div>
+      </div>
+    </div>
     <div class="results-overlay hidden" id="results-overlay">
       <div class="results-panel">
         <h2 class="results-title" id="results-title"></h2>
@@ -957,7 +1016,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v64';
+    const APP_VERSION = 'shadows-v65';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1043,6 +1102,7 @@
     let mySetupShared = false;  // have I shared a card in setup?
     let setupMinimized = false; // setup overlay minimized so player can peek at loyalty
     let cardShareResolving = false; // re-entry guard for collaborative card-share finalization
+    let questDetailKey = null;  // quest key currently shown in the quest-detail overlay
     let prevCachedQuests = null;
     let questUpdatePopupTimer = null;
     let excaliburAutoDecline = false;
@@ -2192,6 +2252,11 @@
     $('btn-rules-home').addEventListener('click', openRules);
     $('btn-rules-lobby').addEventListener('click', openRules);
     $('btn-close-rules').addEventListener('click', closeRules);
+    $('btn-info-modal-close').addEventListener('click', closeInfoModal);
+    $('btn-quest-detail-close').addEventListener('click', () => $('quest-detail-overlay').classList.add('hidden'));
+    $('btn-quest-detail-help').addEventListener('click', () => {
+      if (questDetailKey) showInfoModal(getLocationLabel(questDetailKey), getQuestRulesSummary(questDetailKey));
+    });
     $('btn-leave-game').addEventListener('click', () => {
       if (confirm('Leave this game? You can return later from the home screen.')) {
         leaveRoom(false);
@@ -2765,6 +2830,16 @@
           inner += '<div class="card-name">' + name + '</div>';
         }
         el.innerHTML = inner;
+        // Per-card "?" help badge (doesn't trigger select/drag).
+        const helpBtn = document.createElement('button');
+        helpBtn.className = 'card-help';
+        helpBtn.textContent = '?';
+        helpBtn.addEventListener('click', e => {
+          e.stopPropagation();
+          showInfoModal(getCardDisplayName(card), getCardEffectDescription(card));
+        });
+        helpBtn.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
+        el.appendChild(helpBtn);
         el.dataset.cardIndex = myHand.indexOf(card);
         el.addEventListener('click', () => onCardTap(card.id));
         // Long-press drag to reorder
@@ -3030,6 +3105,11 @@
         return '<div class="quest-chip" data-quest-key="' + qi.key + '"' + lostStyle + '><div class="qname">' + qi.name + lostLabel + '</div>' +
                '<div class="qinfo">' + qi.info(q) + heroismTag + moaTag + '</div></div>';
       }).join('');
+
+      // Tap a quest chip to open its detail overlay.
+      el.querySelectorAll('.quest-chip').forEach(chip => {
+        chip.addEventListener('click', () => showQuestDetail(chip.dataset.questKey));
+      });
     }
 
     function renderGamePlayers() {
@@ -4584,10 +4664,9 @@
       return slots;
     }
 
-    function showQuestUpdatePopup(questKey, questData, desc) {
-      const popup = $('quest-update-popup');
-      $('quest-update-title').textContent = getLocationLabel(questKey);
-
+    // Build the quest board visual (Excalibur river / Grail slots / combat rows /
+    // war fight cards). Shared by the transient popup and the clickable detail overlay.
+    function renderQuestBoardVisual(questKey, questData) {
       let html = '';
       if (questKey === 'excalibur') {
         html += '<div style="display:flex;gap:3px;justify-content:center;">';
@@ -4619,14 +4698,14 @@
         const bc = questData.blackCards || [];
         const maxW = questKey === 'blackKnight' ? 4 : (questData.phase === 'dragon' ? 9 : 5);
         const maxB = questKey === 'blackKnight' ? 4 : 5;
-        html += '<div style="display:flex;gap:3px;justify-content:center;margin-bottom:4px;">';
+        html += '<div style="display:flex;gap:3px;justify-content:center;margin-bottom:4px;flex-wrap:wrap;">';
         for (let i = 0; i < maxW; i++) {
           const c = wc[i];
           html += c
             ? '<div class="combat-card white-side" style="width:24px;min-height:32px;font-size:0.625rem;"><div style="font-weight:700;">' + c.value + '</div></div>'
             : '<div style="width:24px;height:32px;border-radius:3px;border:1px dashed rgba(200,180,120,0.3);"></div>';
         }
-        html += '</div><div style="display:flex;gap:3px;justify-content:center;">';
+        html += '</div><div style="display:flex;gap:3px;justify-content:center;flex-wrap:wrap;">';
         for (let i = 0; i < maxB; i++) {
           const c = bc[i];
           html += c
@@ -4638,7 +4717,7 @@
         const fc = questData.fightCards || [];
         const mordredAttached = roomData?.persistentEffects?.mordred === questKey;
         const maxF = mordredAttached ? 6 : 5;
-        html += '<div style="display:flex;gap:3px;justify-content:center;margin-bottom:4px;">';
+        html += '<div style="display:flex;gap:3px;justify-content:center;margin-bottom:4px;flex-wrap:wrap;">';
         for (let i = 0; i < maxF; i++) {
           const c = fc[i];
           html += c
@@ -4649,8 +4728,14 @@
         const w = questData.warriors || 0;
         html += '<div style="font-size:0.8125rem;color:var(--red-bright);">' + '\u2694'.repeat(w) + '\u2501'.repeat(4 - w) + ' ' + w + '/4 Warriors</div>';
       }
+      return html;
+    }
 
-      $('quest-update-content').innerHTML = html;
+    function showQuestUpdatePopup(questKey, questData, desc) {
+      const popup = $('quest-update-popup');
+      $('quest-update-title').textContent = getLocationLabel(questKey);
+
+      $('quest-update-content').innerHTML = renderQuestBoardVisual(questKey, questData);
       $('quest-update-desc').textContent = desc;
 
       popup.classList.remove('hidden', 'fade-out');
@@ -4659,6 +4744,19 @@
         popup.classList.add('fade-out');
         setTimeout(() => popup.classList.add('hidden'), 500);
       }, 3000);
+    }
+
+    // Persistent quest-detail overlay opened by tapping a quest chip.
+    function showQuestDetail(questKey) {
+      const q = cachedQuests?.[questKey];
+      if (!q) return;
+      questDetailKey = questKey;
+      $('quest-detail-title').textContent = getLocationLabel(questKey);
+      $('quest-detail-board').innerHTML = renderQuestBoardVisual(questKey, q);
+      const phase = questKey === 'lancelot' ? (q.phase || 'lancelot') : null;
+      $('quest-detail-pattern').textContent = getQuestPatternText(questKey, phase);
+      $('quest-detail-status').textContent = getQuestStatusInfo(questKey);
+      $('quest-detail-overlay').classList.remove('hidden');
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -7754,7 +7852,11 @@
       const questLabel = getLocationLabel(res.questKey);
       $('combat-title').textContent = questLabel + ' — Combat Resolution';
 
-      let html = '<p style="color:var(--text-dim);font-size:1rem;">White Cards (Knights)</p>' +
+      const patternText = getQuestPatternText(res.questKey, cachedQuests?.lancelot?.phase);
+      let html = patternText
+        ? '<p style="color:var(--gold);font-size:0.875rem;font-weight:600;margin-bottom:0.5rem;">' + patternText + '</p>'
+        : '';
+      html += '<p style="color:var(--text-dim);font-size:1rem;">White Cards (Knights)</p>' +
         '<div class="combat-cards">';
       for (const c of (res.whiteCards || [])) {
         html += '<div class="combat-card white-side"><div class="cc-val">' + (c.value || '?') + '</div><div style="font-size:0.625rem;">Fight</div></div>';
@@ -8414,6 +8516,84 @@
     ];
     let currentRulesTab = 'objective';
 
+    // Single-source card/quest reference text — used by both the Rules overlay and the
+    // per-card / per-quest "?" popups so wording never drifts.
+    const SPECIAL_WHITE_CARDS = [
+      ['Merlin', 7, '3 Merlins played together cancel 1 Special Black card when it is drawn. Or play 1 alone to remove a Siege Engine, remove the last standard Black card on a quest, or remove a Saxon/Pict warrior.'],
+      ['Fate', 1, 'If Loyal: every knight draws 1 White card. If Traitor: reveal yourself and each opponent discards 2 White cards (while hidden you may instead play the Loyal effect).'],
+      ['Piety', 1, 'Gain 3 Life Points, OR give each other knight 1 Life Point (max 6).'],
+      ['Reinforcements', 1, 'Draw 4 White cards, OR let each other knight draw 1 White card.'],
+      ['Heroism', 1, 'Place on any quest; it adds +1 Sword to that quest\'s final outcome (White if won, Black if lost).'],
+      ['Clairvoyance', 1, 'Look at the top 5 Black cards and put them back in any order.'],
+      ['Messenger', 1, 'Give 1 to 3 White cards from your hand to a knight of your choice.'],
+      ['Lady of the Lake', 1, 'If the Excalibur quest is unfinished, move Excalibur 1 space toward victory; otherwise gain 2 Life Points.'],
+      ['Convocation', 1, 'All knights may return to Camelot at once; the gathered knights then draw and share White cards equal to their number.'],
+    ];
+    const SPECIAL_WHITE_DESC = Object.fromEntries(SPECIAL_WHITE_CARDS.map(([n, , d]) => [n, d]));
+
+    const SPECIAL_BLACK_RULES =
+      '<li><b>Morgan 1:</b> One knight volunteers to discard 3, or all discard 1.</li>' +
+      '<li><b>Morgan 2:</b> Draw and apply next 3 Black cards.</li>' +
+      '<li><b>Morgan 3:</b> Add 2 Siege Engines.</li>' +
+      '<li><b>Morgan 4:</b> All knights lose 1 LP.</li>' +
+      '<li><b>Morgan 5:</b> One knight volunteers to lose 2 LP, or all discard 1.</li>' +
+      '<li><b>Desolation (x2):</b> Place on Grail quest (uncancellable by quest action).</li>' +
+      '<li><b>Dark Forest:</b> No Grail cards may be played until a quest is won.</li>' +
+      '<li><b>Guinevere:</b> All knights return to Camelot. Solo quest cards removed. Turn ends.</li>' +
+      '<li><b>Mist of Avalon:</b> Permanent — each lost quest adds 1 extra Black Sword.</li>' +
+      '<li><b>Mordred:</b> Attach to a war; needs extra Fight 5 to win.</li>' +
+      '<li><b>Vivien:</b> No Merlin cards until a quest is won.</li>';
+
+    // Per-quest rules summaries keyed by quest key (saxonWar/pictWar share 'war').
+    const QUEST_RULES = {
+      holyGrail:
+        '<h4>Holy Grail (Group)</h4>' +
+        '<p>Play Grail cards on 7 slots. Win: 7 Grail cards placed. Lose: all slots filled with Despair/Desolation.</p>' +
+        '<p>Victory: 3 White Swords, +1 LP, Holy Grail relic, 7 cards. Defeat: 3 Black Swords, -1 LP.</p>',
+      excalibur:
+        '<h4>Excalibur (Group)</h4>' +
+        '<p>Discard any White card to move Excalibur toward the knights. Black Excalibur cards push it toward evil.</p>' +
+        '<p>Victory: 2 White Swords, +1 LP, Excalibur relic, 7 cards. Defeat: 2 Black Swords, -1 LP.</p>',
+      blackKnight:
+        '<h4>Black Knight (Solo, Perpetual)</h4>' +
+        '<p>Play Fight cards in two pairs of distinct values (e.g. AA BB — 4 slots). Compare sum vs the 4 Black Knight cards. Higher wins. Ties = Evil.</p>' +
+        '<p>Victory: 1 White Sword, +1 LP, 3 cards. Defeat: 1 Black Sword, -1 LP.</p>',
+      lancelot:
+        '<h4>Lancelot / Dragon (Solo / Group)</h4>' +
+        '<p>Lancelot: full house — three of a kind + a pair (e.g. AAA BB, 5 cards). Dragon: three distinct three-of-a-kinds (e.g. AAA BBB CCC, 9 cards). Compare sums; ties = Evil.</p>' +
+        '<p>Lancelot Victory: 1 White Sword, +1 LP, Armor relic, 4 cards. Dragon Victory: 2 White Swords, +2 LP, 7 cards.</p>',
+      war:
+        '<h4>Saxon & Pict Wars (Group, Perpetual)</h4>' +
+        '<p>Play Fight cards in an ascending straight (1‑2‑3‑4‑5). Lose if the 4th warrior is placed.</p>' +
+        '<p>Victory: 1 White Sword, +1 LP, 4 cards. Defeat: 1 Black Sword + 2 Siege Engines, -1 LP.</p>',
+    };
+
+    function getQuestRulesSummary(questKey) {
+      if (questKey === 'saxonWar' || questKey === 'pictWar') return QUEST_RULES.war;
+      return QUEST_RULES[questKey] || '';
+    }
+
+    // Accepted white/fight card pattern for a quest's battle (empty for non-fight quests).
+    function getQuestPatternText(questKey, phase) {
+      if (questKey === 'blackKnight') return 'White cards: two pairs of distinct values (e.g. AA BB)';
+      if (questKey === 'lancelot') {
+        return phase === 'dragon'
+          ? 'White cards: three distinct three-of-a-kinds (e.g. AAA BBB CCC)'
+          : 'White cards: full house — three of a kind + a pair (e.g. AAA BB)';
+      }
+      if (questKey === 'saxonWar' || questKey === 'pictWar') return 'Fight cards: ascending straight 1‑2‑3‑4‑5';
+      return '';
+    }
+
+    // Plain-language summary of a White card in hand (for the per-card "?").
+    function getCardEffectDescription(card) {
+      if (!card) return '';
+      if (card.type === 'fight') return 'Fight card (value ' + card.value + '). Played in combat quests (Black Knight, Lancelot/Dragon), the Saxon/Pict Wars, and Siege Engine fights.';
+      if (card.type === 'grail') return 'Grail card. Played on the Holy Grail quest — 7 Grail cards win it.';
+      if (card.type === 'special') return SPECIAL_WHITE_DESC[card.name] || card.name;
+      return getCardDisplayName(card);
+    }
+
     function getRulesContent(tabId) {
       if (tabId === 'objective') return '' +
         '<h4>Object of the Game</h4>' +
@@ -8440,45 +8620,14 @@
         '<p>Once per turn, lose 1 LP for a second <em>different</em> Heroic Action. If this brings you to 0 LP, complete the action then die.</p>';
 
       if (tabId === 'quests') return '' +
-        '<h4>Holy Grail (Group)</h4>' +
-        '<p>Play Grail cards on 7 slots. Win: 7 Grail cards placed. Lose: all slots filled with Despair/Desolation.</p>' +
-        '<p>Victory: 3 White Swords, +1 LP, Holy Grail relic, 7 cards. Defeat: 3 Black Swords, -1 LP.</p>' +
-        '<h4>Excalibur (Group)</h4>' +
-        '<p>Discard any White card to move Excalibur toward knights. Black Excalibur cards push it toward evil.</p>' +
-        '<p>Victory: 2 White Swords, +1 LP, Excalibur relic, 7 cards. Defeat: 2 Black Swords, -1 LP.</p>' +
-        '<h4>Black Knight (Solo, Perpetual)</h4>' +
-        '<p>Play Fight cards (4 slots). Compare sum vs 4 Black Knight cards. Higher wins. Ties = Evil.</p>' +
-        '<p>Victory: 1 White Sword, +1 LP, 3 cards. Defeat: 1 Black Sword, -1 LP.</p>' +
-        '<h4>Lancelot / Dragon (Solo / Group)</h4>' +
-        '<p>Lancelot: Full house pattern (5 cards). Dragon: 3 three-of-a-kinds (9 cards). Compare sums.</p>' +
-        '<p>Lancelot Victory: 1 White Sword, +1 LP, Armor relic, 4 cards. Dragon Victory: 2 White Swords, +2 LP, 7 cards.</p>' +
-        '<h4>Saxon & Pict Wars (Group, Perpetual)</h4>' +
-        '<p>Play Fight cards in ascending order (1-2-3-4-5). Lose if 4th warrior placed.</p>' +
-        '<p>Victory: 1 White Sword, +1 LP, 4 cards. Defeat: 1 Black Sword + 2 Siege Engines, -1 LP.</p>';
+        QUEST_RULES.holyGrail + QUEST_RULES.excalibur + QUEST_RULES.blackKnight +
+        QUEST_RULES.lancelot + QUEST_RULES.war;
 
       if (tabId === 'cards') return '' +
         '<h4>Special White Cards</h4><ul>' +
-        '<li><b>Merlin (x7):</b> 3 Merlins cancel 1 Special Black card when drawn. Or play 1 to remove siege/warrior/black card.</li>' +
-        '<li><b>Fate (x1):</b> Loyal: all draw 1 card. Traitor: may pretend loyal or reveal (opponents discard 2).</li>' +
-        '<li><b>Piety (x1):</b> Gain 3 LP, or each other knight gains 1 LP.</li>' +
-        '<li><b>Reinforcements (x1):</b> Draw 4 cards, or each other knight draws 1.</li>' +
-        '<li><b>Heroism (x1):</b> Place on quest; adds +1 sword to outcome.</li>' +
-        '<li><b>Clairvoyance (x1):</b> View and reorder top 5 Black cards.</li>' +
-        '<li><b>Messenger (x1):</b> Pass 1-3 cards to any knight.</li>' +
-        '<li><b>Lady of the Lake (x1):</b> Move Excalibur 1 toward knights (or +2 LP if quest done).</li>' +
-        '<li><b>Convocation (x1):</b> All knights may return to Camelot; draw/share cards.</li></ul>' +
-        '<h4>Special Black Cards</h4><ul>' +
-        '<li><b>Morgan 1:</b> One knight volunteers to discard 3, or all discard 1.</li>' +
-        '<li><b>Morgan 2:</b> Draw and apply next 3 Black cards.</li>' +
-        '<li><b>Morgan 3:</b> Add 2 Siege Engines.</li>' +
-        '<li><b>Morgan 4:</b> All knights lose 1 LP.</li>' +
-        '<li><b>Morgan 5:</b> One knight volunteers to lose 2 LP, or all discard 1.</li>' +
-        '<li><b>Desolation (x2):</b> Place on Grail quest (uncancellable by quest action).</li>' +
-        '<li><b>Dark Forest:</b> No Grail cards may be played until a quest is won.</li>' +
-        '<li><b>Guinevere:</b> All knights return to Camelot. Solo quest cards removed. Turn ends.</li>' +
-        '<li><b>Mist of Avalon:</b> Permanent — each lost quest adds 1 extra Black Sword.</li>' +
-        '<li><b>Mordred:</b> Attach to a war; needs extra Fight 5 to win.</li>' +
-        '<li><b>Vivien:</b> No Merlin cards until a quest is won.</li></ul>';
+        SPECIAL_WHITE_CARDS.map(([n, c, d]) => '<li><b>' + n + ' (x' + c + '):</b> ' + d + '</li>').join('') +
+        '</ul>' +
+        '<h4>Special Black Cards</h4><ul>' + SPECIAL_BLACK_RULES + '</ul>';
 
       if (tabId === 'knights') {
         let html = '<h4>Knight Special Powers</h4><ul>';
@@ -8518,6 +8667,16 @@
 
     function closeRules() {
       $('rules-overlay').classList.add('hidden');
+    }
+
+    // Generic info modal (used by the per-card "?" and the quest-detail "?").
+    function showInfoModal(title, html) {
+      $('info-modal-title').textContent = title;
+      $('info-modal-body').innerHTML = html;
+      $('info-modal').classList.remove('hidden');
+    }
+    function closeInfoModal() {
+      $('info-modal').classList.add('hidden');
     }
 
     function renderRulesOverlay() {
