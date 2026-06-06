@@ -955,7 +955,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v60';
+    const APP_VERSION = 'shadows-v61';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -5209,20 +5209,20 @@
       const merlinCard = myHand.find(c => c.type === 'special' && c.name === 'Merlin');
       if (!merlinCard) { showToast('No Merlin card in hand!'); return; }
 
-      // Remove from hand and discard
+      // Remove from hand (but do NOT discard yet — only discard on successful cancel)
       myHand = myHand.filter(c => c.id !== merlinCard.id);
       await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
-      await requestWhiteDiscard([merlinCard]);
 
       // Increment totalMerlins atomically
       await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/totalMerlins')
         .transaction(current => (current || 0) + 1);
 
-      // Update response (NOT done yet — player can offer more)
+      // Store offered card objects in response for resolution
       const prev = roomData.pendingInteraction?.responses?.[myKnight];
       const prevOffered = prev?.merlinsOffered || 0;
+      const prevCards = prev?.offeredCards || [];
       await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
-        .set({ merlinsOffered: prevOffered + 1 });
+        .set({ merlinsOffered: prevOffered + 1, offeredCards: [...prevCards, merlinCard] });
 
       showToast('Merlin offered! You can offer more or confirm done.');
     }
@@ -5230,8 +5230,9 @@
     async function confirmMerlinDone() {
       const prev = roomData.pendingInteraction?.responses?.[myKnight];
       const offered = prev?.merlinsOffered || 0;
+      const offeredCards = prev?.offeredCards || [];
       await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
-        .set({ done: true, merlinsOffered: offered });
+        .set({ done: true, merlinsOffered: offered, offeredCards });
     }
 
     async function passMerlinOffer() {
@@ -5242,10 +5243,9 @@
         // Decrement totalMerlins
         await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/totalMerlins')
           .transaction(current => Math.max(0, (current || 0) - prevOffered));
-        // Return Merlin cards to hand
-        for (let i = 0; i < prevOffered; i++) {
-          myHand.push({ id: 'merlin_undo_' + Date.now() + '_' + i, type: 'special', name: 'Merlin' });
-        }
+        // Return actual offered cards to hand
+        const offeredCards = prev?.offeredCards || [];
+        myHand.push(...offeredCards);
         await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
         renderHand();
       }
@@ -5265,7 +5265,13 @@
       if (!allDone) return;
 
       if (total === 3) {
-        // Exactly 3 — cancelled!
+        // Exactly 3 — cancelled! Discard offered cards now.
+        const allOffered = [];
+        for (const [kid, resp] of Object.entries(responses)) {
+          if (resp.offeredCards) allOffered.push(...resp.offeredCards);
+        }
+        if (allOffered.length > 0) await requestWhiteDiscard(allOffered);
+
         await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set(null);
         await fbDb.ref('games/' + currentRoom + '/meta/revealedBlackCard').set(null);
         await addLog('info', interaction.card.name + ' was cancelled by Merlin!');
@@ -5286,16 +5292,15 @@
           drawnBy: roomData.currentTurnKnight,
         });
       } else {
-        // Less than 3 — not enough, return Merlins and apply effect
+        // Less than 3 — not enough, return actual Merlin cards to owners
         const updates = {};
         for (const [kid, resp] of Object.entries(responses)) {
-          if (resp.merlinsOffered > 0) {
-            for (let i = 0; i < resp.merlinsOffered; i++) {
-              updates['games/' + currentRoom + '/drawResults/merlinReturn_' + kid + '_' + i] = {
-                knightId: kid,
-                cards: [{ id: 'merlin_return_' + Date.now() + '_' + kid + '_' + i, type: 'special', name: 'Merlin' }]
-              };
-            }
+          if (resp.offeredCards && resp.offeredCards.length > 0) {
+            const key = fbDb.ref('games/' + currentRoom + '/drawResults').push().key;
+            updates['games/' + currentRoom + '/drawResults/' + key] = {
+              knightId: kid,
+              cards: resp.offeredCards
+            };
           }
         }
         updates['games/' + currentRoom + '/meta/pendingInteraction'] = null;
@@ -5375,19 +5380,28 @@
       const totalSelected = Object.values(sel.contributors).reduce((sum, c) => sum + (c.selected || 0), 0);
       if (totalSelected !== 3) { showToast('Select exactly 3 Merlins.'); return; }
 
-      // Return unused Merlins to their owners
+      const responses = roomData?.pendingInteraction?.responses || {};
       const updates = {};
+      const toDiscard = [];
+
       for (const [kid, contrib] of Object.entries(sel.contributors)) {
-        const unused = contrib.offered - (contrib.selected || 0);
-        if (unused > 0) {
-          for (let i = 0; i < unused; i++) {
-            updates['games/' + currentRoom + '/drawResults/merlinReturn_' + kid + '_' + i] = {
-              knightId: kid,
-              cards: [{ id: 'merlin_return_' + Date.now() + '_' + kid + '_' + i, type: 'special', name: 'Merlin' }]
-            };
-          }
+        const offeredCards = responses[kid]?.offeredCards || [];
+        const selected = contrib.selected || 0;
+        // First `selected` cards are used (discarded), rest returned
+        const used = offeredCards.slice(0, selected);
+        const unused = offeredCards.slice(selected);
+        toDiscard.push(...used);
+        if (unused.length > 0) {
+          const key = fbDb.ref('games/' + currentRoom + '/drawResults').push().key;
+          updates['games/' + currentRoom + '/drawResults/' + key] = {
+            knightId: kid,
+            cards: unused
+          };
         }
       }
+
+      if (toDiscard.length > 0) await requestWhiteDiscard(toDiscard);
+
       updates['games/' + currentRoom + '/meta/pendingInteraction'] = null;
       updates['games/' + currentRoom + '/meta/revealedBlackCard'] = null;
       await fbDb.ref().update(updates);
