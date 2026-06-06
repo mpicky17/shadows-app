@@ -6,125 +6,94 @@
 <title>Excalibur — Quest Lost</title>
 <!--
   STANDALONE comic-book animation (BLACK & WHITE): Excalibur lost (Quest LOST).
-  The sword's tip is embedded in a stone; a swamp surrounds the stone, and the
-  stone (with the sword) sinks down into the swamp.
+  The sword's tip is embedded in a stone; a swamp (reeds, cattails, lily pads, mist)
+  surrounds it, and the stone + sword sink together down into the swamp.
   Pure CSS + inline SVG, no dependencies. Auto-plays on load; "Replay" restarts it.
 
-  To embed in the game later: lift the .panel markup + this <style> (scoped under
-  .panel) into an overlay element, show it when the Excalibur quest is LOST, then call
-  panel.classList.add('play') to trigger. Remove the overlay when the existing
-  questResult overlay is dismissed.
+  To embed in the game: lift the .panel markup + this <style> into an overlay, show on
+  Excalibur LOSS, call panel.classList.add('play'); remove when the questResult overlay closes.
 -->
 <style>
-  :root {
-    --ink: #0c0c0c; --steel: #cfcfcf; --steel-hi: #ffffff; --steel-sh: #8f8f8f;
-    --metal: #b8b8b8; --grip: #4a4a4a; --stone1: #4f4f4f; --stone2: #636363; --stone-dk: #232323;
-  }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
     height: 100%;
     font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
     background: #000;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    gap: 1.25rem;
-    -webkit-user-select: none; user-select: none;
+    gap: 1.25rem; -webkit-user-select: none; user-select: none;
   }
-
-  /* ── Comic panel ─────────────────────────────────────────── */
   .panel {
     position: relative;
-    width: min(92vw, 420px);
-    height: min(115vw, 520px);
-    border: 6px solid var(--ink);
-    border-radius: 4px;
-    overflow: hidden;
+    width: min(92vw, 420px); height: min(115vw, 520px);
+    border: 6px solid #0c0c0c; border-radius: 4px; overflow: hidden;
     box-shadow: 0 10px 0 rgba(0,0,0,0.6), 0 18px 40px rgba(0,0,0,0.85);
-    transform: rotate(0.6deg);
-    background: #0e0e0e;
+    transform: rotate(0.6deg); background: #0e0e0e;
   }
   .layer { position: absolute; inset: 0; }
 
-  /* Grayscale murky background */
-  .bg { background: radial-gradient(120% 80% at 50% 28%, #4a4a4a 0%, #232323 48%, #060606 100%); }
+  .bg { background: radial-gradient(125% 85% at 50% 26%, #4c4c4c 0%, #242424 46%, #050505 100%); }
 
-  /* Stone + embedded sword, sink together as one group */
+  /* Stone + embedded sword, sink together */
   .sink-group {
-    position: absolute;
-    left: 50%; bottom: 10%;
-    width: min(74vw, 250px); height: auto;
-    z-index: 2;
+    position: absolute; left: 50%; bottom: 10%;
+    width: min(74vw, 250px); height: auto; z-index: 2;
     transform: translateX(-50%) translateY(0) rotate(0deg);
   }
-  .panel.play .sink-group { animation: sinkGroup 4.2s cubic-bezier(.5,0,.75,.6) both; }
+  .panel.play .sink-group { animation: sinkGroup 4.4s cubic-bezier(.5,0,.75,.55) both; }
   @keyframes sinkGroup {
     0%   { transform: translateX(-50%) translateY(-4px) rotate(0deg); }
     14%  { transform: translateX(-50%) translateY(-9px) rotate(-1.2deg); }
     30%  { transform: translateX(-50%) translateY(6px)  rotate(1.4deg); }
-    100% { transform: translateX(-50%) translateY(285px) rotate(2.5deg); opacity: 0.85; }
+    100% { transform: translateX(-50%) translateY(292px) rotate(2.6deg); opacity: 0.82; }
   }
 
-  /* Swamp water — sits ABOVE the group so submerged parts read as underwater */
+  /* Swamp water (above the group so submerged parts read as underwater) */
   .swamp {
-    top: 60%; bottom: 0; left: 0; right: 0; z-index: 4;
-    background: linear-gradient(to bottom, rgba(55,55,55,0.55) 0%, rgba(24,24,24,0.8) 45%, rgba(6,6,6,0.94) 100%);
-    -webkit-backdrop-filter: blur(1.8px); backdrop-filter: blur(1.8px);
-    border-top: 2px solid rgba(200,200,200,0.6);
-    overflow: hidden;
+    top: 60%; bottom: 0; left: 0; right: 0; z-index: 4; overflow: hidden;
+    background:
+      linear-gradient(to bottom, rgba(60,60,60,0.5) 0%, rgba(30,30,30,0.72) 30%, rgba(14,14,14,0.86) 65%, rgba(5,5,5,0.95) 100%);
+    -webkit-backdrop-filter: blur(2px); backdrop-filter: blur(2px);
   }
-  .swamp::after {
-    content: ''; position: absolute; inset: -20% -20% 0 -20%;
-    background: repeating-linear-gradient(100deg,
-      rgba(200,200,200,0.0) 0px, rgba(200,200,200,0.09) 22px, rgba(200,200,200,0.0) 44px);
-    animation: shimmer 7s linear infinite;
+  .swamp::before { /* drifting caustic shimmer */
+    content: ''; position: absolute; inset: -20% -25% 0 -25%;
+    background: repeating-linear-gradient(102deg, rgba(200,200,200,0) 0px, rgba(200,200,200,0.08) 24px, rgba(200,200,200,0) 48px);
+    animation: shimmer 8s linear infinite;
   }
-  @keyframes shimmer { to { transform: translateX(44px); } }
+  @keyframes shimmer { to { transform: translateX(48px); } }
 
-  /* Reeds along the swamp surface (in front of the stone) */
-  .reeds { top: 0; left: 0; right: 0; bottom: 0; z-index: 5; pointer-events: none; }
+  /* Foam / scum line + lily pads sit right at the surface, in front */
+  .surface { z-index: 5; pointer-events: none; }
+  .reeds { z-index: 6; pointer-events: none; }
 
-  /* Surface ripple rings + bubbles (created in JS) */
-  .fx { z-index: 6; pointer-events: none; }
-  .ring {
-    position: absolute; left: 50%; top: 60%;
-    width: 30px; height: 12px; margin: -6px 0 0 -15px;
-    border: 2px solid rgba(210,210,210,0.8); border-radius: 50%;
-    opacity: 0; animation: ripple 2.0s ease-out both;
-  }
-  @keyframes ripple {
-    0% { opacity: 0; transform: scale(0.3); }
-    20% { opacity: 0.85; }
-    100% { opacity: 0; transform: scale(7); }
-  }
-  .bubble {
-    position: absolute;
-    background: radial-gradient(circle at 35% 30%, rgba(255,255,255,0.95), rgba(150,150,150,0.45) 70%, transparent);
-    border-radius: 50%; opacity: 0; animation: rise 2.4s ease-in both;
-  }
-  @keyframes rise {
-    0% { opacity: 0; transform: translateY(20px) scale(0.6); }
-    25% { opacity: 0.85; }
-    100% { opacity: 0; transform: translateY(-80px) scale(1); }
-  }
+  .fx { z-index: 7; pointer-events: none; }
+  .ring { position: absolute; left: 50%; top: 60%; width: 34px; height: 13px; margin: -6px 0 0 -17px;
+    border: 2px solid rgba(215,215,215,0.8); border-radius: 50%; opacity: 0; animation: ripple 2.0s ease-out both; }
+  @keyframes ripple { 0% { opacity: 0; transform: scale(0.3);} 20% { opacity: 0.85;} 100% { opacity: 0; transform: scale(7);} }
+  .bubble { position: absolute; border-radius: 50%; opacity: 0;
+    background: radial-gradient(circle at 35% 30%, rgba(255,255,255,0.95), rgba(150,150,150,0.4) 70%, transparent);
+    animation: rise 2.4s ease-in both; }
+  @keyframes rise { 0% { opacity: 0; transform: translateY(20px) scale(0.6);} 25% { opacity: 0.85;} 100% { opacity: 0; transform: translateY(-84px) scale(1);} }
 
-  /* Halftone comic shading */
-  .halftone {
-    background-image: radial-gradient(circle, rgba(0,0,0,0.45) 1px, transparent 1.6px);
-    background-size: 6px 6px; mix-blend-mode: multiply; opacity: 0.22; z-index: 7;
-  }
+  /* Drifting mist band over the water */
+  .mist { z-index: 8; pointer-events: none; opacity: 0.0;
+    background: linear-gradient(to bottom, transparent 48%, rgba(225,225,225,0.16) 60%, rgba(225,225,225,0.05) 72%, transparent 82%); }
+  .mist::after { content: ''; position: absolute; inset: 0;
+    background: radial-gradient(60% 40% at 30% 62%, rgba(235,235,235,0.18), transparent 70%),
+                radial-gradient(55% 38% at 75% 64%, rgba(235,235,235,0.14), transparent 70%);
+    animation: drift 11s ease-in-out infinite alternate; }
+  @keyframes drift { 0% { transform: translateX(-16px);} 100% { transform: translateX(16px);} }
+  .panel.play .mist { animation: mistIn 4.4s ease-in both; }
+  @keyframes mistIn { 0% { opacity: 0;} 40% { opacity: 0.7;} 100% { opacity: 1;} }
 
-  /* Cold vignette darkens as the blade is lost */
-  .darken {
-    background: radial-gradient(circle at 50% 58%, transparent 28%, rgba(2,2,2,0.9) 100%);
-    opacity: 0; z-index: 8;
-  }
-  .panel.play .darken { animation: darken 4.2s ease-in both; }
-  @keyframes darken { 0%, 58% { opacity: 0; } 100% { opacity: 0.92; } }
+  .halftone { z-index: 9; background-image: radial-gradient(circle, rgba(0,0,0,0.45) 1px, transparent 1.6px);
+    background-size: 6px 6px; mix-blend-mode: multiply; opacity: 0.22; }
 
-  .replay {
-    font-family: inherit; font-size: 1rem; cursor: pointer;
-    background: transparent; color: #fff; border: 2px solid #fff; border-radius: 8px;
-    padding: 0.5rem 1.5rem; letter-spacing: 0.08em; text-transform: uppercase;
-  }
+  .darken { z-index: 10; background: radial-gradient(circle at 50% 58%, transparent 26%, rgba(2,2,2,0.92) 100%); opacity: 0; }
+  .panel.play .darken { animation: darken 4.4s ease-in both; }
+  @keyframes darken { 0%, 56% { opacity: 0;} 100% { opacity: 0.94;} }
+
+  .replay { font-family: inherit; font-size: 1rem; cursor: pointer; background: transparent; color: #fff;
+    border: 2px solid #fff; border-radius: 8px; padding: 0.5rem 1.5rem; letter-spacing: 0.08em; text-transform: uppercase; }
   .replay:hover, .replay:focus { background: #fff; color: #000; }
 </style>
 </head>
@@ -132,48 +101,97 @@
   <div class="panel" id="panel">
     <div class="layer bg"></div>
 
-    <!-- Stone with the sword's tip embedded, drawn as one sinking group -->
+    <!-- Stone with the sword's tip embedded — sinks as one group -->
     <svg class="sink-group" viewBox="0 0 250 360" fill="none">
-      <!-- sword, point-down, hilt up -->
-      <circle cx="125" cy="22" r="10" fill="var(--metal)" stroke="var(--ink)" stroke-width="2.5"/>
-      <circle cx="125" cy="22" r="3.5" fill="var(--steel-hi)"/>
-      <rect x="117" y="32" width="16" height="48" rx="4" fill="var(--grip)" stroke="var(--ink)" stroke-width="2.5"/>
-      <line x1="118" y1="42" x2="132" y2="46" stroke="#8a8a8a" stroke-width="1.5"/>
-      <line x1="118" y1="54" x2="132" y2="58" stroke="#8a8a8a" stroke-width="1.5"/>
-      <line x1="118" y1="66" x2="132" y2="70" stroke="#8a8a8a" stroke-width="1.5"/>
-      <rect x="96" y="80" width="58" height="15" rx="5" fill="var(--metal)" stroke="var(--ink)" stroke-width="2.5"/>
-      <circle cx="110" cy="87" r="4" fill="var(--stone-dk)" stroke="var(--ink)" stroke-width="1.5"/>
-      <circle cx="140" cy="87" r="4" fill="var(--steel-hi)" stroke="var(--ink)" stroke-width="1.5"/>
-      <!-- blade points down into the stone -->
-      <path d="M108 95 L142 95 L142 150 L125 192 L108 150 Z" fill="var(--steel)" stroke="var(--ink)" stroke-width="2.5" stroke-linejoin="round"/>
-      <path d="M125 95 L134 150 L125 178 Z" fill="var(--steel-hi)" opacity="0.55"/>
+      <defs>
+        <linearGradient id="blade2" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#6a6a6a"/><stop offset="0.16" stop-color="#b6b6b6"/>
+          <stop offset="0.4" stop-color="#fafafa"/><stop offset="0.5" stop-color="#d4d4d4"/>
+          <stop offset="0.6" stop-color="#fafafa"/><stop offset="0.84" stop-color="#ababab"/>
+          <stop offset="1" stop-color="#585858"/>
+        </linearGradient>
+        <linearGradient id="metal2" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#ededed"/><stop offset="0.5" stop-color="#969696"/><stop offset="1" stop-color="#4e4e4e"/>
+        </linearGradient>
+        <linearGradient id="grip2" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#4e4e4e"/><stop offset="1" stop-color="#1a1a1a"/>
+        </linearGradient>
+        <linearGradient id="rock2" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="#767676"/><stop offset="0.5" stop-color="#4f4f4f"/><stop offset="1" stop-color="#262626"/>
+        </linearGradient>
+      </defs>
 
-      <!-- stone with the blade tip embedded in its top -->
-      <path d="M38 332 L58 182 Q66 164 100 160 L150 160 Q184 164 192 182 L212 332 Z"
-            fill="var(--stone1)" stroke="var(--ink)" stroke-width="4" stroke-linejoin="round"/>
-      <path d="M58 182 Q66 164 100 160 L150 160 Q184 164 192 182 L188 196 L62 196 Z" fill="var(--stone2)"/>
-      <rect x="114" y="158" width="22" height="14" rx="3" fill="#121212" stroke="var(--ink)" stroke-width="3"/>
-      <path d="M70 270 L96 262 M158 276 L196 266 M104 306 L132 300" stroke="var(--stone-dk)" stroke-width="3" stroke-linecap="round"/>
+      <!-- sword, point-down -->
+      <circle cx="125" cy="20" r="13" fill="url(#metal2)" stroke="#0c0c0c" stroke-width="2.5"/>
+      <circle cx="125" cy="20" r="5.5" fill="#efefef" stroke="#0c0c0c" stroke-width="1"/>
+      <circle cx="121" cy="16" r="2.2" fill="#fff"/>
+      <rect x="116" y="32" width="18" height="50" rx="3" fill="url(#grip2)" stroke="#0c0c0c" stroke-width="2.5"/>
+      <g stroke="#7c7c7c" stroke-width="2"><line x1="117" y1="37" x2="133" y2="43"/><line x1="117" y1="46" x2="133" y2="52"/><line x1="117" y1="55" x2="133" y2="61"/><line x1="117" y1="64" x2="133" y2="70"/><line x1="117" y1="73" x2="133" y2="79"/></g>
+      <g stroke="#2a2a2a" stroke-width="1.4" opacity="0.8"><line x1="117" y1="43" x2="133" y2="37"/><line x1="117" y1="52" x2="133" y2="46"/><line x1="117" y1="61" x2="133" y2="55"/><line x1="117" y1="70" x2="133" y2="64"/></g>
+      <path d="M94 92 Q125 80 156 92 Q151 101 146 99 Q125 90 104 99 Q99 101 94 92 Z" fill="url(#metal2)" stroke="#0c0c0c" stroke-width="2.5" stroke-linejoin="round"/>
+      <circle cx="95" cy="93" r="4" fill="url(#metal2)" stroke="#0c0c0c" stroke-width="1.5"/>
+      <circle cx="155" cy="93" r="4" fill="url(#metal2)" stroke="#0c0c0c" stroke-width="1.5"/>
+      <!-- blade, tapered, point down, fuller -->
+      <path d="M110 101 L140 101 L136 175 L125 232 L114 175 Z" fill="url(#blade2)" stroke="#0c0c0c" stroke-width="2.3" stroke-linejoin="round"/>
+      <path d="M125 105 L129 175 L125 214 L121 175 Z" fill="#6a6a6a" opacity="0.5"/>
+      <line x1="125" y1="107" x2="125" y2="206" stroke="#ffffff" stroke-width="1.2" opacity="0.65"/>
+
+      <!-- stone, blade tip embedded in its top -->
+      <path d="M30 340 L50 206 Q58 188 98 184 L152 184 Q192 188 200 206 L220 340 Z"
+            fill="url(#rock2)" stroke="#0c0c0c" stroke-width="4" stroke-linejoin="round"/>
+      <!-- lit / shadow facets -->
+      <path d="M58 206 Q66 190 98 186 L132 186 L92 220 Z" fill="#8a8a8a" opacity="0.55"/>
+      <path d="M132 186 L152 184 Q192 188 200 206 L176 226 Z" fill="#373737" opacity="0.7"/>
+      <path d="M92 220 L130 224 L120 310 L74 300 Z" fill="#404040" opacity="0.45"/>
+      <!-- slot + radiating cracks -->
+      <rect x="111" y="182" width="28" height="22" rx="3" fill="#0e0e0e" stroke="#0c0c0c" stroke-width="2"/>
+      <g stroke="#1b1b1b" stroke-width="2.5" stroke-linecap="round" fill="none">
+        <path d="M125 204 L104 256 L92 228"/><path d="M129 204 L160 252 L176 230"/><path d="M119 204 L110 300"/><path d="M133 204 L150 320"/>
+      </g>
+      <g fill="#1d1d1d" opacity="0.55"><ellipse cx="70" cy="300" rx="14" ry="6"/><ellipse cx="178" cy="312" rx="16" ry="7"/><circle cx="104" cy="270" r="3.5"/><circle cx="150" cy="262" r="3"/></g>
+      <g fill="#9a9a9a" opacity="0.45"><circle cx="86" cy="250" r="2.5"/><circle cx="160" cy="246" r="2.5"/></g>
     </svg>
 
     <div class="layer swamp"></div>
 
-    <svg class="layer reeds" viewBox="0 0 420 520" preserveAspectRatio="none" fill="none">
-      <g stroke="#161616" stroke-width="6" stroke-linecap="round" fill="none" opacity="0.9">
-        <path d="M44 520 Q40 380 30 320"/>
-        <path d="M70 520 Q74 400 86 344"/>
-        <path d="M360 520 Q366 384 384 322"/>
-        <path d="M392 520 Q388 410 378 350"/>
+    <!-- surface foam + lily pads at the waterline -->
+    <svg class="layer surface" viewBox="0 0 420 520" preserveAspectRatio="none" fill="none">
+      <!-- foam/scum line along the surface (~60% => y312) -->
+      <path d="M0 312 Q60 306 120 311 T260 311 T420 310" stroke="rgba(220,220,220,0.7)" stroke-width="2.5" fill="none"/>
+      <path d="M0 316 Q70 312 150 316 T320 315 T420 316" stroke="rgba(150,150,150,0.5)" stroke-width="2" fill="none"/>
+      <!-- lily pads -->
+      <g stroke="#0c0c0c" stroke-width="2">
+        <path d="M52 320 a26 9 0 1 0 52 0 a26 9 0 1 0 -52 0 Z" fill="#343434"/>
+        <path d="M78 316 L70 322" stroke="#0c0c0c" stroke-width="2"/>
+        <path d="M300 326 a30 10 0 1 0 60 0 a30 10 0 1 0 -60 0 Z" fill="#2c2c2c"/>
+        <path d="M330 322 L322 329" stroke="#0c0c0c" stroke-width="2"/>
+        <path d="M188 330 a18 6 0 1 0 36 0 a18 6 0 1 0 -36 0 Z" fill="#383838"/>
       </g>
-      <g fill="#161616" opacity="0.9">
-        <ellipse cx="29" cy="316" rx="5" ry="14"/>
-        <ellipse cx="87" cy="340" rx="5" ry="14"/>
-        <ellipse cx="385" cy="318" rx="5" ry="14"/>
-        <ellipse cx="377" cy="346" rx="5" ry="14"/>
+    </svg>
+
+    <!-- cattails / reeds in front -->
+    <svg class="layer reeds" viewBox="0 0 420 520" preserveAspectRatio="none" fill="none">
+      <g stroke="#141414" stroke-width="5" stroke-linecap="round" fill="none">
+        <path d="M40 520 Q34 380 26 300"/>
+        <path d="M64 520 Q70 392 84 318"/>
+        <path d="M366 520 Q372 384 388 300"/>
+        <path d="M398 520 Q392 404 380 332"/>
+      </g>
+      <!-- cattail seed heads -->
+      <g fill="#141414">
+        <rect x="22" y="286" width="9" height="30" rx="4.5"/>
+        <rect x="80" y="304" width="9" height="28" rx="4.5"/>
+        <rect x="384" y="286" width="9" height="30" rx="4.5"/>
+      </g>
+      <!-- thin leaves -->
+      <g stroke="#141414" stroke-width="3" stroke-linecap="round" fill="none" opacity="0.9">
+        <path d="M52 520 Q40 430 60 360"/>
+        <path d="M376 520 Q392 430 372 360"/>
       </g>
     </svg>
 
     <div class="layer fx" id="fx"></div>
+    <div class="layer mist"></div>
     <div class="layer halftone"></div>
     <div class="layer darken"></div>
   </div>
@@ -183,38 +201,28 @@
 <script>
   const panel = document.getElementById('panel');
   const fx = document.getElementById('fx');
-
   function buildFx() {
     fx.innerHTML = '';
-    // ripple rings as the stone settles into and sinks beneath the swamp
-    const ringDelays = [0.9, 1.6, 2.3, 3.0];
-    for (const d of ringDelays) {
-      const r = document.createElement('div');
-      r.className = 'ring';
-      r.style.animationDelay = d.toFixed(2) + 's';
-      fx.appendChild(r);
+    for (const d of [0.9, 1.6, 2.3, 3.0]) {
+      const r = document.createElement('div'); r.className = 'ring';
+      r.style.animationDelay = d.toFixed(2) + 's'; fx.appendChild(r);
     }
-    // bubbles rising around the stone throughout the sink
-    const n = 12;
-    for (let i = 0; i < n; i++) {
-      const b = document.createElement('div');
-      b.className = 'bubble';
-      const size = 4 + Math.random() * 9;
-      b.style.width = b.style.height = size + 'px';
+    for (let i = 0; i < 13; i++) {
+      const b = document.createElement('div'); b.className = 'bubble';
+      const sz = 4 + Math.random() * 9;
+      b.style.width = b.style.height = sz + 'px';
       b.style.left = (50 + (Math.random() * 34 - 17)) + '%';
       b.style.top = (61 + Math.random() * 12) + '%';
-      b.style.animationDelay = (1.0 + Math.random() * 2.2).toFixed(2) + 's';
+      b.style.animationDelay = (1.0 + Math.random() * 2.4).toFixed(2) + 's';
       fx.appendChild(b);
     }
   }
-
   function play() {
     panel.classList.remove('play');
     void panel.offsetWidth;
     buildFx();
     panel.classList.add('play');
   }
-
   document.getElementById('replay').addEventListener('click', play);
   window.addEventListener('load', play);
 </script>
