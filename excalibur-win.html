@@ -5,25 +5,26 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Excalibur — Quest Won</title>
 <!--
-  STANDALONE comic-book animation: Excalibur pulled from the stone (Quest WON).
+  STANDALONE comic-book animation (BLACK & WHITE): Excalibur pulled from the stone (Quest WON).
   Pure CSS + inline SVG, no dependencies. Auto-plays on load; "Replay" restarts it.
+  The sword rests point-down on top of the stone and is pulled straight up.
 
   To embed in the game later: lift the .panel markup + this <style> (scoped under
   .panel) into an overlay element, show it when the Excalibur quest is WON, then call
   panel.classList.add('play') to trigger. Remove the overlay when the existing
-  questResult overlay is dismissed. Palette/font match index.html.
+  questResult overlay is dismissed.
 -->
 <style>
   :root {
-    --gold: #D4A843; --gold-lt: #F3D27A; --gold-dim: #8B7230;
-    --bg-dark: #1A1A2E; --purple: #2D1B4E; --red: #C62828; --blue: #1565C0;
-    --parchment: #F5F0E1; --ink: #120d08;
+    --ink: #0c0c0c; --steel: #dcdcdc; --steel-hi: #ffffff; --steel-sh: #9a9a9a;
+    --metal: #c4c4c4; --grip: #555555; --stone1: #585858; --stone2: #6c6c6c;
+    --stone-dk: #2c2c2c; --paper: #ededed;
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
     height: 100%;
     font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-    background: #0a0a14;
+    background: #000;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     gap: 1.25rem;
     -webkit-user-select: none; user-select: none;
@@ -37,135 +38,105 @@
     border: 6px solid var(--ink);
     border-radius: 4px;
     overflow: hidden;
-    box-shadow: 0 10px 0 rgba(0,0,0,0.55), 0 18px 40px rgba(0,0,0,0.7);
+    box-shadow: 0 10px 0 rgba(0,0,0,0.6), 0 18px 40px rgba(0,0,0,0.8);
     transform: rotate(-0.6deg);
-    background: #0c0a1a;
+    background: #161616;
   }
   .layer { position: absolute; inset: 0; }
 
-  /* Warm radial background */
-  .bg {
-    background: radial-gradient(120% 90% at 50% 78%, var(--purple) 0%, var(--bg-dark) 55%, #08060f 100%);
-  }
+  /* Grayscale radial background */
+  .bg { background: radial-gradient(120% 90% at 50% 74%, #3a3a3a 0%, #1c1c1c 55%, #070707 100%); }
   .panel.play .bg { animation: bgZoom 3.6s ease-out both; }
   @keyframes bgZoom { 0% { transform: scale(1.08); } 100% { transform: scale(1); } }
 
-  /* Radial gold "speed line" burst behind the sword */
-  .rays-wrap {
-    display: flex; align-items: center; justify-content: center;
-    opacity: 0;
-  }
-  .panel.play .rays-wrap { animation: raysIn 2.2s 1.55s ease-out both; }
+  /* Radial white "speed line" burst behind the sword */
+  .rays-wrap { display: flex; align-items: center; justify-content: center; opacity: 0; }
+  .panel.play .rays-wrap { animation: raysIn 2.2s 1.5s ease-out both; }
   @keyframes raysIn {
     0%   { opacity: 0; transform: scale(0.25); }
     35%  { opacity: 0.95; transform: scale(1.25); }
-    100% { opacity: 0.6; transform: scale(1.0); }
+    100% { opacity: 0.55; transform: scale(1.0); }
   }
   .rays {
-    width: 160%; height: 160%;
-    border-radius: 50%;
+    width: 165%; height: 165%; border-radius: 50%;
     background: repeating-conic-gradient(from 0deg at 50% 50%,
-      rgba(243,210,122,0.0) 0deg,
-      rgba(243,210,122,0.55) 3deg,
-      rgba(243,210,122,0.0) 6deg,
-      rgba(243,210,122,0.0) 11deg);
-    -webkit-mask-image: radial-gradient(circle, #000 18%, rgba(0,0,0,0.6) 42%, transparent 72%);
-    mask-image: radial-gradient(circle, #000 18%, rgba(0,0,0,0.6) 42%, transparent 72%);
+      rgba(255,255,255,0.0) 0deg, rgba(255,255,255,0.6) 3deg,
+      rgba(255,255,255,0.0) 6deg, rgba(255,255,255,0.0) 11deg);
+    -webkit-mask-image: radial-gradient(circle, #000 16%, rgba(0,0,0,0.6) 40%, transparent 70%);
+    mask-image: radial-gradient(circle, #000 16%, rgba(0,0,0,0.6) 40%, transparent 70%);
   }
   .panel.play .rays { animation: spin 14s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
 
-  /* Soft glow behind the hilt */
+  /* Soft white glow behind the blade */
   .glow {
-    background: radial-gradient(circle at 50% 46%, rgba(243,210,122,0.85) 0%, rgba(212,168,67,0.35) 22%, transparent 52%);
+    background: radial-gradient(circle at 50% 44%, rgba(255,255,255,0.9) 0%, rgba(255,255,255,0.3) 20%, transparent 50%);
     opacity: 0;
   }
   .panel.play .glow { animation: glowBuild 3.6s ease-in-out both; }
   @keyframes glowBuild {
-    0% { opacity: 0; }
-    35% { opacity: 0.25; }
-    52% { opacity: 1; }
-    62% { opacity: 0.7; }
-    100% { opacity: 0.8; }
+    0% { opacity: 0; } 35% { opacity: 0.2; } 52% { opacity: 1; } 62% { opacity: 0.65; } 100% { opacity: 0.75; }
   }
 
-  /* The stone / anvil — drawn IN FRONT of the sword so the embedded blade is hidden */
-  .stone {
-    bottom: -2px; left: 50%; transform: translateX(-50%);
-    width: 78%; height: 38%;
-    z-index: 5; pointer-events: none;
-  }
+  /* The stone — drawn IN FRONT so the embedded tip is hidden */
+  .stone { bottom: -2px; left: 50%; transform: translateX(-50%); width: 80%; height: 40%; z-index: 5; pointer-events: none; }
 
-  /* The sword (rises out of the stone) */
+  /* The sword: point-DOWN, tip resting on the stone, pulled straight up */
   .sword {
-    left: 50%; top: 50%;
-    width: 64px; height: 256px;
-    z-index: 3;
-    /* starts embedded blade-down (rotated 180deg): hilt up, blade in the stone */
-    transform: translate(-50%, 40px) rotate(180deg);
+    left: 50%; top: 50%; width: 64px; height: 256px; z-index: 3;
+    transform: translate(-50%, -18px) rotate(180deg); /* point-down, tip in the stone's top */
   }
   .panel.play .sword { animation: heroPull 3.0s cubic-bezier(.18,.7,.2,1) both; }
   @keyframes heroPull {
-    /* embedded blade-down, with an anticipation shake */
-    0%   { transform: translate(-50%, 40px) rotate(180deg); }
-    9%   { transform: translate(-50%, 36px) rotate(178deg); }
-    16%  { transform: translate(-50%, 46px) rotate(182deg); }
-    24%  { transform: translate(-50%, 36px) rotate(178deg); }
-    32%  { transform: translate(-50%, 44px) rotate(181deg); }
-    40%  { transform: translate(-50%, 40px) rotate(180deg); }
-    /* yanked free with a flourish flip to a blade-up hero pose */
-    58%  { transform: translate(-50%, -158px) rotate(360deg); }
-    66%  { transform: translate(-50%, -134px) rotate(360deg); }
-    100% { transform: translate(-50%, -134px) rotate(360deg); }
+    /* resting point-down with the tip in the stone, with an anticipation shake */
+    0%   { transform: translate(-50%, -18px) rotate(180deg); }
+    9%   { transform: translate(-50%, -14px) rotate(181deg); }
+    16%  { transform: translate(-50%, -22px) rotate(179deg); }
+    24%  { transform: translate(-50%, -14px) rotate(181deg); }
+    32%  { transform: translate(-50%, -21px) rotate(179.5deg); }
+    40%  { transform: translate(-50%, -18px) rotate(180deg); }
+    /* pulled straight up (stays point-down), slight overshoot then settle */
+    58%  { transform: translate(-50%, -158px) rotate(180deg); }
+    66%  { transform: translate(-50%, -134px) rotate(180deg); }
+    100% { transform: translate(-50%, -134px) rotate(180deg); }
   }
-  /* Inner element does a gentle infinite hero-bob once raised */
+  /* gentle infinite hero-bob once raised */
   .sword-art { width: 100%; height: 100%; }
   .panel.play .sword-art { animation: bob 2.6s 2.1s ease-in-out infinite; }
   @keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-7px); } }
 
-  /* Dust puff at the stone when the blade is yanked free */
+  /* Dust puff at the stone when the blade is pulled free */
   .dust {
-    bottom: 26%; left: 50%; width: 150px; height: 60px;
-    transform: translateX(-50%) scale(0.4);
-    border-radius: 50%;
-    background: radial-gradient(circle, rgba(200,185,150,0.55), transparent 70%);
+    bottom: 28%; left: 50%; width: 150px; height: 56px;
+    transform: translateX(-50%) scale(0.4); border-radius: 50%;
+    background: radial-gradient(circle, rgba(220,220,220,0.5), transparent 70%);
     opacity: 0; z-index: 4;
   }
-  .panel.play .dust { animation: dust 1.1s 1.7s ease-out both; }
+  .panel.play .dust { animation: dust 1.1s 1.55s ease-out both; }
   @keyframes dust {
     0% { opacity: 0; transform: translateX(-50%) scale(0.4); }
-    25% { opacity: 0.8; }
-    100% { opacity: 0; transform: translateX(-50%) scale(1.6); }
+    25% { opacity: 0.8; } 100% { opacity: 0; transform: translateX(-50%) scale(1.6); }
   }
 
   /* Halftone comic shading */
   .halftone {
-    background-image: radial-gradient(circle, rgba(0,0,0,0.35) 1px, transparent 1.6px);
-    background-size: 6px 6px;
-    mix-blend-mode: multiply;
-    opacity: 0.18; z-index: 7;
+    background-image: radial-gradient(circle, rgba(0,0,0,0.4) 1px, transparent 1.6px);
+    background-size: 6px 6px; mix-blend-mode: multiply; opacity: 0.2; z-index: 7;
   }
   .panel.play .halftone { animation: htPulse 3.6s ease-in-out both; }
-  @keyframes htPulse { 0%,100% { opacity: 0.16; } 55% { opacity: 0.3; } }
+  @keyframes htPulse { 0%,100% { opacity: 0.18; } 55% { opacity: 0.32; } }
 
   /* White climax flash */
   .flash { background: #fff; opacity: 0; z-index: 8; }
   .panel.play .flash { animation: flash 3.4s ease-out both; }
-  @keyframes flash {
-    0%, 50% { opacity: 0; }
-    54% { opacity: 0.85; }
-    60% { opacity: 0; }
-    100% { opacity: 0; }
-  }
+  @keyframes flash { 0%, 50% { opacity: 0; } 54% { opacity: 0.9; } 60% { opacity: 0; } 100% { opacity: 0; } }
 
-  /* Sparkles (created in JS, appended into .sparkles) */
+  /* Sparkles (created in JS) */
   .sparkles { z-index: 6; pointer-events: none; }
   .spark {
-    position: absolute; width: 8px; height: 8px;
-    background: var(--gold-lt);
+    position: absolute; width: 8px; height: 8px; background: #fff;
     clip-path: polygon(50% 0%, 60% 40%, 100% 50%, 60% 60%, 50% 100%, 40% 60%, 0% 50%, 40% 40%);
-    opacity: 0;
-    animation: twinkle 1.6s ease-out both;
+    opacity: 0; animation: twinkle 1.6s ease-out both;
   }
   @keyframes twinkle {
     0% { opacity: 0; transform: scale(0.2); }
@@ -175,11 +146,10 @@
 
   .replay {
     font-family: inherit; font-size: 1rem; cursor: pointer;
-    background: transparent; color: var(--gold);
-    border: 2px solid var(--gold); border-radius: 8px;
+    background: transparent; color: #fff; border: 2px solid #fff; border-radius: 8px;
     padding: 0.5rem 1.5rem; letter-spacing: 0.08em; text-transform: uppercase;
   }
-  .replay:hover, .replay:focus { background: var(--gold); color: var(--bg-dark); }
+  .replay:hover, .replay:focus { background: #fff; color: #000; }
 </style>
 </head>
 <body>
@@ -190,22 +160,20 @@
 
     <div class="layer sword">
       <div class="sword-art">
+        <!-- drawn point-up; the .sword element is rotated 180deg so it points DOWN -->
         <svg viewBox="0 0 64 256" width="100%" height="100%" fill="none">
-          <!-- blade -->
-          <path d="M32 6 L40 30 L40 150 L24 150 L24 30 Z" fill="#ECECEC" stroke="var(--ink)" stroke-width="2.5" stroke-linejoin="round"/>
-          <line x1="32" y1="22" x2="32" y2="146" stroke="#B9B9B9" stroke-width="2"/>
-          <!-- crossguard -->
-          <rect x="8" y="150" width="48" height="14" rx="5" fill="var(--gold)" stroke="var(--ink)" stroke-width="2.5"/>
-          <circle cx="18" cy="157" r="4" fill="var(--red)" stroke="var(--ink)" stroke-width="1.5"/>
-          <circle cx="46" cy="157" r="4" fill="var(--blue)" stroke="var(--ink)" stroke-width="1.5"/>
-          <!-- grip -->
-          <rect x="25" y="164" width="14" height="46" rx="4" fill="#7A4A1E" stroke="var(--ink)" stroke-width="2.5"/>
-          <line x1="26" y1="172" x2="38" y2="176" stroke="#D4A843" stroke-width="1.5"/>
-          <line x1="26" y1="182" x2="38" y2="186" stroke="#D4A843" stroke-width="1.5"/>
-          <line x1="26" y1="192" x2="38" y2="196" stroke="#D4A843" stroke-width="1.5"/>
-          <!-- pommel -->
-          <circle cx="32" cy="218" r="9" fill="var(--gold)" stroke="var(--ink)" stroke-width="2.5"/>
-          <circle cx="32" cy="218" r="3.5" fill="var(--gold-lt)"/>
+          <path d="M32 6 L40 30 L40 150 L24 150 L24 30 Z" fill="var(--steel)" stroke="var(--ink)" stroke-width="2.5" stroke-linejoin="round"/>
+          <path d="M32 6 L36 30 L36 150 L32 150 Z" fill="var(--steel-hi)" opacity="0.7"/>
+          <line x1="32" y1="22" x2="32" y2="146" stroke="var(--steel-sh)" stroke-width="2"/>
+          <rect x="8" y="150" width="48" height="14" rx="5" fill="var(--metal)" stroke="var(--ink)" stroke-width="2.5"/>
+          <circle cx="18" cy="157" r="4" fill="var(--stone-dk)" stroke="var(--ink)" stroke-width="1.5"/>
+          <circle cx="46" cy="157" r="4" fill="var(--steel-hi)" stroke="var(--ink)" stroke-width="1.5"/>
+          <rect x="25" y="164" width="14" height="46" rx="4" fill="var(--grip)" stroke="var(--ink)" stroke-width="2.5"/>
+          <line x1="26" y1="172" x2="38" y2="176" stroke="#888" stroke-width="1.5"/>
+          <line x1="26" y1="182" x2="38" y2="186" stroke="#888" stroke-width="1.5"/>
+          <line x1="26" y1="192" x2="38" y2="196" stroke="#888" stroke-width="1.5"/>
+          <circle cx="32" cy="218" r="9" fill="var(--metal)" stroke="var(--ink)" stroke-width="2.5"/>
+          <circle cx="32" cy="218" r="3.5" fill="var(--steel-hi)"/>
         </svg>
       </div>
     </div>
@@ -213,12 +181,11 @@
     <div class="layer dust"></div>
 
     <svg class="layer stone" viewBox="0 0 240 120" preserveAspectRatio="xMidYMax meet" fill="none">
-      <!-- anvil-like stone with a slot where the blade was -->
       <path d="M10 116 L26 54 Q34 40 60 38 L180 38 Q206 40 214 54 L230 116 Z"
-            fill="#3a3550" stroke="var(--ink)" stroke-width="4" stroke-linejoin="round"/>
-      <path d="M26 54 Q34 40 60 38 L180 38 Q206 40 214 54 L210 64 L30 64 Z" fill="#4a4566"/>
-      <rect x="104" y="34" width="32" height="12" rx="3" fill="#16131f" stroke="var(--ink)" stroke-width="3"/>
-      <path d="M40 92 L70 84 M150 88 L196 80 M96 104 L120 100" stroke="#2a2640" stroke-width="3" stroke-linecap="round"/>
+            fill="var(--stone1)" stroke="var(--ink)" stroke-width="4" stroke-linejoin="round"/>
+      <path d="M26 54 Q34 40 60 38 L180 38 Q206 40 214 54 L210 64 L30 64 Z" fill="var(--stone2)"/>
+      <rect x="104" y="34" width="32" height="12" rx="3" fill="#141414" stroke="var(--ink)" stroke-width="3"/>
+      <path d="M40 92 L70 84 M150 88 L196 80 M96 104 L120 100" stroke="var(--stone-dk)" stroke-width="3" stroke-linecap="round"/>
     </svg>
 
     <div class="layer sparkles" id="sparkles"></div>
@@ -238,9 +205,8 @@
     for (let i = 0; i < n; i++) {
       const s = document.createElement('div');
       s.className = 'spark';
-      // cluster around the raised blade (upper-center of the panel)
-      const x = 50 + (Math.random() * 46 - 23);
-      const y = 20 + (Math.random() * 34);
+      const x = 50 + (Math.random() * 44 - 22);
+      const y = 12 + (Math.random() * 38);
       const size = 6 + Math.random() * 10;
       s.style.left = x + '%';
       s.style.top = y + '%';
@@ -252,7 +218,7 @@
 
   function play() {
     panel.classList.remove('play');
-    void panel.offsetWidth; // force reflow so animations restart
+    void panel.offsetWidth;
     buildSparkles();
     panel.classList.add('play');
   }
