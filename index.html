@@ -955,7 +955,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v61';
+    const APP_VERSION = 'shadows-v62';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -4948,8 +4948,11 @@
           updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
         }
         // Solo quests: remove white cards when knights forced to abandon
+        // Note: lancelot in Dragon phase is a GROUP quest — don't remove cards
         for (const qk of ['blackKnight', 'lancelot']) {
           const q = cachedQuests?.[qk];
+          const isDragon = qk === 'lancelot' && q?.phase === 'dragon';
+          if (isDragon) continue; // Dragon is a group quest, handled below
           if (q && q.status === 'active' && (q.whiteCards || []).length > 0) {
             await requestWhiteDiscard(q.whiteCards);
             updates['games/' + currentRoom + '/quests/' + qk + '/whiteCards'] = [];
@@ -4959,8 +4962,8 @@
             updates['games/' + currentRoom + '/quests/' + qk + '/knightsPresent'] = [];
           }
         }
-        // Group quests: just clear knightsPresent
-        for (const qk of ['excalibur', 'holyGrail', 'saxonWar', 'pictWar']) {
+        // Group quests: just clear knightsPresent (includes Dragon phase of lancelot)
+        for (const qk of ['excalibur', 'holyGrail', 'saxonWar', 'pictWar', 'lancelot']) {
           const q = cachedQuests?.[qk];
           if (q && q.status === 'active' && (q.knightsPresent || []).length > 0) {
             updates['games/' + currentRoom + '/quests/' + qk + '/knightsPresent'] = [];
