@@ -9,6 +9,9 @@ Traitor.jpg
 ~$*
 ~WRL*
 
+# Full-res video masters & scratch encodes (only the compressed root .mp4s are committed)
+_fullres/
+
 # Node
 node_modules/
 

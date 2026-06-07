@@ -683,6 +683,12 @@
     .overlay-minimize-btn { position: absolute; top: 0.5rem; right: 0.75rem; background: var(--border); color: var(--text-dim); border: none; border-radius: 4px; padding: 0.25rem 0.5rem; font-size: 0.75rem; cursor: pointer; z-index: 10; }
     .overlay-minimized { position: fixed; right: 0.75rem; bottom: 0.75rem; z-index: 201; padding: 0.5rem 1rem; color: var(--gold); font-size: 1rem; cursor: pointer; white-space: nowrap; background: rgba(20,15,10,0.95); border: 2px solid var(--gold); border-radius: 24px; box-shadow: 0 2px 12px rgba(0,0,0,0.6); }
     .overlay-minimized.hidden { display: none; }
+    .cinematic-overlay { position: fixed; inset: 0; z-index: 260; background: #000; display: flex; align-items: center; justify-content: center; }
+    .cinematic-overlay.hidden { display: none; }
+    #cinematic-video { width: 100%; height: 100%; object-fit: contain; }
+    #btn-cinematic-skip { position: absolute; top: 1rem; right: 1rem; z-index: 2; }
+    #btn-cinematic-sound { position: absolute; bottom: 1.25rem; left: 50%; transform: translateX(-50%); z-index: 2; }
+    #btn-cinematic-sound.hidden { display: none; }
     @keyframes cardPlayFlash {
       0% { opacity: 1; transform: scale(1); }
       50% { opacity: 0.8; transform: scale(1.05); }
@@ -954,6 +960,11 @@
       </div>
     </div>
     <div class="overlay-minimized hidden" id="combat-minimized">Quest Result ▸</div>
+    <div class="cinematic-overlay hidden" id="cinematic-overlay">
+      <video id="cinematic-video" playsinline preload="auto"></video>
+      <button class="btn hidden" id="btn-cinematic-sound">🔊 Tap for sound</button>
+      <button class="btn" id="btn-cinematic-skip">Skip</button>
+    </div>
     <div id="quest-update-popup" class="quest-update-popup hidden">
       <div id="quest-update-title" style="font-weight:700;font-size:1rem;margin-bottom:0.5rem;"></div>
       <div id="quest-update-content"></div>
@@ -1016,7 +1027,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v65';
+    const APP_VERSION = 'shadows-v66';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1100,6 +1111,14 @@
     let myHand = [];
     let selectedCardId = null;  // card selected in hand (for setup)
     let mySetupShared = false;  // have I shared a card in setup?
+    // Quest cinematics: map event → video file (static assets at repo root, streamed from network).
+    const CINEMATICS = {
+      dragonWin:     'dragon-win.mp4',
+      dragonLose:    'dragon-lose.mp4',
+      excaliburWin:  'sword-win.mp4',
+      excaliburLose: 'sword-lose.mp4',
+    };
+    let lastCinematicId = null;  // dedupe cinematic playback across re-renders/reconnects
     let setupMinimized = false; // setup overlay minimized so player can peek at loyalty
     let cardShareResolving = false; // re-entry guard for collaborative card-share finalization
     let questDetailKey = null;  // quest key currently shown in the quest-detail overlay
@@ -1883,6 +1902,7 @@
           renderPendingInteraction();
           onCombatResolutionChanged();
           onQuestResultChanged();
+          onCinematicChanged();
         }
       });
 
@@ -2022,6 +2042,7 @@
       myHand = [];
       selectedCardId = null;
       mySetupShared = false;
+      lastCinematicId = null;
       setupMinimized = false;
       cardShareResolving = false;
       cachedBoard = null;
@@ -2397,6 +2418,18 @@
       }
       setupOverlayMinimize('card-reveal-overlay', 'reveal-minimized', 'btn-minimize-reveal');
       setupOverlayMinimize('combat-overlay', 'combat-minimized', 'btn-minimize-combat');
+      // Cinematic overlay controls (Skip + tap-for-sound fallback)
+      {
+        const cinV = $('cinematic-video');
+        const skipBtn = $('btn-cinematic-skip');
+        const soundBtn = $('btn-cinematic-sound');
+        if (cinV) cinV.addEventListener('ended', endCinematic);
+        if (skipBtn) skipBtn.addEventListener('click', endCinematic);
+        if (soundBtn) soundBtn.addEventListener('click', () => {
+          cinV.muted = false;
+          soundBtn.classList.add('hidden');
+        });
+      }
       // Setup overlay: minimize so players can peek at their loyalty card behind it.
       // Tracks setupMinimized so the meta-status listener doesn't re-open it.
       {
@@ -4882,6 +4915,7 @@
           questKey: 'excalibur', result: 'defeat', position: newPos, fromEvil: true,
           summary: '2 Black Swords, -1 LP. Excalibur removed from game.',
         };
+        updates['games/' + currentRoom + '/meta/cinematic'] = { type: 'excaliburLose', id: Date.now() };
 
         await fbDb.ref().update(updates);
         await addLog('quest', 'Excalibur quest LOST! 2 Black Swords, -1 LP. Excalibur removed from game.');
@@ -7745,6 +7779,41 @@
       $('combat-minimized').classList.add('hidden');
     }
 
+    function onCinematicChanged() {
+      const cin = roomData?.cinematic;
+      if (!cin || cin.id === lastCinematicId) return;
+      lastCinematicId = cin.id;
+      const src = CINEMATICS[cin.type];
+      if (!src) return;
+      const overlay = $('cinematic-overlay');
+      const v = $('cinematic-video');
+      const soundBtn = $('btn-cinematic-sound');
+      soundBtn.classList.add('hidden');
+      if (!v.src.endsWith(src)) v.src = src;
+      try { v.currentTime = 0; } catch (e) {}
+      overlay.classList.remove('hidden');
+      // Attempt playback with sound; fall back to muted + a tap-for-sound button if autoplay is blocked.
+      v.muted = false;
+      v.play().catch(() => {
+        v.muted = true;
+        v.play().catch(() => {});
+        soundBtn.classList.remove('hidden');
+      });
+    }
+
+    function endCinematic() {
+      const overlay = $('cinematic-overlay');
+      const v = $('cinematic-video');
+      v.pause();
+      overlay.classList.add('hidden');
+      $('btn-cinematic-sound').classList.add('hidden');
+      // Only the turn player clears the shared flag; other clients just stop locally
+      // (id-dedupe prevents replay if the flag lingers).
+      if (isMyTurn() && currentRoom) {
+        fbDb.ref('games/' + currentRoom + '/meta/cinematic').set(null);
+      }
+    }
+
     function onCombatResolutionChanged() {
       const resolution = roomData?.combatResolution;
       const overlay = $('combat-overlay');
@@ -8006,6 +8075,7 @@
             updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
           }
           await shareQuestSpoils(7, knightsOnQuest);
+          updates['games/' + currentRoom + '/meta/cinematic'] = { type: 'dragonWin', id: Date.now() };
           await addLog('quest', "Dragon's Quest WON! 2 White Swords, +2 LP, 7 cards shared.");
         }
       } else {
@@ -8027,6 +8097,7 @@
           for (const kid of knightsOnQuest) {
             updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.max(0, (cachedPlayers[kid]?.life ?? 4) - 2);
           }
+          updates['games/' + currentRoom + '/meta/cinematic'] = { type: 'dragonLose', id: Date.now() };
           await addLog('quest', "Dragon's Quest LOST! 2 Black Swords, -2 LP.");
         }
         // Mist of Avalon: extra black sword on any quest loss
@@ -8133,6 +8204,7 @@
           questKey: 'excalibur', result: 'victory', position: q.position || 0,
           summary: '2 White Swords, +1 LP each, 7 cards, Excalibur relic to ' + getKnightDisplayName(myKnight),
         };
+        updates['games/' + currentRoom + '/meta/cinematic'] = { type: 'excaliburWin', id: Date.now() };
         await fbDb.ref().update(updates);
         await shareQuestSpoils(7, knightsOnQuest);
         await addLog('quest', 'Quest for Excalibur WON! 2 White Swords, +1 LP each, 7 cards, Excalibur relic to ' + getKnightDisplayName(myKnight));
