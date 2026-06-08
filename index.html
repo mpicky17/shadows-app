@@ -1027,7 +1027,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v67';
+    const APP_VERSION = 'shadows-v68';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -3574,6 +3574,13 @@
         return;
       }
 
+      // Draw N White cards and discard them (quest won with no knight present to receive spoils)
+      if (deckType === 'drawDiscardWhite') {
+        await hostDrawWhiteToDiscard(deckPath, request.count || 0);
+        await fbDb.ref('games/' + currentRoom + '/drawRequests/' + requestId).remove();
+        return;
+      }
+
       // Write all loyalties for results screen (non-host triggered game end)
       if (deckType === 'writeLoyalties') {
         await writeAllLoyalties();
@@ -3689,6 +3696,44 @@
       } else {
         await fbDb.ref('games/' + currentRoom + '/drawRequests').push().set({
           knightId: myKnight, deckType: 'discardWhite', cards,
+          timestamp: firebase.database.ServerValue.TIMESTAMP,
+        });
+      }
+    }
+
+    async function hostDrawWhiteToDiscard(deckPath, count) {
+      // Host-side: pop up to `count` White cards (reshuffling when the pile empties) and
+      // move them straight to the white discard pile.
+      let pile = (await fbDb.ref(deckPath + 'whiteDraw').once('value')).val() || [];
+      const drawn = [];
+      for (let i = 0; i < count; i++) {
+        if (pile.length === 0) {
+          await fbDb.ref(deckPath + 'whiteDraw').set([]); // persist empty so reshuffle merges correctly
+          if (!(await reshuffleDecksIfNeeded(deckPath))) break;
+          pile = (await fbDb.ref(deckPath + 'whiteDraw').once('value')).val() || [];
+          if (pile.length === 0) break;
+        }
+        drawn.push(pile.pop());
+      }
+      if (drawn.length === 0) return;
+      const discard = (await fbDb.ref(deckPath + 'whiteDiscard').once('value')).val() || [];
+      discard.push(...drawn);
+      const updates = {};
+      updates[deckPath + 'whiteDraw'] = pile;
+      updates[deckPath + 'whiteDiscard'] = discard;
+      updates['games/' + currentRoom + '/decks/whiteDrawCount'] = pile.length;
+      await fbDb.ref().update(updates);
+    }
+
+    async function drawWhiteToDiscard(count) {
+      // Draw `count` White cards and discard them (no recipient). Host does it directly;
+      // a non-host completer routes through a drawDiscardWhite request.
+      if (isHost) {
+        const deckPath = 'private/' + currentRoom + '/' + hostDeckKey + '/hostDecks/';
+        await hostDrawWhiteToDiscard(deckPath, count);
+      } else {
+        await fbDb.ref('games/' + currentRoom + '/drawRequests').push().set({
+          knightId: myKnight, deckType: 'drawDiscardWhite', count,
           timestamp: firebase.database.ServerValue.TIMESTAMP,
         });
       }
@@ -6336,7 +6381,13 @@
         const p = cachedPlayers[kid];
         return p && p.alive !== false && !p.isRevealed;
       });
-      if (participants.length === 0) return;
+      if (participants.length === 0) {
+        // Quest won with nobody present (e.g. Excalibur via Lady of the Lake, or a Dragon
+        // quest that resolves with no knight there): the spoils cards are still drawn from
+        // the deck and discarded, for deck integrity.
+        await drawWhiteToDiscard(count);
+        return;
+      }
       if (participants.length === 1) {
         await distributeCardsAmongKnights(count, participants);
         return;
@@ -6534,10 +6585,15 @@
     async function finalizeCardShareRandom(interaction, forcedByKnight) {
       const pool = [...(interaction.pool || [])];
       const participants = interaction.participants || [];
+      // Deal starting with the quest completer (the distributor) so they get the first
+      // card and any leftover when the count doesn't divide evenly.
+      let order = participants;
+      const di = participants.indexOf(interaction.distributor);
+      if (di > 0) order = [...participants.slice(di), ...participants.slice(0, di)];
       shuffle(pool);
       const byKnight = {};
       for (let i = 0; i < pool.length; i++) {
-        const kid = participants[i % participants.length];
+        const kid = order[i % order.length];
         (byKnight[kid] = byKnight[kid] || []).push(pool[i]);
       }
       const who = forcedByKnight ? getKnightDisplayName(forcedByKnight) : 'A knight';
@@ -7660,9 +7716,9 @@
       const handLimit = getHandLimit();
       if (myHand.length >= handLimit) { showToast('Hand is full!'); return; }
 
-      let count = myKnight === 'gawain' ? 3 : 2;
-      // Cap so we don't exceed hand limit
-      count = Math.min(count, handLimit - myHand.length);
+      // No cap on the draw amount: a knight holding <12 draws their full 2 (Gawain 3),
+      // even if that ends above 12. The only restriction is the >=12 gate above.
+      const count = myKnight === 'gawain' ? 3 : 2;
 
       await requestCardDraw('white', count);
       await addLog('info', getKnightDisplayName(myKnight) + ' drew ' + count + ' White card' + (count > 1 ? 's' : '') + ' at the Round Table');
@@ -9159,6 +9215,11 @@
         updates['games/' + currentRoom + '/quests/excalibur/position'] = (q.position || 0) + 1;
         await addLog('info', getKnightDisplayName(myKnight) + ' used Merlin to move Excalibur toward knights');
       } else if (questKey === 'holyGrail') {
+        // GRAY AREA (intentional, per user 2026-06-07): this removes a placed Despair OR
+        // Desolation. The Book of Quests says a placed Desolation behaves "like a regular
+        // Despair" (supports removing it here). A supplemental FAQ suggests its Special
+        // nature persists once placed (removable only by a Grail card). Keeping it removable
+        // for now — flip the condition to `=== 'despair'` only if the FAQ ruling is adopted.
         const cards = [...(q.cards || [])];
         for (let i = cards.length - 1; i >= 0; i--) {
           if (cards[i].type === 'despair' || cards[i].type === 'desolation') { cards.splice(i, 1); break; }
