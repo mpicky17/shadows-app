@@ -1027,7 +1027,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v66';
+    const APP_VERSION = 'shadows-v67';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1119,6 +1119,10 @@
       excaliburLose: 'sword-lose.mp4',
     };
     let lastCinematicId = null;  // dedupe cinematic playback across re-renders/reconnects
+    // Percival's Lancelot's-Armor decline flow (client-local UI stage; only the acting player interacts)
+    let armorUiStage = null;       // 'bottom' | 'decide' | 'confirm'
+    let armorUiBottomIdx = null;   // index of the card chosen to go to the bottom
+    let lastArmorChoiceId = null;  // resets the stage when a new armorChoice appears
     let setupMinimized = false; // setup overlay minimized so player can peek at loyalty
     let cardShareResolving = false; // re-entry guard for collaborative card-share finalization
     let questDetailKey = null;  // quest key currently shown in the quest-detail overlay
@@ -3392,38 +3396,39 @@
         return;
       }
 
-      // Lancelot's Armor: draw 2 cards for choice
+      // Lancelot's Armor: draw 2 cards for choice (pop available first, reshuffle for the 2nd)
       if (deckType === 'armorReveal') {
-        const deckSnap = await fbDb.ref(deckPath + 'blackDraw').once('value');
-        const drawPile = deckSnap.val() || [];
-        if (drawPile.length === 0) {
-          const reshuffled = await reshuffleDecksIfNeeded(deckPath);
-          if (!reshuffled) {
-            await fbDb.ref('games/' + currentRoom + '/drawRequests/' + requestId).remove();
-            return;
-          }
-          await processDrawRequest(request, requestId);
-          return;
-        }
-        const card1 = drawPile.pop();
-        const card2 = drawPile.length > 0 ? drawPile.pop() : null;
-        const cards = card2 ? [card1, card2] : [card1];
+        const isPercivalDecline = (knightId === 'percival' && !roomData.percivalPeeked);
+        const { card1, card2 } = await armorDrawTwoCards(deckPath);
         const updates = {};
-        updates[deckPath + 'blackDraw'] = drawPile;
-        updates['games/' + currentRoom + '/decks/blackDrawCount'] = drawPile.length;
-        updates['games/' + currentRoom + '/meta/armorChoice'] = { cards, forKnight: knightId };
+        if (!card1) {
+          // Deck totally empty — nothing to draw.
+        } else if (card2) {
+          updates['games/' + currentRoom + '/meta/armorChoice'] = buildArmorChoice([card1, card2], knightId, isPercivalDecline);
+          if (isPercivalDecline) updates['games/' + currentRoom + '/meta/percivalPeeked'] = true;
+        } else if (isPercivalDecline) {
+          updates['games/' + currentRoom + '/meta/armorChoice'] = buildArmorChoice([card1], knightId, true);
+          updates['games/' + currentRoom + '/meta/percivalPeeked'] = true;
+        } else {
+          // Single card, non-Percival: discard + reveal directly.
+          const discard = (await fbDb.ref(deckPath + 'blackDiscard').once('value')).val() || [];
+          discard.push(card1);
+          updates[deckPath + 'blackDiscard'] = discard;
+          updates['games/' + currentRoom + '/meta/revealedBlackCard'] = { card: card1, drawnBy: knightId, status: 'revealed', questPhase: cachedQuests?.lancelot?.phase || 'lancelot' };
+        }
         updates['games/' + currentRoom + '/drawRequests/' + requestId] = null;
         await fbDb.ref().update(updates);
         return;
       }
 
-      // Lancelot's Armor: process card selection
+      // Lancelot's Armor: process card selection (play)
       if (deckType === 'armorSelect') {
         const choice = (await fbDb.ref('games/' + currentRoom + '/meta/armorChoice').once('value')).val();
         if (!choice) { await fbDb.ref('games/' + currentRoom + '/drawRequests/' + requestId).remove(); return; }
+        const cards = choice.cards || [];
         const chosenIndex = request.chosenIndex || 0;
-        const chosen = choice.cards[chosenIndex];
-        const unchosen = choice.cards[1 - chosenIndex];
+        const chosen = cards[chosenIndex];
+        const unchosen = cards.length > 1 ? cards[1 - chosenIndex] : null;
         const discardSnap = await fbDb.ref(deckPath + 'blackDiscard').once('value');
         const discard = discardSnap.val() || [];
         discard.push(chosen);
@@ -3435,9 +3440,18 @@
         updates[deckPath + 'blackDiscard'] = discard;
         updates['games/' + currentRoom + '/decks/blackDrawCount'] = drawPile2.length;
         updates['games/' + currentRoom + '/meta/armorChoice'] = null;
+        updates['games/' + currentRoom + '/meta/evilActionTaken'] = true;
         updates['games/' + currentRoom + '/meta/revealedBlackCard'] = { card: chosen, drawnBy: knightId, status: 'revealed', questPhase: cachedQuests?.lancelot?.phase || 'lancelot' };
         updates['games/' + currentRoom + '/drawRequests/' + requestId] = null;
         await fbDb.ref().update(updates);
+        return;
+      }
+
+      // Lancelot's Armor: Percival declines (kept card back on top, other to the bottom)
+      if (deckType === 'armorDecline') {
+        const choice = (await fbDb.ref('games/' + currentRoom + '/meta/armorChoice').once('value')).val();
+        if (choice) await applyArmorDecline(deckPath, choice, request.bottomIndex || 0);
+        await fbDb.ref('games/' + currentRoom + '/drawRequests/' + requestId).remove();
         return;
       }
 
@@ -3462,7 +3476,10 @@
         updates[deckPath + 'blackDraw'] = drawPile;
         updates[deckPath + 'blackDiscard'] = discard;
         updates['games/' + currentRoom + '/decks/blackDrawCount'] = drawPile.length;
-        updates['games/' + currentRoom + '/meta/revealedBlackCard'] = { card, drawnBy: knightId, status: 'revealed', questPhase: cachedQuests?.lancelot?.phase || 'lancelot' };
+        updates['games/' + currentRoom + '/meta/revealedBlackCard'] = {
+          card, drawnBy: knightId, status: 'revealed', questPhase: cachedQuests?.lancelot?.phase || 'lancelot',
+          ...(request.forcedApply ? { forcedApply: true } : {}),
+        };
         updates['games/' + currentRoom + '/drawRequests/' + requestId] = null;
         await fbDb.ref().update(updates);
         return;
@@ -4015,21 +4032,27 @@
           }
 
           const isPercival = roomData.currentTurnKnight === 'percival';
-          const canPeek = isPercival && !roomData.percivalPeeked;
+          const hasArmor = cachedPlayers[myKnight]?.relics?.lancelotArmor;
+          const canPeek = isPercival && !hasArmor && !roomData.percivalPeeked;
+          // After Percival declines an Armor draw, he must take a different Evil Action (no re-draw).
+          const declined = roomData.percivalDeclined;
 
           let html = '<div class="turn-actions">' +
             '<h3>Progression of Evil</h3>' +
-            '<p style="color:var(--text-dim);font-size:0.875rem;margin-bottom:0.5rem;">Choose one evil action:</p>' +
-            '<div class="action-buttons">' +
-            '<button class="btn btn-evil" id="btn-draw-black">Draw Black Card</button>' +
-            '<button class="btn btn-evil" id="btn-siege">Add Siege Engine</button>' +
+            '<p style="color:var(--text-dim);font-size:0.875rem;margin-bottom:0.5rem;">' +
+            (declined ? 'Card put back — choose a Siege Engine or Lose 1 Life Point:' : 'Choose one evil action:') +
+            '</p>' +
+            '<div class="action-buttons">';
+          if (!declined) html += '<button class="btn btn-evil" id="btn-draw-black">Draw Black Card</button>';
+          html += '<button class="btn btn-evil" id="btn-siege">Add Siege Engine</button>' +
             '<button class="btn btn-evil" id="btn-lose-life">Lose 1 Life Point</button>';
           if (canPeek) {
             html += '<button class="btn btn-heroic" id="btn-percival-peek" style="margin-top:0.25rem;">Percival: Peek at Top Black Card</button>';
           }
           html += '</div></div>';
           area.innerHTML = html;
-          document.getElementById('btn-draw-black').addEventListener('click', () => performEvilAction('drawBlack'));
+          const drawBtn = document.getElementById('btn-draw-black');
+          if (drawBtn) drawBtn.addEventListener('click', () => performEvilAction('drawBlack'));
           document.getElementById('btn-siege').addEventListener('click', () => performEvilAction('siegeEngine'));
           document.getElementById('btn-lose-life').addEventListener('click', () => performEvilAction('loseLife'));
           const peekBtn = document.getElementById('btn-percival-peek');
@@ -4056,7 +4079,9 @@
       document.querySelectorAll('.btn-evil').forEach(b => b.disabled = true);
       try {
         if (actionType === 'drawBlack') {
-          if (myKnight === 'percival' && !roomData.percivalPeeked) {
+          const hasArmor = cachedPlayers[myKnight]?.relics?.lancelotArmor;
+          // Armored Percival's "look" is the draw-2 itself, so skip the single-card peek.
+          if (myKnight === 'percival' && !hasArmor && !roomData.percivalPeeked) {
             await percivalPeekAction();
           } else {
             await drawBlackCard();
@@ -4149,74 +4174,122 @@
     //  SECTION 12C: Draw Black Card & Reveal
     // ═══════════════════════════════════════════════════════════════════
 
-    async function drawBlackCard() {
-      await fbDb.ref('games/' + currentRoom + '/meta/evilActionTaken').set(true);
+    async function armorDrawTwoCards(deckPath) {
+      // Lancelot's Armor "draw 2": pop the available card first, then reshuffle the
+      // discard for the 2nd if the pile runs out — so the last real card stays an option.
+      // Returns { card1, card2 } (card2 null only if a single black card exists overall).
+      let pile = (await fbDb.ref(deckPath + 'blackDraw').once('value')).val() || [];
+      if (pile.length === 0) {
+        if (!(await reshuffleDecksIfNeeded(deckPath))) return { card1: null, card2: null };
+        pile = (await fbDb.ref(deckPath + 'blackDraw').once('value')).val() || [];
+        if (pile.length === 0) return { card1: null, card2: null };
+      }
+      const card1 = pile.pop();
+      let card2 = null;
+      if (pile.length > 0) {
+        card2 = pile.pop();
+      } else {
+        // Draw pile exhausted after card1 — persist the empty pile so the reshuffle
+        // doesn't re-add card1, then draw the 2nd from the reshuffled discard.
+        await fbDb.ref(deckPath + 'blackDraw').set([]);
+        if (await reshuffleDecksIfNeeded(deckPath)) {
+          pile = (await fbDb.ref(deckPath + 'blackDraw').once('value')).val() || [];
+          if (pile.length > 0) card2 = pile.pop();
+        }
+      }
+      await fbDb.ref(deckPath + 'blackDraw').set(pile);
+      await fbDb.ref('games/' + currentRoom + '/decks/blackDrawCount').set(pile.length);
+      return { card1, card2 };
+    }
 
+    async function drawSingleBlackAndReveal(deckPath, drawnBy, forcedApply) {
+      // Draw one black card (reshuffle if empty) and reveal it. Returns true if drawn.
+      let pile = (await fbDb.ref(deckPath + 'blackDraw').once('value')).val() || [];
+      if (pile.length === 0) {
+        if (!(await reshuffleDecksIfNeeded(deckPath))) return false;
+        pile = (await fbDb.ref(deckPath + 'blackDraw').once('value')).val() || [];
+        if (pile.length === 0) return false;
+      }
+      const card = pile.pop();
+      const discard = (await fbDb.ref(deckPath + 'blackDiscard').once('value')).val() || [];
+      discard.push(card);
+      const updates = {};
+      updates[deckPath + 'blackDraw'] = pile;
+      updates[deckPath + 'blackDiscard'] = discard;
+      updates['games/' + currentRoom + '/decks/blackDrawCount'] = pile.length;
+      updates['games/' + currentRoom + '/meta/revealedBlackCard'] = {
+        card, drawnBy, status: 'revealed', questPhase: cachedQuests?.lancelot?.phase || 'lancelot',
+        ...(forcedApply ? { forcedApply: true } : {}),
+      };
+      await fbDb.ref().update(updates);
+      return true;
+    }
+
+    async function revealArmorSingleCard(deckPath, card, drawnBy) {
+      // Discard an already-drawn single Armor card (degenerate 1-card case) and reveal it.
+      const discard = (await fbDb.ref(deckPath + 'blackDiscard').once('value')).val() || [];
+      discard.push(card);
+      const updates = {};
+      updates[deckPath + 'blackDiscard'] = discard;
+      updates['games/' + currentRoom + '/meta/revealedBlackCard'] = {
+        card, drawnBy, status: 'revealed', questPhase: cachedQuests?.lancelot?.phase || 'lancelot',
+      };
+      await fbDb.ref().update(updates);
+    }
+
+    async function applyArmorDecline(deckPath, choice, bottomIdx) {
+      // Percival declines: bottom one card (if two), put the kept card back on top,
+      // leave evilActionTaken false, and force a different Evil Action.
+      const cards = choice.cards || [];
+      const single = cards.length < 2;
+      const bottomCard = single ? null : cards[bottomIdx];
+      const keepCard = single ? cards[0] : cards[1 - bottomIdx];
+      const pile = (await fbDb.ref(deckPath + 'blackDraw').once('value')).val() || [];
+      if (bottomCard) pile.unshift(bottomCard); // bottom of pile (index 0; draws pop from the end)
+      if (keepCard) pile.push(keepCard);        // top of pile (next drawn)
+      const updates = {};
+      updates[deckPath + 'blackDraw'] = pile;
+      updates['games/' + currentRoom + '/decks/blackDrawCount'] = pile.length;
+      updates['games/' + currentRoom + '/meta/armorChoice'] = null;
+      updates['games/' + currentRoom + '/meta/percivalDeclined'] = true;
+      await fbDb.ref().update(updates);
+    }
+
+    function buildArmorChoice(cards, forKnight, canDecline) {
+      return { cards, forKnight, canDecline, single: cards.length < 2, id: Date.now() };
+    }
+
+    async function drawBlackCard() {
       const hasArmor = cachedPlayers[myKnight]?.relics?.lancelotArmor;
+      // Percival's once-per-turn "look": with the Armor he sees 2 cards and may decline.
+      const isPercivalDecline = (myKnight === 'percival' && hasArmor && !roomData.percivalPeeked);
+      // Commit the evil action now — EXCEPT for the decline case (deferred until he plays).
+      if (!isPercivalDecline) {
+        await fbDb.ref('games/' + currentRoom + '/meta/evilActionTaken').set(true);
+      }
 
       if (isHost) {
         const deckPath = 'private/' + currentRoom + '/' + hostDeckKey + '/hostDecks/';
-        const deckSnap = await fbDb.ref(deckPath + 'blackDraw').once('value');
-        const drawPile = deckSnap.val() || [];
-
-        if (drawPile.length === 0) {
-          const reshuffled = await reshuffleDecksIfNeeded(deckPath);
-          if (!reshuffled) return;
-          // Re-read the deck after reshuffle
-          const freshSnap = await fbDb.ref(deckPath + 'blackDraw').once('value');
-          const freshPile = freshSnap.val() || [];
-          if (freshPile.length === 0) return;
-
-          if (hasArmor && freshPile.length >= 2) {
-            const card1 = freshPile.pop();
-            const card2 = freshPile.pop();
-            const u = {};
-            u[deckPath + 'blackDraw'] = freshPile;
-            u['games/' + currentRoom + '/decks/blackDrawCount'] = freshPile.length;
-            u['games/' + currentRoom + '/meta/armorChoice'] = { cards: [card1, card2], forKnight: myKnight };
-            await fbDb.ref().update(u);
-            return;
+        if (hasArmor) {
+          const { card1, card2 } = await armorDrawTwoCards(deckPath);
+          if (!card1) { await advanceToHeroicPhase(); return; }
+          if (card2) {
+            const updates = {};
+            updates['games/' + currentRoom + '/meta/armorChoice'] = buildArmorChoice([card1, card2], myKnight, isPercivalDecline);
+            if (isPercivalDecline) updates['games/' + currentRoom + '/meta/percivalPeeked'] = true;
+            await fbDb.ref().update(updates);
+          } else if (isPercivalDecline) {
+            const updates = {};
+            updates['games/' + currentRoom + '/meta/armorChoice'] = buildArmorChoice([card1], myKnight, true);
+            updates['games/' + currentRoom + '/meta/percivalPeeked'] = true;
+            await fbDb.ref().update(updates);
+          } else {
+            await revealArmorSingleCard(deckPath, card1, myKnight);
           }
-
-          const freshCard = freshPile.pop();
-          const u = {};
-          u[deckPath + 'blackDraw'] = freshPile;
-          u['games/' + currentRoom + '/decks/blackDrawCount'] = freshPile.length;
-          const dSnap = await fbDb.ref(deckPath + 'blackDiscard').once('value');
-          const d = dSnap.val() || [];
-          d.push(freshCard);
-          u[deckPath + 'blackDiscard'] = d;
-          u['games/' + currentRoom + '/meta/revealedBlackCard'] = { card: freshCard, drawnBy: myKnight, status: 'revealed', questPhase: cachedQuests?.lancelot?.phase || 'lancelot' };
-          await fbDb.ref().update(u);
           return;
         }
-
-        if (hasArmor && drawPile.length >= 2) {
-          // Lancelot's Armor: draw 2, pick 1
-          const card1 = drawPile.pop();
-          const card2 = drawPile.pop();
-          const updates = {};
-          updates[deckPath + 'blackDraw'] = drawPile;
-          updates['games/' + currentRoom + '/decks/blackDrawCount'] = drawPile.length;
-          updates['games/' + currentRoom + '/meta/armorChoice'] = { cards: [card1, card2], forKnight: myKnight };
-          await fbDb.ref().update(updates);
-          return;
-        }
-
-        const card = drawPile.pop();
-        const updates = {};
-        updates[deckPath + 'blackDraw'] = drawPile;
-        updates['games/' + currentRoom + '/decks/blackDrawCount'] = drawPile.length;
-
-        const discardSnap = await fbDb.ref(deckPath + 'blackDiscard').once('value');
-        const discard = discardSnap.val() || [];
-        discard.push(card);
-        updates[deckPath + 'blackDiscard'] = discard;
-
-        updates['games/' + currentRoom + '/meta/revealedBlackCard'] = {
-          card, drawnBy: myKnight, status: 'revealed', questPhase: cachedQuests?.lancelot?.phase || 'lancelot',
-        };
-        await fbDb.ref().update(updates);
+        const ok = await drawSingleBlackAndReveal(deckPath, myKnight, false);
+        if (!ok) await advanceToHeroicPhase();
       } else {
         const reqType = hasArmor ? 'armorReveal' : 'blackReveal';
         await fbDb.ref('games/' + currentRoom + '/drawRequests').push({
@@ -4227,149 +4300,159 @@
     }
 
     async function triggerMorgan2Draw() {
-      // Same as drawBlackCard but without setting evilActionTaken
+      // Morgan 2 forces drawing & applying the next 3 Black cards. Per the Book of Quests,
+      // these forced cards are immune to Lancelot's Armor, Merlin, and Excalibur, so each is a
+      // plain single draw tagged forcedApply (suppression handled in renderRevealActions).
+      // evilActionTaken is intentionally not set (the initial Morgan 2 already committed it).
       const currentKnight = roomData?.currentTurnKnight;
       if (myKnight !== currentKnight) return; // Only current turn player draws
-      const hasArmor = cachedPlayers[myKnight]?.relics?.lancelotArmor;
 
       if (isHost) {
         const deckPath = 'private/' + currentRoom + '/' + hostDeckKey + '/hostDecks/';
-        const deckSnap = await fbDb.ref(deckPath + 'blackDraw').once('value');
-        const drawPile = deckSnap.val() || [];
-
-        if (drawPile.length === 0) {
-          const reshuffled = await reshuffleDecksIfNeeded(deckPath);
-          if (!reshuffled) {
-            await fbDb.ref('games/' + currentRoom + '/meta/morgan2Remaining').set(0);
-            await advanceToHeroicPhase();
-            return;
-          }
-          // Re-read the deck after reshuffle
-          const freshSnap = await fbDb.ref(deckPath + 'blackDraw').once('value');
-          const freshPile = freshSnap.val() || [];
-          if (freshPile.length === 0) {
-            await fbDb.ref('games/' + currentRoom + '/meta/morgan2Remaining').set(0);
-            await advanceToHeroicPhase();
-            return;
-          }
-
-          if (hasArmor && freshPile.length >= 2) {
-            const card1 = freshPile.pop();
-            const card2 = freshPile.pop();
-            const u = {};
-            u[deckPath + 'blackDraw'] = freshPile;
-            u['games/' + currentRoom + '/decks/blackDrawCount'] = freshPile.length;
-            u['games/' + currentRoom + '/meta/armorChoice'] = { cards: [card1, card2], forKnight: myKnight };
-            await fbDb.ref().update(u);
-            return;
-          }
-
-          const freshCard = freshPile.pop();
-          const u = {};
-          u[deckPath + 'blackDraw'] = freshPile;
-          u['games/' + currentRoom + '/decks/blackDrawCount'] = freshPile.length;
-          const dSnap = await fbDb.ref(deckPath + 'blackDiscard').once('value');
-          const d = dSnap.val() || [];
-          d.push(freshCard);
-          u[deckPath + 'blackDiscard'] = d;
-          u['games/' + currentRoom + '/meta/revealedBlackCard'] = { card: freshCard, drawnBy: myKnight, status: 'revealed', questPhase: cachedQuests?.lancelot?.phase || 'lancelot' };
-          await fbDb.ref().update(u);
-          return;
+        const ok = await drawSingleBlackAndReveal(deckPath, myKnight, true);
+        if (!ok) {
+          await fbDb.ref('games/' + currentRoom + '/meta/morgan2Remaining').set(0);
+          await advanceToHeroicPhase();
         }
-
-        if (hasArmor && drawPile.length >= 2) {
-          const card1 = drawPile.pop();
-          const card2 = drawPile.pop();
-          const updates = {};
-          updates[deckPath + 'blackDraw'] = drawPile;
-          updates['games/' + currentRoom + '/decks/blackDrawCount'] = drawPile.length;
-          updates['games/' + currentRoom + '/meta/armorChoice'] = { cards: [card1, card2], forKnight: myKnight };
-          await fbDb.ref().update(updates);
-          return;
-        }
-
-        const card = drawPile.pop();
-        const updates = {};
-        updates[deckPath + 'blackDraw'] = drawPile;
-        updates['games/' + currentRoom + '/decks/blackDrawCount'] = drawPile.length;
-
-        const discardSnap = await fbDb.ref(deckPath + 'blackDiscard').once('value');
-        const discard = discardSnap.val() || [];
-        discard.push(card);
-        updates[deckPath + 'blackDiscard'] = discard;
-
-        updates['games/' + currentRoom + '/meta/revealedBlackCard'] = {
-          card, drawnBy: myKnight, status: 'revealed', questPhase: cachedQuests?.lancelot?.phase || 'lancelot',
-        };
-        await fbDb.ref().update(updates);
       } else {
-        const reqType = hasArmor ? 'armorReveal' : 'blackReveal';
         await fbDb.ref('games/' + currentRoom + '/drawRequests').push({
-          knightId: myKnight, deckType: reqType, count: hasArmor ? 2 : 1,
+          knightId: myKnight, deckType: 'blackReveal', forcedApply: true, count: 1,
           timestamp: firebase.database.ServerValue.TIMESTAMP,
         });
       }
     }
 
+    function armorCardPanelHtml(c) {
+      // Opens a card panel div with name/value/description; caller closes the div (after any button).
+      const name = getBlackCardDisplayName(c);
+      const val = getBlackCardValue(c);
+      return '<div style="flex:1;text-align:center;border:1px solid var(--text-dim);border-radius:8px;padding:0.75rem;min-width:120px;">' +
+        '<div style="color:var(--gold);font-size:1rem;">' + name + '</div>' +
+        (val !== null ? '<div style="font-size:1.25rem;font-weight:bold;">' + val + '</div>' : '') +
+        '<div style="color:var(--text-dim);font-size:0.75rem;margin:0.25rem 0;">' + getBlackCardDescription(c) + '</div>';
+    }
+
     function renderArmorChoiceOverlay(area) {
       const choice = roomData.armorChoice;
       if (!choice) return;
+      const cards = choice.cards || [];
 
-      if (choice.forKnight === myKnight) {
-        const cards = choice.cards;
+      if (choice.forKnight !== myKnight) {
+        const name = getKnightDisplayName(choice.forKnight);
+        area.innerHTML = '<div class="turn-actions"><p class="waiting-text">' + name +
+          (cards.length > 1 ? ' is choosing between 2 Black cards' : ' is resolving a Black card') +
+          ' (Lancelot\'s Armor)...</p></div>';
+        return;
+      }
+
+      // Non-declinable (non-Percival, or look already used): original single-step "pick 1 to play".
+      if (!choice.canDecline) {
         let html = '<div class="turn-actions"><h3>Lancelot\'s Armor</h3>' +
           '<p style="color:var(--text-dim);font-size:0.875rem;">Choose 1 card to play. The other goes under the Black pile.</p>' +
           '<div style="display:flex;gap:1rem;justify-content:center;margin-top:0.5rem;">';
         for (let i = 0; i < cards.length; i++) {
-          const c = cards[i];
-          const name = getBlackCardDisplayName(c);
-          const val = getBlackCardValue(c);
-          html += '<div style="flex:1;text-align:center;border:1px solid var(--text-dim);border-radius:8px;padding:0.75rem;">' +
-            '<div style="color:var(--gold);font-size:1rem;">' + name + '</div>' +
-            (val !== null ? '<div style="font-size:1.25rem;font-weight:bold;">' + val + '</div>' : '') +
-            '<div style="color:var(--text-dim);font-size:0.75rem;margin:0.25rem 0;">' + getBlackCardDescription(c) + '</div>' +
-            '<button class="btn btn-evil" data-armor-idx="' + i + '">Choose</button></div>';
+          html += armorCardPanelHtml(cards[i]) + '<button class="btn btn-evil" data-armor-idx="' + i + '">Choose</button></div>';
         }
         html += '</div></div>';
         area.innerHTML = html;
         area.querySelectorAll('[data-armor-idx]').forEach(btn => {
           btn.addEventListener('click', () => selectArmorCard(parseInt(btn.dataset.armorIdx)));
         });
-      } else {
-        const name = getKnightDisplayName(choice.forKnight);
-        area.innerHTML = '<div class="turn-actions"><p class="waiting-text">' + name + ' is choosing between 2 Black cards (Lancelot\'s Armor)...</p></div>';
+        return;
       }
+
+      // Percival (canDecline): bottom -> decide -> confirm flow. Reset stage on a new choice.
+      if (choice.id !== lastArmorChoiceId) {
+        lastArmorChoiceId = choice.id;
+        armorUiStage = choice.single ? 'decide' : 'bottom';
+        armorUiBottomIdx = null;
+      }
+
+      // Step 1 — choose which card goes to the bottom (two-card case only).
+      if (armorUiStage === 'bottom' && cards.length > 1) {
+        let html = '<div class="turn-actions"><h3>Lancelot\'s Armor — Sir Percival</h3>' +
+          '<p style="color:var(--text-dim);font-size:0.875rem;">Choose which card to place at the BOTTOM of the Black pile.</p>' +
+          '<div style="display:flex;gap:1rem;justify-content:center;margin-top:0.5rem;">';
+        for (let i = 0; i < cards.length; i++) {
+          html += armorCardPanelHtml(cards[i]) + '<button class="btn btn-evil" data-bottom-idx="' + i + '">Send to bottom</button></div>';
+        }
+        html += '</div></div>';
+        area.innerHTML = html;
+        area.querySelectorAll('[data-bottom-idx]').forEach(btn => {
+          btn.addEventListener('click', () => { armorUiBottomIdx = parseInt(btn.dataset.bottomIdx); armorUiStage = 'decide'; renderTurnActions(); });
+        });
+        return;
+      }
+
+      const keepIdx = choice.single ? 0 : (1 - armorUiBottomIdx);
+      const keepCard = cards[keepIdx];
+
+      // Step 3 — confirmation popup before declining.
+      if (armorUiStage === 'confirm') {
+        area.innerHTML = '<div class="turn-actions"><h3>Lancelot\'s Armor — Sir Percival</h3>' +
+          '<p style="color:var(--gold);font-size:1rem;">Are you sure you don\'t want to play this card and will choose a Siege Engine or lose a Life Point as your Evil Deed?</p>' +
+          '<div class="action-buttons">' +
+          '<button class="btn btn-evil" id="btn-armor-decline-yes">Yes, put it back</button>' +
+          '<button class="btn btn-heroic" id="btn-armor-decline-no" style="margin-top:0.5rem;">No, go back</button>' +
+          '</div></div>';
+        document.getElementById('btn-armor-decline-yes').addEventListener('click', () => armorDecline(armorUiBottomIdx));
+        document.getElementById('btn-armor-decline-no').addEventListener('click', () => { armorUiStage = 'decide'; renderTurnActions(); });
+        return;
+      }
+
+      // Step 2 — decide on the remaining card: play it or put it back.
+      area.innerHTML = '<div class="turn-actions"><h3>Lancelot\'s Armor — Sir Percival</h3>' +
+        '<p style="color:var(--text-dim);font-size:0.875rem;">Play this card, or put it back on top and take a different Evil Action.</p>' +
+        '<div style="display:flex;justify-content:center;margin-top:0.5rem;">' +
+        armorCardPanelHtml(keepCard) + '</div></div>' +
+        '<div class="action-buttons">' +
+        '<button class="btn btn-evil" id="btn-armor-play">Play This Card</button>' +
+        '<button class="btn btn-heroic" id="btn-armor-putback" style="margin-top:0.5rem;">Put It Back &amp; Choose Another Evil Action</button>' +
+        '</div></div>';
+      document.getElementById('btn-armor-play').addEventListener('click', () => selectArmorCard(keepIdx));
+      document.getElementById('btn-armor-putback').addEventListener('click', () => { armorUiStage = 'confirm'; renderTurnActions(); });
     }
 
     async function selectArmorCard(chosenIndex) {
       const choice = roomData.armorChoice;
       if (!choice) return;
-      const chosen = choice.cards[chosenIndex];
-      const unchosen = choice.cards[1 - chosenIndex];
+      const cards = choice.cards || [];
+      const chosen = cards[chosenIndex];
+      const unchosen = cards.length > 1 ? cards[1 - chosenIndex] : null;
 
       if (isHost) {
         const deckPath = 'private/' + currentRoom + '/' + hostDeckKey + '/hostDecks/';
-        // Add chosen to discard
-        const discardSnap = await fbDb.ref(deckPath + 'blackDiscard').once('value');
-        const discard = discardSnap.val() || [];
+        const discard = (await fbDb.ref(deckPath + 'blackDiscard').once('value')).val() || [];
         discard.push(chosen);
-        // Put unchosen under the black draw pile (index 0)
-        const drawSnap = await fbDb.ref(deckPath + 'blackDraw').once('value');
-        const drawPile = drawSnap.val() || [];
-        drawPile.unshift(unchosen);
+        const drawPile = (await fbDb.ref(deckPath + 'blackDraw').once('value')).val() || [];
+        if (unchosen) drawPile.unshift(unchosen); // under the Black draw pile (index 0)
         const updates = {};
         updates[deckPath + 'blackDraw'] = drawPile;
         updates[deckPath + 'blackDiscard'] = discard;
         updates['games/' + currentRoom + '/decks/blackDrawCount'] = drawPile.length;
         updates['games/' + currentRoom + '/meta/armorChoice'] = null;
+        updates['games/' + currentRoom + '/meta/evilActionTaken'] = true;
         updates['games/' + currentRoom + '/meta/revealedBlackCard'] = {
-          card: chosen, drawnBy: myKnight, status: 'revealed',
+          card: chosen, drawnBy: myKnight, status: 'revealed', questPhase: cachedQuests?.lancelot?.phase || 'lancelot',
         };
         await fbDb.ref().update(updates);
       } else {
-        // Non-host: send selection to host
         await fbDb.ref('games/' + currentRoom + '/drawRequests').push({
           knightId: myKnight, deckType: 'armorSelect', chosenIndex,
+          timestamp: firebase.database.ServerValue.TIMESTAMP,
+        });
+      }
+    }
+
+    async function armorDecline(bottomIdx) {
+      const choice = roomData.armorChoice;
+      if (!choice) return;
+      if (isHost) {
+        const deckPath = 'private/' + currentRoom + '/' + hostDeckKey + '/hostDecks/';
+        await applyArmorDecline(deckPath, choice, bottomIdx || 0);
+      } else {
+        await fbDb.ref('games/' + currentRoom + '/drawRequests').push({
+          knightId: myKnight, deckType: 'armorDecline', bottomIndex: bottomIdx || 0,
           timestamp: firebase.database.ServerValue.TIMESTAMP,
         });
       }
@@ -4478,9 +4561,10 @@
 
       const card = data.card;
 
-      // Excalibur cancel prompt — any holder can cancel any black card
+      // Excalibur cancel prompt — any holder can cancel any black card.
+      // Forced Morgan 2 cascade cards (forcedApply) are immune and skip this.
       const excHolder = findExcaliburHolder();
-      if (excHolder && !roomData.excaliburPrompt) {
+      if (excHolder && !roomData.excaliburPrompt && !data.forcedApply) {
         // Auto-decline if holder has the toggle on
         if (excHolder === myKnight && excaliburAutoDecline) {
           fbDb.ref('games/' + currentRoom + '/meta/excaliburPrompt').set({ declined: true });
@@ -4508,7 +4592,7 @@
           return;
         }
       }
-      if (roomData.excaliburPrompt?.pending) {
+      if (roomData.excaliburPrompt?.pending && !data.forcedApply) {
         // Auto-decline if holder has the toggle on
         if (myKnight === roomData.excaliburPrompt.holderKnight && excaliburAutoDecline) {
           resolveExcaliburPrompt(false);
@@ -4545,7 +4629,11 @@
         document.getElementById('btn-face-up').addEventListener('click', () => resolveRevealedCard('combat', false));
         document.getElementById('btn-face-down').addEventListener('click', () => resolveRevealedCard('combat', true));
       } else if (card.type === 'specialBlack') {
-        if (!roomData.pendingInteraction) {
+        if (data.forcedApply) {
+          // Forced Morgan 2 cascade card — immune to Merlin; apply directly.
+          actionsEl.innerHTML = '<button class="btn btn-evil" id="btn-apply-special">Apply Effect</button>';
+          document.getElementById('btn-apply-special').addEventListener('click', () => resolveRevealedCard('special'));
+        } else if (!roomData.pendingInteraction) {
           // Vivien blocks Merlin cancels (except Vivien itself can always be cancelled)
           const vivienBlocks = roomData.persistentEffects?.vivien && card.name !== 'Vivien';
           if (vivienBlocks) {
@@ -6896,6 +6984,7 @@
       // Phase 5 meta resets
       updates['games/' + currentRoom + '/meta/percivalPeeked'] = null;
       updates['games/' + currentRoom + '/meta/percivalPeek'] = null;
+      updates['games/' + currentRoom + '/meta/percivalDeclined'] = null;
       updates['games/' + currentRoom + '/meta/armorChoice'] = null;
       updates['games/' + currentRoom + '/meta/excaliburPrompt'] = null;
       updates['games/' + currentRoom + '/meta/arthurPowerUsed'] = null;
