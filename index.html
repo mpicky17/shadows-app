@@ -651,6 +651,16 @@
       border-radius: var(--radius); font-family: inherit;
     }
     .btn-download-log:hover { background: var(--text-dim); color: var(--bg-dark); }
+    /* ── Detailed debug log (Change 6) ───────────────────────────── */
+    .debug-controls { margin-top: 0.75rem; padding-top: 0.5rem; border-top: 1px dashed var(--gold-dim); }
+    .debug-btn-row { display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.5rem; }
+    .debug-panel {
+      margin-top: 0.5rem; max-height: 240px; overflow: auto;
+      background: #0a0a0a; border: 1px solid var(--text-dim); border-radius: var(--radius);
+      padding: 0.5rem; font-size: 0.6875rem; line-height: 1.3; color: #9fe09f;
+      white-space: pre-wrap; word-break: break-word;
+    }
+    .debug-panel.hidden { display: none; }
     /* ── Phase 4: Heroic Actions ─────────────────────────────────── */
     .heroic-menu { padding: 1rem; background: var(--bg-card); border-radius: var(--radius); border: 1px solid var(--gold-dim); }
     .heroic-menu h3 { color: var(--gold); font-size: 1rem; margin-bottom: 0.25rem; }
@@ -795,6 +805,13 @@
     .combat-card.white-side { background: linear-gradient(135deg, #F5F0E1, #E8DCC8); color: #333; border: 2px solid var(--gold); }
     .combat-card.black-side { background: linear-gradient(135deg, #1a1a1a, #2a1a1a); color: var(--parchment); border: 2px solid var(--red-bright); }
     .combat-card .cc-val { font-size: 1.25rem; }
+    .combat-card.face-down { background: linear-gradient(135deg, #2a2030, #201828); border-style: dashed; opacity: 0.85; }
+    .combat-shuffle-banner {
+      margin: 1rem 0; padding: 1.25rem; text-align: center; font-size: 1.25rem; font-weight: 700;
+      color: var(--gold); border: 2px dashed var(--gold); border-radius: 8px;
+      animation: shufflePulse 0.6s ease-in-out infinite alternate;
+    }
+    @keyframes shufflePulse { from { opacity: 0.55; } to { opacity: 1; } }
     .combat-result { font-size: 1.5rem; font-weight: 700; margin: 0.5rem 0; }
     .combat-result.victory { color: var(--gold); }
     .combat-result.defeat { color: var(--red-bright); }
@@ -872,6 +889,11 @@
         <div class="toggle" id="toggle-traitor-among-us" role="button" tabindex="0"></div>
         <div style="font-size:0.75rem;color:var(--text-dim);width:100%;margin-top:0.25rem;">Guarantees a traitor — loyalty deck matches player count exactly</div>
       </div>
+      <div class="setting-row">
+        <label>Grail self-save when dying completes Grail quest</label>
+        <div class="toggle" id="toggle-grail-self-save" role="button" tabindex="0"></div>
+        <div style="font-size:0.75rem;color:var(--text-dim);width:100%;margin-top:0.25rem;">If on, a knight who dies playing the winning Holy Grail card keeps the Grail and may drink it to save themselves. If off, that Grail is lost and they die.</div>
+      </div>
     </div>
 
     <div class="lobby-actions">
@@ -924,6 +946,19 @@
       <div class="game-admin-btns" id="game-admin-btns">
         <button class="btn btn-danger" id="btn-premature-death" style="display:none;">Permanently Leave Game</button>
         <button class="btn btn-danger" id="btn-host-remove-player" style="display:none;">Remove Player From Game</button>
+      </div>
+
+      <!-- ── Detailed debug log (Change 6) ──────────────────────────── -->
+      <div class="debug-controls" id="debug-controls">
+        <div class="setting-row" style="margin:0;">
+          <label for="toggle-debug-log" style="font-size:1rem;">Detailed debug log</label>
+          <div class="toggle" id="toggle-debug-log" role="button" tabindex="0"></div>
+        </div>
+        <div class="debug-btn-row" id="debug-btn-row" style="display:none;">
+          <button class="btn-download-log" id="btn-export-my-debug">Export My Log</button>
+          <button class="btn-download-log" id="btn-export-all-debug" style="display:none;">Export ALL Players' Logs</button>
+        </div>
+        <pre class="debug-panel hidden" id="debug-panel"><div id="debug-panel-body"></div></pre>
       </div>
     </div>
 
@@ -1027,7 +1062,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v68';
+    const APP_VERSION = 'shadows-v69';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1119,6 +1154,8 @@
       excaliburLose: 'sword-lose.mp4',
     };
     let lastCinematicId = null;  // dedupe cinematic playback across re-renders/reconnects
+    let combatStageTimer = null; // drives the combat reveal animation (Change 2)
+    let resolvingDeaths = false; // re-entry guard for off-turn death resolution (Change 5)
     // Percival's Lancelot's-Armor decline flow (client-local UI stage; only the acting player interacts)
     let armorUiStage = null;       // 'bottom' | 'decide' | 'confirm'
     let armorUiBottomIdx = null;   // index of the card chosen to go to the bottom
@@ -1160,6 +1197,15 @@
     let heroicSubState = {};     // context for current heroic sub-action
     let lastHeroicAction = null; // track first action type for sacrifice restriction
     let galahadPowerUsedLocal = false; // local flag to prevent race condition with Firebase listener
+
+    // ── Detailed debug log (Change 6) ──────────────────────────────────
+    // Client-LOCAL verbose troubleshooting log. Each device records only what
+    // it legitimately knows; nothing is written to the shared game log. The host
+    // can on-demand aggregate every device's buffer via meta/debugCollect.
+    const DEBUG_BUFFER_MAX = 2000;
+    let debugBuffer = [];           // in-memory ring buffer of {t, knight, isHost, category, message, data}
+    let detailedDebugEnabled = false; // controls the on-screen debug panel visibility
+    let lastDebugCollectId = null;  // dedupe host aggregation requests
 
     // ═══════════════════════════════════════════════════════════════════
     //  SECTION 3: Firebase Setup
@@ -1504,6 +1550,7 @@
         status: 'lobby',
         includeTraitor: true,
         traitorAmongUs: false,
+        grailSelfSave: false,
       });
 
       promptForName('create');
@@ -1869,6 +1916,15 @@
         roomData = snap.val();
         if (!roomData.galahadPowerUsed) galahadPowerUsedLocal = false;
 
+        // Respond to a host request to aggregate debug logs (Change 6)
+        handleDebugCollectRequest();
+
+        // Catch off-turn deaths that occurred while another interaction was active —
+        // re-check once nothing is pending (Change 5). Guarded + idempotent.
+        if (isHost && roomData.status === 'playing' && !roomData.pendingInteraction) {
+          resolveImmediateDeaths();
+        }
+
         // Update traitor toggles
         const toggle = $('toggle-traitor');
         if (roomData.includeTraitor) {
@@ -1884,6 +1940,10 @@
         } else {
           tauToggle.classList.remove('on');
         }
+        // Grail self-save toggle (Change 5)
+        $('toggle-grail-self-save').classList.toggle('on', !!roomData.grailSelfSave);
+        // Host-only "Export ALL players' logs" button (Change 6)
+        $('btn-export-all-debug').style.display = isHost ? '' : 'none';
 
         // If game started or in setup, switch to game screen
         if ((roomData.status === 'setup' || roomData.status === 'playing') && !inGameScreen) {
@@ -2312,6 +2372,24 @@
       fbDb.ref('games/' + currentRoom + '/meta/traitorAmongUs').set(newVal);
     });
 
+    // Grail self-save toggle (Change 5) — host-only lobby setting
+    $('toggle-grail-self-save').addEventListener('click', () => {
+      if (!isHost || !currentRoom) return;
+      const toggle = $('toggle-grail-self-save');
+      const newVal = !toggle.classList.contains('on');
+      fbDb.ref('games/' + currentRoom + '/meta/grailSelfSave').set(newVal);
+    });
+
+    // Detailed debug log controls (Change 6) — per-device
+    $('toggle-debug-log').addEventListener('click', () => {
+      detailedDebugEnabled = !detailedDebugEnabled;
+      $('toggle-debug-log').classList.toggle('on', detailedDebugEnabled);
+      $('debug-btn-row').style.display = detailedDebugEnabled ? 'flex' : 'none';
+      renderDebugPanel();
+    });
+    $('btn-export-my-debug').addEventListener('click', exportMyDebugLog);
+    $('btn-export-all-debug').addEventListener('click', exportAllPlayersDebugLogs);
+
     // Copy room code on tap
     $('lobby-code').addEventListener('click', () => {
       const code = $('lobby-code').textContent;
@@ -2527,8 +2605,62 @@
           requestWhiteDiscard(discardedHand);
           renderHand();
         }
+        // Reactively resolve any knight who hit 0 LP on someone else's turn (Change 5).
+        // Driven by the host; the active turn knight's death stays deferred to end of turn.
+        if (isHost && roomData?.status === 'playing') resolveImmediateDeaths();
         renderGamePlayers();
       });
+    }
+
+    // Off-turn death (Change 5): a knight who reaches 0 LP on another player's turn is
+    // resolved immediately — Holy-Grail-saved or killed on the spot — with no final
+    // heroic deed (that is reserved for dying on one's own turn). Host-only; processes
+    // one knight at a time and re-runs after each grail decision.
+    async function resolveImmediateDeaths() {
+      if (!isHost || !currentRoom || !roomData) return;
+      // Don't interrupt an in-progress grail/other interaction.
+      if (roomData.pendingInteraction) return;
+      if (resolvingDeaths) return;             // re-entry guard (players + meta listeners both call us)
+      resolvingDeaths = true;
+      try {
+        const currentKnight = roomData.currentTurnKnight;
+        const turnOrder = roomData.turnOrder || [];
+        for (const kid of turnOrder) {
+          if (kid === currentKnight) continue;   // their death waits for end of their own turn
+          if (!isDying(kid)) continue;
+          const grailHolder = findGrailHolder();
+          if (grailHolder) {
+            debugLog('death', 'off-turn dying — offering Holy Grail', { dyingKnight: kid, grailHolder });
+            await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set({
+              type: 'grailSave', offTurn: true, dyingKnight: kid, holderKnight: grailHolder,
+              responses: {}, resolved: false,
+            });
+            return; // resumes via continueOffTurnDeath() once the holder decides
+          }
+          debugLog('death', 'off-turn death (no Grail)', { dyingKnight: kid });
+          await killKnight(kid);
+          if (roomData?.status === 'ended') return;
+          // Continue scanning for further simultaneous deaths (e.g. Morgan 4).
+        }
+      } finally {
+        resolvingDeaths = false;
+      }
+    }
+
+    // Finalize an off-turn Holy Grail decision (host-only). Unlike the on-turn path,
+    // this never advances the turn — it just kills (if declined) and looks for more deaths.
+    async function continueOffTurnDeath() {
+      if (!isHost) return;
+      const interaction = roomData?.pendingInteraction;
+      if (!interaction || interaction.type !== 'grailSave' || !interaction.offTurn) return;
+      const accepted = interaction.responses?.[interaction.holderKnight]?.accepted;
+      await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set(null);
+      if (!accepted) {
+        await killKnight(interaction.dyingKnight);
+        if (roomData?.status === 'ended') return;
+      }
+      // Handle any remaining simultaneous deaths.
+      await resolveImmediateDeaths();
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -3643,7 +3775,7 @@
 
           // Add cards to my hand
           const newCards = result.cards || [];
-          console.log('[SOC] drawResult received', { knightId: result.knightId, cardCount: newCards.length, newHandSize: myHand.length + newCards.length });
+          debugLog('drawResult', 'received', { knightId: result.knightId, key: snap.key, cardCount: newCards.length, newHandSize: myHand.length + newCards.length });
           myHand = [...myHand, ...newCards];
           renderHand();
 
@@ -3668,7 +3800,7 @@
             if (processedDrawResults.has(child.key)) return;
             processedDrawResults.add(child.key);
             const newCards = result.cards || [];
-            console.log('[SOC] drawResult sweep catch-up', { cardCount: newCards.length, key: child.key });
+            debugLog('drawResult', 'sweep catch-up', { cardCount: newCards.length, key: child.key });
             myHand = [...myHand, ...newCards];
             const updates = {};
             updates['private/' + currentRoom + '/' + myKnight + '/hand'] = myHand;
@@ -3894,6 +4026,131 @@
           type, knight: myKnight, message,
         });
       } catch (e) { console.warn('Log write failed:', e); }
+    }
+
+    // ── debugLog: client-local verbose troubleshooting log (Change 6) ────
+    // Records to an in-memory ring buffer + console + a localStorage tail.
+    // The originating knight is stamped at log time so attribution survives
+    // host aggregation/merging. Never log another player's hidden info.
+    function debugLog(category, message, data) {
+      try {
+        const entry = {
+          t: new Date().toISOString(),
+          knight: myKnight || (isSpectator ? 'spectator' : 'unknown'),
+          isHost: !!isHost,
+          category: category || 'info',
+          message: message || '',
+        };
+        if (data !== undefined) {
+          try { entry.data = JSON.parse(JSON.stringify(data)); } catch (e) { entry.data = String(data); }
+        }
+        debugBuffer.push(entry);
+        if (debugBuffer.length > DEBUG_BUFFER_MAX) debugBuffer.shift();
+        console.log('[SOC]', category, message, data !== undefined ? data : '');
+        // Persist a tail to localStorage so a refreshed/crashed device keeps recent breadcrumbs.
+        if (currentRoom) {
+          try {
+            localStorage.setItem('soc_debug_' + currentRoom,
+              JSON.stringify(debugBuffer.slice(-500)));
+          } catch (e) { /* quota — ignore */ }
+        }
+        // If a debug panel is open, keep it fresh.
+        if (detailedDebugEnabled) renderDebugPanel();
+      } catch (e) { /* logging must never throw into game logic */ }
+    }
+
+    function formatDebugEntry(e) {
+      const role = e.isHost ? 'host' : 'player';
+      const dataStr = e.data !== undefined
+        ? ' | ' + (typeof e.data === 'string' ? e.data : JSON.stringify(e.data))
+        : '';
+      return e.t + ' [' + (e.knight || 'unknown') + '/' + role + '] ' +
+        (e.category || 'info') + ' | ' + (e.message || '') + dataStr;
+    }
+
+    function debugFilename(suffix) {
+      const d = new Date();
+      const ts = d.getFullYear().toString() +
+        String(d.getMonth() + 1).padStart(2, '0') +
+        String(d.getDate()).padStart(2, '0') + '_' +
+        String(d.getHours()).padStart(2, '0') +
+        String(d.getMinutes()).padStart(2, '0') +
+        String(d.getSeconds()).padStart(2, '0');
+      return ts + '_Room_' + (currentRoom || 'none') + '_' + suffix + '.txt';
+    }
+
+    function downloadTextFile(text, filename) {
+      const blob = new Blob([text], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+
+    // Export THIS device's debug buffer.
+    function exportMyDebugLog() {
+      if (debugBuffer.length === 0) { showToast('Debug log is empty.'); return; }
+      const text = debugBuffer.map(formatDebugEntry).join('\n');
+      downloadTextFile(text, debugFilename(String(myKnight || 'spectator')));
+    }
+
+    // Host-only: request every device's buffer, merge, sort, download one file.
+    async function exportAllPlayersDebugLogs() {
+      if (!isHost || !currentRoom) { showToast('Host only.'); return; }
+      const id = 'dc_' + Date.now();
+      showToast('Collecting logs from all devices...');
+      // Pre-seed our own contribution so a solo host still gets a file.
+      try { await fbDb.ref('games/' + currentRoom + '/debug/' + (myKnight || 'host') + '/' + id)
+        .set(debugBuffer); } catch (e) {}
+      // Broadcast the request; each client's meta listener responds.
+      await fbDb.ref('games/' + currentRoom + '/meta/debugCollect').set({ id, requestedAt: Date.now() });
+      // Wait for responses, then aggregate.
+      await new Promise(r => setTimeout(r, 4000));
+      const snap = await fbDb.ref('games/' + currentRoom + '/debug').once('value');
+      const all = [];
+      snap.forEach(knightNode => {
+        const perId = knightNode.child(id).val();
+        if (Array.isArray(perId)) for (const e of perId) all.push(e);
+      });
+      all.sort((a, b) => (a.t < b.t ? -1 : a.t > b.t ? 1 : 0));
+      if (all.length === 0) { showToast('No debug logs collected.'); }
+      else {
+        const text = all.map(formatDebugEntry).join('\n');
+        downloadTextFile(text, debugFilename('ALL'));
+        showToast('Collected ' + all.length + ' entries from all devices.');
+      }
+      // Cleanup transient nodes.
+      await fbDb.ref('games/' + currentRoom + '/debug').set(null);
+      await fbDb.ref('games/' + currentRoom + '/meta/debugCollect').set(null);
+    }
+
+    // Every device: respond to a host collection request by uploading its buffer.
+    function handleDebugCollectRequest() {
+      const req = roomData?.debugCollect;
+      if (!req || !req.id || req.id === lastDebugCollectId) return;
+      lastDebugCollectId = req.id;
+      if (!currentRoom) return;
+      const who = myKnight || (isSpectator ? 'spectator_' + (myUid || '').slice(-4) : 'unknown');
+      try {
+        fbDb.ref('games/' + currentRoom + '/debug/' + who + '/' + req.id).set(debugBuffer);
+      } catch (e) { /* ignore */ }
+    }
+
+    function renderDebugPanel() {
+      const panel = $('debug-panel');
+      if (!panel) return;
+      panel.classList.toggle('hidden', !detailedDebugEnabled);
+      if (!detailedDebugEnabled) return;
+      const body = $('debug-panel-body');
+      if (body) {
+        const recent = debugBuffer.slice(-200);
+        body.textContent = recent.map(formatDebugEntry).join('\n');
+        body.scrollTop = body.scrollHeight;
+      }
     }
 
     function listenToLog() {
@@ -4206,12 +4463,18 @@
     async function loseOneLifeAction() {
       const currentLife = cachedPlayers[myKnight]?.life ?? 4;
       const newLife = Math.max(0, currentLife - 1);
+      // Warn before choosing to die as the evil deed (Change 4).
+      if (newLife <= 0) {
+        const ok = confirm('Dead players do not receive quest benefits and cannot partake in life points from special white cards. Only the Holy Grail can save you! Are you sure you want to die?');
+        if (!ok) { renderTurnActions(); return; }
+      }
       const updates = {};
       updates['games/' + currentRoom + '/players/' + myKnight + '/life'] = newLife;
       updates['games/' + currentRoom + '/meta/evilActionTaken'] = true;
       await fbDb.ref().update(updates);
 
       await addLog('evil', getKnightDisplayName(myKnight) + ' lost 1 Life Point (' + newLife + ' remaining)');
+      debugLog('life', 'loseOneLifeAction', { knight: myKnight, from: currentLife, to: newLife });
       await advanceToHeroicPhase();
     }
 
@@ -5868,10 +6131,12 @@
       const myResponse = interaction.responses?.[interaction.holderKnight];
 
       if (myResponse) {
-        // Response already given — active player resolves
+        // Response already given — resolve.
         area.innerHTML = '<div class="interaction-panel"><h3>Holy Grail</h3>' +
           '<p>' + (myResponse.accepted ? dyingName + ' has been saved by the Holy Grail!' : 'The Holy Grail was not used. ' + dyingName + ' has fallen.') + '</p></div>';
-        if (isMyTurn()) continueTurnAfterGrailCheck();
+        // Off-turn deaths are finalized by the host (no turn advance); on-turn deaths by the active player.
+        if (interaction.offTurn) { if (isHost) continueOffTurnDeath(); }
+        else if (isMyTurn()) continueTurnAfterGrailCheck();
         return;
       }
 
@@ -6379,7 +6644,8 @@
     async function shareQuestSpoils(count, knightsOnQuest) {
       const participants = (knightsOnQuest || []).filter(kid => {
         const p = cachedPlayers[kid];
-        return p && p.alive !== false && !p.isRevealed;
+        // Dying knights (0 LP, not yet dead) forfeit shared spoils (Change 3).
+        return p && p.alive !== false && !p.isRevealed && !isDying(kid);
       });
       if (participants.length === 0) {
         // Quest won with nobody present (e.g. Excalibur via Lady of the Lake, or a Dragon
@@ -6849,6 +7115,14 @@
       return null;
     }
 
+    // A knight at 0 LP who is still alive (death is deferred to end of their turn).
+    // Such a knight gets one final heroic deed but earns no life points, no shared
+    // quest cards, and keeps no relics (Change 3). Only the Holy Grail can save them.
+    function isDying(kid) {
+      const p = cachedPlayers[kid];
+      return !!p && p.alive !== false && !p.isRevealed && (p.life ?? 4) <= 0;
+    }
+
     function findExcaliburHolder() {
       for (const kid of (roomData?.turnOrder || [])) {
         const p = cachedPlayers[kid];
@@ -6859,6 +7133,7 @@
 
     async function killKnight(knightId) {
       const p = cachedPlayers[knightId];
+      debugLog('death', 'killKnight', { knightId, life: p?.life, relics: p?.relics });
       const updates = {};
       updates['games/' + currentRoom + '/players/' + knightId + '/alive'] = false;
       // Relic loss on death
@@ -7059,6 +7334,7 @@
       galahadPowerUsedLocal = false;
 
       await addLog('info', 'Turn ' + ((roomData.turnNumber || 1) + 1) + ': ' + getKnightDisplayName(nextKnight) + '\'s turn');
+      debugLog('turn', 'finishTurnAdvance', { from: currentKnight, to: nextKnight, turnNumber: (roomData.turnNumber || 1) + 1 });
     }
 
     function getNextAliveKnight(currentKnight) {
@@ -7470,20 +7746,38 @@
       myHand = myHand.filter(c => c.id !== cardId);
       await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
 
-      // Send card to target via drawResults
-      const resultRef = fbDb.ref('games/' + currentRoom + '/drawResults').push();
-      await resultRef.set({ knightId: targetKnight, cards: [card] });
-
-      // Set exchange metadata
+      // Blind swap: HOLD Arthur's card in the shared exchange node — do NOT deliver
+      // it to the recipient yet. The recipient picks a card to return without seeing
+      // Arthur's card; both cards are then delivered at the same moment (Change 1).
       await fbDb.ref('games/' + currentRoom + '/meta/arthurExchange').set({
-        toKnight: targetKnight, status: 'awaitingReturn',
+        toKnight: targetKnight, status: 'awaitingReturn', fromCard: card,
       });
 
       heroicSubState = { step: 'awaitingReturn', toKnight: targetKnight };
-      console.log('[SOC] performArthurSend', { targetKnight, cardId });
-      await addLog('info', 'King Arthur exchanged a card with ' + getKnightDisplayName(targetKnight));
+      debugLog('arthur', 'performArthurSend (held, blind)', { targetKnight, cardId });
+      await addLog('info', 'King Arthur is exchanging a card with ' + getKnightDisplayName(targetKnight));
       renderHand();
       renderTurnActions();
+    }
+
+    // Deliver both cards simultaneously and finish the exchange (Change 1).
+    async function completeArthurExchange(exchange, returnCard) {
+      // Deliver Arthur's held card to the recipient.
+      if (exchange.fromCard) {
+        await fbDb.ref('games/' + currentRoom + '/drawResults').push()
+          .set({ knightId: exchange.toKnight, cards: [exchange.fromCard] });
+      }
+      // Deliver the recipient's chosen card back to Arthur.
+      if (returnCard) {
+        await fbDb.ref('games/' + currentRoom + '/drawResults').push()
+          .set({ knightId: 'arthur', cards: [returnCard] });
+      }
+      await fbDb.ref('games/' + currentRoom + '/meta').update({
+        arthurExchange: null, arthurPowerUsed: true,
+      });
+      debugLog('arthur', 'completeArthurExchange (simultaneous deliver)', {
+        toKnight: exchange.toKnight, gaveBack: returnCard ? returnCard.id : null,
+      });
     }
 
     function renderArthurExchangeWaiting(area) {
@@ -7492,13 +7786,26 @@
       if (!exchange) return;
 
       if (exchange.toKnight === myKnight && exchange.status === 'awaitingReturn') {
-        // I'm the target — select a card to return
+        // I'm the target — pick a card to return WITHOUT seeing Arthur's card (blind swap).
+        // Arthur's card is held in exchange.fromCard and only delivered once I commit.
+        if (myHand.length === 0) {
+          // No card to return — receive Arthur's card and finish (edge case).
+          area.innerHTML = '<div class="quest-play-panel"><h3>Arthur\'s Exchange</h3>' +
+            '<p style="color:var(--gold);font-size:1rem;">Arthur sent you a card (face-down). You have no card to return.</p>' +
+            '<button class="btn btn-heroic" id="btn-arthur-receive">Receive Card</button></div>';
+          document.getElementById('btn-arthur-receive').addEventListener('click', async () => {
+            await completeArthurExchange(exchange, null);
+            selectedCardId = null;
+            renderHand();
+          });
+          return;
+        }
         const selectedCard = selectedCardId ? myHand.find(c => c.id === selectedCardId) : null;
         let html = '<div class="quest-play-panel"><h3>Arthur\'s Exchange</h3>' +
-          '<p style="color:var(--gold);font-size:1rem;">Arthur sent you a card. Select 1 card to return.</p>';
+          '<p style="color:var(--gold);font-size:1rem;">Arthur sent you a card, face-down. Select 1 card to return — you\'ll both see the swapped cards only after you confirm.</p>';
         if (selectedCard) {
           html += '<p>Selected: ' + getCardDisplayName(selectedCard) + '</p>' +
-            '<button class="btn btn-heroic" id="btn-arthur-return">Return Card</button>';
+            '<button class="btn btn-heroic" id="btn-arthur-return">Return Card (Blind Swap)</button>';
         }
         html += '</div>';
         area.innerHTML = html;
@@ -7508,13 +7815,7 @@
           if (!card) return;
           myHand = myHand.filter(c => c.id !== selectedCardId);
           await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
-          // Send back to Arthur
-          const resultRef = fbDb.ref('games/' + currentRoom + '/drawResults').push();
-          await resultRef.set({ knightId: 'arthur', cards: [card] });
-          await fbDb.ref('games/' + currentRoom + '/meta').update({
-            arthurExchange: null, arthurPowerUsed: true,
-          });
-          console.log('[SOC] arthurReturn complete', { returnedCardId: selectedCardId });
+          await completeArthurExchange(exchange, card);
           selectedCardId = null;
           renderHand();
         });
@@ -7899,7 +8200,10 @@
       const q = cachedQuests[questKey];
       if (!q && !overrideCards) return;
       const whiteCards = overrideCards?.whiteCards || q?.whiteCards || [];
-      const blackCards = shuffle([...(overrideCards?.blackCards || q?.blackCards || [])]);
+      // Preserve the board-order cards (with faceDown flags) for the pre-reveal view,
+      // then shuffle a copy so the revealed order can't be traced back to who played what (Change 2).
+      const preRevealBlackCards = (overrideCards?.blackCards || q?.blackCards || []).map(c => ({ ...c }));
+      const blackCards = shuffle([...preRevealBlackCards]).map(c => { const n = { ...c }; delete n.faceDown; return n; });
       const rawWhiteSum = whiteCards.reduce((s, c) => s + (c.value || 0), 0);
       const blackSum = blackCards.reduce((s, c) => {
         const phase = overrideCards?.phase || q?.phase;
@@ -7912,12 +8216,16 @@
       const whiteSum = rawWhiteSum + (hasExcalibur ? 1 : 0);
       const kayPresent = knightsPresent.includes('kay') && cachedPlayers['kay']?.alive !== false;
 
+      const anyFaceDown = preRevealBlackCards.some(c => c.faceDown);
       await fbDb.ref('games/' + currentRoom + '/meta/combatResolution').set({
-        questKey, whiteCards, blackCards, whiteSum, blackSum,
+        questKey, whiteCards, blackCards, preRevealBlackCards, whiteSum, blackSum,
         excaliburBonus: hasExcalibur,
         kayPrompt: kayPresent, kayPlayed: false, winner: null,
         fromEvil,
+        revealAt: Date.now(),        // drives the client-local 3-stage reveal animation
+        anyFaceDown,                 // skip the shuffle theater if nothing was hidden
       });
+      debugLog('combat', 'triggerCombatResolution', { questKey, whiteSum, blackSum, blackCount: blackCards.length, anyFaceDown });
     }
 
     function resetCombatOverlayMinimize() {
@@ -8062,14 +8370,37 @@
       }
     }
 
+    // Three-stage reveal animation (Change 2): protect a possible traitor by showing
+    // the cards "as they stand" (face-up/face-down), a brief "Shuffling before reveal"
+    // beat, then the shuffled black cards. Driven client-locally off res.revealAt so all
+    // devices stay in sync without extra Firebase writes. Quests with no face-down black
+    // card skip straight to the reveal.
+    const COMBAT_PREREVEAL_MS = 2000;
+    const COMBAT_SHUFFLE_MS = 2000;
+    function combatRevealStage(res) {
+      if (!res.anyFaceDown || !res.revealAt) return 'revealed';
+      const elapsed = Date.now() - res.revealAt;
+      if (elapsed < COMBAT_PREREVEAL_MS) return 'preReveal';
+      if (elapsed < COMBAT_PREREVEAL_MS + COMBAT_SHUFFLE_MS) return 'shuffling';
+      return 'revealed';
+    }
+
+    function blackCardValue(res, c) {
+      return res.questKey === 'lancelot' && cachedQuests?.lancelot?.phase === 'dragon'
+        ? (c.dragonValue || c.value) : (c.value || c.lancelotValue);
+    }
+
     function renderCombatOverlay(res) {
       const questLabel = getLocationLabel(res.questKey);
-      $('combat-title').textContent = questLabel + ' — Combat Resolution';
+      const stage = combatRevealStage(res);
+      if (combatStageTimer) { clearTimeout(combatStageTimer); combatStageTimer = null; }
 
       const patternText = getQuestPatternText(res.questKey, cachedQuests?.lancelot?.phase);
       let html = patternText
         ? '<p style="color:var(--gold);font-size:0.875rem;font-weight:600;margin-bottom:0.5rem;">' + patternText + '</p>'
         : '';
+
+      // White cards — always shown as they stand.
       html += '<p style="color:var(--text-dim);font-size:1rem;">White Cards (Knights)</p>' +
         '<div class="combat-cards">';
       for (const c of (res.whiteCards || [])) {
@@ -8077,11 +8408,39 @@
       }
       html += '</div><p style="color:var(--gold);font-size:1.25rem;font-weight:700;">Total: ' + res.whiteSum + (res.excaliburBonus ? ' (incl. Excalibur +1)' : '') + '</p>';
 
+      if (stage === 'preReveal') {
+        // Black cards "as they stand" — board order, face-down hidden as "?".
+        $('combat-title').textContent = questLabel + ' — Before Reveal';
+        html += '<p style="color:var(--text-dim);font-size:1rem;margin-top:0.5rem;">Black Cards (as they stand)</p>' +
+          '<div class="combat-cards">';
+        for (const c of (res.preRevealBlackCards || [])) {
+          const shown = c.faceDown ? '?' : blackCardValue(res, c);
+          html += '<div class="combat-card black-side' + (c.faceDown ? ' face-down' : '') + '"><div class="cc-val">' + shown + '</div><div style="font-size:0.625rem;">' + (c.faceDown ? 'Hidden' : 'Fight') + '</div></div>';
+        }
+        html += '</div>';
+        $('combat-content').innerHTML = html;
+        $('combat-actions').innerHTML = '<p class="waiting-text">Revealing shortly...</p>';
+        combatStageTimer = setTimeout(() => { const cur = roomData?.combatResolution; if (cur) renderCombatOverlay(cur); },
+          (res.revealAt + COMBAT_PREREVEAL_MS) - Date.now() + 30);
+        return;
+      }
+
+      if (stage === 'shuffling') {
+        $('combat-title').textContent = questLabel + ' — Shuffling';
+        html += '<div class="combat-shuffle-banner">🔀 Shuffling before reveal</div>';
+        $('combat-content').innerHTML = html;
+        $('combat-actions').innerHTML = '<p class="waiting-text">Shuffling the black cards...</p>';
+        combatStageTimer = setTimeout(() => { const cur = roomData?.combatResolution; if (cur) renderCombatOverlay(cur); },
+          (res.revealAt + COMBAT_PREREVEAL_MS + COMBAT_SHUFFLE_MS) - Date.now() + 30);
+        return;
+      }
+
+      // ── Revealed stage ──
+      $('combat-title').textContent = questLabel + ' — Combat Resolution';
       html += '<p style="color:var(--text-dim);font-size:1rem;margin-top:0.5rem;">Black Cards (Evil)</p>' +
         '<div class="combat-cards">';
       for (const c of (res.blackCards || [])) {
-        const val = res.questKey === 'lancelot' && cachedQuests?.lancelot?.phase === 'dragon'
-          ? (c.dragonValue || c.value) : (c.value || c.lancelotValue);
+        const val = blackCardValue(res, c);
         html += '<div class="combat-card black-side"><div class="cc-val">' + val + '</div><div style="font-size:0.625rem;">Fight</div></div>';
       }
       html += '</div><p style="color:var(--red-bright);font-size:1.25rem;font-weight:700;">Total: ' + res.blackSum + '</p>';
@@ -8191,30 +8550,38 @@
 
       if (winner === 'white') {
         // Victory
+        // Dying knights (0 LP, not yet dead) earn no LP and no shared cards (Change 3).
+        const sharers = knightsOnQuest.filter(kid => !isDying(kid));
         if (questKey === 'blackKnight') {
           await addSword('white', 'blackKnight');
           for (const kid of knightsOnQuest) {
+            if (isDying(kid)) continue;
             let life = Math.min(6, (cachedPlayers[kid]?.life ?? 4) + 1);
             if (kid === 'palamedes') life = Math.min(6, life + 1);
             updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
           }
-          await distributeCardsAmongKnights(3, knightsOnQuest);
+          if (sharers.length > 0) await distributeCardsAmongKnights(3, sharers);
+          else await drawWhiteToDiscard(3);
           await addLog('quest', 'Black Knight Tournament WON! 1 White Sword, +1 LP, 3 cards shared.');
         } else if (questKey === 'lancelot' && q.phase === 'lancelot') {
           await addSword('white', 'lancelot');
-          if (knightsOnQuest.length > 0) {
+          // Armor relic only if the completing knight isn't dying (else it is lost).
+          if (knightsOnQuest.length > 0 && !isDying(knightsOnQuest[0])) {
             updates['games/' + currentRoom + '/players/' + knightsOnQuest[0] + '/relics/lancelotArmor'] = true;
           }
           for (const kid of knightsOnQuest) {
+            if (isDying(kid)) continue;
             let life = Math.min(6, (cachedPlayers[kid]?.life ?? 4) + 1);
             if (kid === 'palamedes') life = Math.min(6, life + 1);
             updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
           }
-          await distributeCardsAmongKnights(4, knightsOnQuest);
+          if (sharers.length > 0) await distributeCardsAmongKnights(4, sharers);
+          else await drawWhiteToDiscard(4);
           await addLog('quest', 'Quest for Lancelot WON! 1 White Sword, +1 LP, Armor relic, 4 cards shared.');
         } else if (questKey === 'lancelot' && q.phase === 'dragon') {
           for (let i = 0; i < 2; i++) await addSword('white', 'dragon');
           for (const kid of knightsOnQuest) {
+            if (isDying(kid)) continue;
             let life = Math.min(6, (cachedPlayers[kid]?.life ?? 4) + 2);
             if (kid === 'palamedes') life = Math.min(6, life + 1);
             updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
@@ -8336,11 +8703,14 @@
 
       if (questKey === 'excalibur') {
         for (let i = 0; i < 2; i++) await addSword('white', 'excalibur');
-        updates['games/' + currentRoom + '/players/' + myKnight + '/relics/excalibur'] = true;
+        // Relic lost if the completing knight is dying (Change 3).
+        if (!isDying(myKnight)) updates['games/' + currentRoom + '/players/' + myKnight + '/relics/excalibur'] = true;
         for (const kid of knightsOnQuest) {
-          let life = Math.min(6, (cachedPlayers[kid]?.life ?? 4) + 1);
-          if (kid === 'palamedes') life = Math.min(6, life + 1);
-          updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
+          if (!isDying(kid)) {
+            let life = Math.min(6, (cachedPlayers[kid]?.life ?? 4) + 1);
+            if (kid === 'palamedes') life = Math.min(6, life + 1);
+            updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
+          }
           updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
         }
         updates['games/' + currentRoom + '/quests/excalibur/status'] = 'won';
@@ -8356,32 +8726,44 @@
 
       } else if (questKey === 'holyGrail') {
         for (let i = 0; i < 3; i++) await addSword('white', 'holyGrail');
-        updates['games/' + currentRoom + '/players/' + myKnight + '/relics/holyGrail'] = true;
+        // Relic handling when the completing knight is dying (Change 5):
+        //  - grailSelfSave ON: they keep the Grail and may drink to self-save at end of turn.
+        //  - grailSelfSave OFF: the Grail is lost entirely (not assigned to anyone).
+        const completerDying = isDying(myKnight);
+        const grailToCompleter = !completerDying || !!roomData?.grailSelfSave;
+        if (grailToCompleter) updates['games/' + currentRoom + '/players/' + myKnight + '/relics/holyGrail'] = true;
         for (const kid of knightsOnQuest) {
-          let life = Math.min(6, (cachedPlayers[kid]?.life ?? 4) + 1);
-          if (kid === 'palamedes') life = Math.min(6, life + 1);
-          updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
+          if (!isDying(kid)) {
+            let life = Math.min(6, (cachedPlayers[kid]?.life ?? 4) + 1);
+            if (kid === 'palamedes') life = Math.min(6, life + 1);
+            updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
+          }
           updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
         }
         const grailWhiteCards = (q.cards || []).filter(c => c?.type === 'grail');
         if (grailWhiteCards.length > 0) await requestWhiteDiscard(grailWhiteCards);
         updates['games/' + currentRoom + '/quests/holyGrail/status'] = 'won';
         updates['games/' + currentRoom + '/quests/holyGrail/knightsPresent'] = [];
+        const grailDest = grailToCompleter ? getKnightDisplayName(myKnight)
+          : (completerDying ? 'lost (completing knight is dying)' : getKnightDisplayName(myKnight));
+        if (completerDying) debugLog('grail', 'holyGrail won by dying knight', { grailSelfSave: !!roomData?.grailSelfSave, grailToCompleter });
         updates['games/' + currentRoom + '/meta/questResult'] = {
           questKey: 'holyGrail', result: 'victory', cards: q.cards || [],
-          summary: '3 White Swords, +1 LP, 7 cards, Holy Grail relic to ' + getKnightDisplayName(myKnight),
+          summary: '3 White Swords, +1 LP, 7 cards, Holy Grail relic to ' + grailDest,
         };
         await fbDb.ref().update(updates);
         await shareQuestSpoils(7, knightsOnQuest);
-        await addLog('quest', 'Quest for the Holy Grail WON! 3 White Swords, +1 LP, 7 cards, Holy Grail relic to ' + getKnightDisplayName(myKnight));
+        await addLog('quest', 'Quest for the Holy Grail WON! 3 White Swords, +1 LP, 7 cards, Holy Grail relic to ' + grailDest);
 
       } else if (questKey === 'saxonWar' || questKey === 'pictWar') {
         const warName = questKey === 'saxonWar' ? 'Saxon War' : 'Pict War';
         await addSword('white', questKey);
         for (const kid of knightsOnQuest) {
-          let life = Math.min(6, (cachedPlayers[kid]?.life ?? 4) + 1);
-          if (kid === 'palamedes') life = Math.min(6, life + 1);
-          updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
+          if (!isDying(kid)) {
+            let life = Math.min(6, (cachedPlayers[kid]?.life ?? 4) + 1);
+            if (kid === 'palamedes') life = Math.min(6, life + 1);
+            updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
+          }
           updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
         }
         const fightCards = q.fightCards || [];
@@ -8621,6 +9003,8 @@
     async function performHeal(cardType, cardValue) {
       const life = cachedPlayers[myKnight]?.life ?? 4;
       if (life >= 6) { showToast('Already at max life!'); return; }
+      // A dying knight (0 LP) cannot claw back via healing — only the Holy Grail saves them (Change 3).
+      if (isDying(myKnight)) { showToast('You are dying — only the Holy Grail can save you.'); return; }
 
       // Find 3 matching cards
       let count = 0;
@@ -8994,10 +9378,13 @@
         // Show choice: gain 3 LP or each other gains 1
         heroicMode = null;
         const area = $('turn-action-area');
+        const dyingSelf = isDying(myKnight);
         area.innerHTML = '<div class="quest-play-panel"><h3>Piety</h3>' +
-          '<button class="btn btn-heroic" id="btn-piety-self">Gain 3 LP</button>' +
+          (dyingSelf ? '<p style="color:var(--red-bright);font-size:0.875rem;">You are dying — you cannot gain Life Points, but you may still give to others.</p>' : '') +
+          '<button class="btn btn-heroic" id="btn-piety-self"' + (dyingSelf ? ' disabled' : '') + '>Gain 3 LP</button>' +
           '<button class="btn btn-heroic" id="btn-piety-others" style="margin-top:0.5rem;">Each other knight gains 1 LP</button></div>';
         document.getElementById('btn-piety-self').addEventListener('click', async () => {
+          if (isDying(myKnight)) { showToast('You are dying — cannot gain Life Points.'); return; }
           document.getElementById('btn-piety-self').disabled = true;
           document.getElementById('btn-piety-others').disabled = true;
           const life = Math.min(6, (cachedPlayers[myKnight]?.life ?? 4) + 3);
@@ -9058,6 +9445,9 @@
           await fbDb.ref('games/' + currentRoom + '/quests/excalibur/position').set(pos);
           await addLog('quest', 'Lady of the Lake moved Excalibur toward the knights (position ' + pos + ')');
           if (pos >= 5) await resolveQuestVictory('excalibur');
+        } else if (isDying(myKnight)) {
+          // Dying knights cannot gain Life Points (Change 3).
+          await addLog('info', getKnightDisplayName(myKnight) + ' played Lady of the Lake but is dying — no Life Points gained.');
         } else {
           const life = Math.min(6, (cachedPlayers[myKnight]?.life ?? 4) + 2);
           await fbDb.ref('games/' + currentRoom + '/players/' + myKnight + '/life').set(life);
