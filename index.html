@@ -1074,7 +1074,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v72';
+    const APP_VERSION = 'shadows-v73';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -5783,6 +5783,9 @@
 
       } else if (name === 'Morgan 5') {
         // Any player can volunteer 2 LP; if all decline, everyone discards 1 white card
+        debugLog('morgan5', 'triggered (volunteer-or-all-discard)', {
+          alive: (roomData?.turnOrder || []).filter(k => cachedPlayers[k]?.alive !== false && !cachedPlayers[k]?.isRevealed),
+        });
         await startPendingInteraction('morgan5Volunteer', card);
       }
     }
@@ -6275,7 +6278,8 @@
       }
 
       if (myHand.length === 0) {
-        // Auto-respond if no cards
+        // Auto-respond if no cards (rule: discard only "if they have at least one")
+        debugLog('morgan5', 'auto-skip discard — no white cards', { knight: myKnight, handSize: 0 });
         fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
           .set({ done: true });
         return;
@@ -6305,6 +6309,7 @@
       await requestWhiteDiscard([card]);
       await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
         .set({ done: true });
+      debugLog('morgan5', 'discarded 1 card', { knight: myKnight, handSizeAfter: myHand.length });
       showToast('Card discarded.');
     }
 
@@ -6410,6 +6415,7 @@
       // All declined — everyone with at least 1 white card must discard 1
       // Set up a new discard interaction
       await addLog('evil', 'No one volunteered for Morgan 5 — all knights must discard 1 White card!');
+      debugLog('morgan5', 'no volunteer → all discard 1', { required: aliveKnights, responses });
       await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set({
         type: 'morganDiscard', card: { name: 'Morgan 5 (all discard)' },
         responses: {}, resolved: false,
@@ -6984,6 +6990,11 @@
 
       // Morgan 5 only requires the drawing knight's response (single-player choice)
       const requiredCount = interaction.type === 'morgan5Choice' ? 1 : aliveKnights.length;
+
+      debugLog('interaction', 'checkInteractionResolution', {
+        type: interaction.type, required: aliveKnights, requiredCount,
+        responded: Object.keys(interaction.responses || {}), responsesCount,
+      });
 
       if (responsesCount >= requiredCount) {
         await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set(null);
