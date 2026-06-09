@@ -1078,7 +1078,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v77';
+    const APP_VERSION = 'shadows-v78';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1347,12 +1347,8 @@
         }
         const meta = metaSnap.val();
 
-        // If game ended, clear session
-        if (meta.status === 'ended') {
-          console.log('Reconnect: game ended');
-          clearSession();
-          return false;
-        }
+        // Ended games are NOT discarded — reconnect so the results overlay is restored
+        // (renderResultsScreen fires from the meta listener for status 'ended').
 
         // Spectator reconnect — no knight validation needed
         if (savedSpectator === 'true') {
@@ -1610,7 +1606,22 @@
       if (!snap.exists()) { showToast('Room not found.'); return; }
 
       const meta = snap.val();
-      if (meta.status === 'ended') { showToast('Game has already ended.'); return; }
+      if (meta.status === 'ended') {
+        // Re-open the finished game's results read-only (recover a results screen lost to a refresh).
+        currentRoom = code;
+        isHost = (meta.hostUid === myUid);
+        isSpectator = true;
+        myKnight = null;
+        roomData = meta;
+        try {
+          localStorage.setItem('shadows-room-code', code);
+          localStorage.setItem('shadows-is-host', isHost ? 'true' : 'false');
+          localStorage.setItem('shadows-is-spectator', 'true');
+          localStorage.removeItem('shadows-knight-id');
+        } catch (e) {}
+        listenToRoom(); // meta listener → enterGameScreen (ended) → renderResultsScreen
+        return;
+      }
       if (meta.status === 'setup') { showToast('Game is starting — try again in a moment.'); return; }
 
       // Check player count
@@ -1989,8 +2000,8 @@
         // Host-only "Export ALL players' logs" button (Change 6)
         $('btn-export-all-debug').style.display = isHost ? '' : 'none';
 
-        // If game started or in setup, switch to game screen
-        if ((roomData.status === 'setup' || roomData.status === 'playing') && !inGameScreen) {
+        // If game started, in setup, or ended (reconnect/join to view results), switch to game screen
+        if ((roomData.status === 'setup' || roomData.status === 'playing' || roomData.status === 'ended') && !inGameScreen) {
           enterGameScreen();
         }
         // Update setup overlay visibility if already in game.
@@ -2621,6 +2632,9 @@
       boardListener = fbDb.ref('games/' + currentRoom + '/board').on('value', snap => {
         cachedBoard = snap.val() || { siegeEngines: 0, swords: [] };
         renderBoard();
+        // On an ended game (reconnect/join to view results), meta won't tick again — refresh
+        // the results stats once the board data arrives so sword/siege counts aren't 0.
+        if (roomData?.status === 'ended') renderResultsScreen();
       });
     }
 
