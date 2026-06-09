@@ -1062,7 +1062,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v70';
+    const APP_VERSION = 'shadows-v71';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1203,9 +1203,12 @@
     // it legitimately knows; nothing is written to the shared game log. The host
     // can on-demand aggregate every device's buffer via meta/debugCollect.
     const DEBUG_BUFFER_MAX = 2000;
-    let debugBuffer = [];           // in-memory ring buffer of {t, knight, isHost, category, message, data}
+    let debugBuffer = [];           // in-memory ring buffer of {t, seq, boot, v, knight, isHost, turn, phase, category, message, data}
     let detailedDebugEnabled = false; // controls the on-screen debug panel visibility
     let lastDebugCollectId = null;  // dedupe host aggregation requests
+    let debugSeq = 0;               // per-boot monotonic counter (exact intra-device order + truncation detection)
+    const debugBootId = Math.random().toString(36).slice(2, 8); // distinguishes refreshes/reconnects of the same knight
+    let debugServerOffset = 0;      // Firebase serverTimeOffset (ms) so timestamps are comparable across devices
 
     // ═══════════════════════════════════════════════════════════════════
     //  SECTION 3: Firebase Setup
@@ -1233,7 +1236,18 @@
       firebase.initializeApp(FIREBASE_CONFIG);
       fbAuth = firebase.auth();
       fbDb   = firebase.database();
+      // Track clock skew so debug-log timestamps are comparable across devices (debug item #1).
+      try { fbDb.ref('.info/serverTimeOffset').on('value', s => { debugServerOffset = s.val() || 0; }); } catch (e) {}
     }
+
+    // Capture uncaught errors/rejections into the debug log (debug item #3) — a fork
+    // often shows up as one device throwing while another doesn't.
+    window.addEventListener('error', e => {
+      try { debugLog('error', e.message || 'window error', { src: e.filename, line: e.lineno, col: e.colno }); } catch (_) {}
+    });
+    window.addEventListener('unhandledrejection', e => {
+      try { debugLog('error', 'unhandledrejection', { reason: String(e.reason && (e.reason.message || e.reason)) }); } catch (_) {}
+    });
 
     // ═══════════════════════════════════════════════════════════════════
     //  SECTION 4: Utility Functions
@@ -4035,10 +4049,16 @@
     function debugLog(category, message, data) {
       try {
         const entry = {
-          t: new Date().toISOString(),
+          // Server-corrected timestamp so entries from different devices share one clock.
+          t: new Date(Date.now() + debugServerOffset).toISOString(),
+          seq: ++debugSeq,               // per-boot order + truncation detection (first seq > 1 ⇒ buffer dropped earlier entries)
+          boot: debugBootId,             // tells refreshes/reconnects of the same knight apart
           v: APP_VERSION,                // stamp the build so version mismatches are visible after merge
           knight: myKnight || (isSpectator ? 'spectator' : 'unknown'),
           isHost: !!isHost,
+          turn: roomData?.turnNumber ?? null,     // shared logical clock to align devices
+          cur: roomData?.currentTurnKnight ?? null,
+          phase: roomData?.turnPhase ?? null,
           category: category || 'info',
           message: message || '',
         };
@@ -4065,7 +4085,11 @@
       const dataStr = e.data !== undefined
         ? ' | ' + (typeof e.data === 'string' ? e.data : JSON.stringify(e.data))
         : '';
-      return e.t + ' [' + (e.knight || 'unknown') + '/' + role + '/' + (e.v || '?') + '] ' +
+      const seqStr = e.seq != null ? '#' + e.seq : '#?';
+      // Logical-clock context: turn number / phase / whose turn it is.
+      const turnStr = 't' + (e.turn ?? '?') + '/' + (e.phase || '-') + (e.cur ? '/' + e.cur : '');
+      return e.t + ' ' + seqStr + ' [' + (e.knight || 'unknown') + '/' + role + '/' +
+        (e.v || '?') + '/' + (e.boot || '----') + '] ' + turnStr + ' | ' +
         (e.category || 'info') + ' | ' + (e.message || '') + dataStr;
     }
 
