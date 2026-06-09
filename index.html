@@ -1075,7 +1075,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v75';
+    const APP_VERSION = 'shadows-v76';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1263,7 +1263,10 @@
     // Capture uncaught errors/rejections into the debug log (debug item #3) — a fork
     // often shows up as one device throwing while another doesn't.
     window.addEventListener('error', e => {
-      try { debugLog('error', e.message || 'window error', { src: e.filename, line: e.lineno, col: e.colno }); } catch (_) {}
+      try {
+        debugLog('error', (e.error && e.error.message) || e.message || 'window error',
+          { src: e.filename, line: e.lineno, col: e.colno, stack: e.error && e.error.stack });
+      } catch (_) {}
     });
     window.addEventListener('unhandledrejection', e => {
       try { debugLog('error', 'unhandledrejection', { reason: String(e.reason && (e.reason.message || e.reason)) }); } catch (_) {}
@@ -3696,6 +3699,9 @@
         for (let i = 0; i < count && drawPile.length > 0; i++) pool.push(drawPile.pop());
         // If pile exhausted mid-draw, reshuffle and draw remainder
         if (pool.length < count && drawPile.length === 0) {
+          // Persist the depleted pile FIRST so reshuffle merges only the discard and
+          // doesn't re-add the cards we just popped into `pool` (duplication bug).
+          await fbDb.ref(deckPath + 'whiteDraw').set(drawPile);
           const reshuffled = await reshuffleDecksIfNeeded(deckPath);
           if (reshuffled) {
             const freshSnap = await fbDb.ref(deckPath + 'whiteDraw').once('value');
@@ -3802,6 +3808,9 @@
 
       // If pile exhausted mid-draw, reshuffle and draw remainder
       if (drawnCards.length < count && drawPile.length === 0) {
+        // Persist the depleted pile FIRST so reshuffle merges only the discard and
+        // doesn't re-add the cards we just popped into `drawnCards` (duplication bug).
+        await fbDb.ref(deckPath + drawKey).set(drawPile);
         const reshuffled = await reshuffleDecksIfNeeded(deckPath);
         if (reshuffled) {
           const freshSnap = await fbDb.ref(deckPath + drawKey).once('value');
@@ -8497,7 +8506,8 @@
       }
       overlay.classList.remove('hidden');
       resetCombatOverlayMinimize();
-      renderCombatOverlay(resolution);
+      try { renderCombatOverlay(resolution); }
+      catch (err) { debugLog('error', 'onCombatResolutionChanged → renderCombatOverlay threw', { msg: err.message, stack: err.stack }); }
     }
 
     function onQuestResultChanged() {
@@ -8640,7 +8650,7 @@
         html += '</div>';
         $('combat-content').innerHTML = html;
         $('combat-actions').innerHTML = '<p class="waiting-text">Revealing shortly...</p>';
-        combatStageTimer = setTimeout(() => { const cur = roomData?.combatResolution; if (cur) renderCombatOverlay(cur); },
+        combatStageTimer = setTimeout(() => { try { const cur = roomData?.combatResolution; if (cur) renderCombatOverlay(cur); } catch (err) { debugLog('error', 'combat preReveal timer threw', { msg: err.message, stack: err.stack }); } },
           (res.revealAt + COMBAT_PREREVEAL_MS) - Date.now() + 30);
         return;
       }
@@ -8650,7 +8660,7 @@
         html += '<div class="combat-shuffle-banner">🔀 Shuffling before reveal</div>';
         $('combat-content').innerHTML = html;
         $('combat-actions').innerHTML = '<p class="waiting-text">Shuffling the black cards...</p>';
-        combatStageTimer = setTimeout(() => { const cur = roomData?.combatResolution; if (cur) renderCombatOverlay(cur); },
+        combatStageTimer = setTimeout(() => { try { const cur = roomData?.combatResolution; if (cur) renderCombatOverlay(cur); } catch (err) { debugLog('error', 'combat shuffling timer threw', { msg: err.message, stack: err.stack }); } },
           (res.revealAt + COMBAT_PREREVEAL_MS + COMBAT_SHUFFLE_MS) - Date.now() + 30);
         return;
       }
