@@ -1049,6 +1049,9 @@
         <h3 style="color:var(--gold);margin-bottom:0.5rem;font-size:1rem;">Knights of the Round Table</h3>
         <div class="results-knights" id="results-knights"></div>
         <button class="btn" id="btn-results-download-log" style="width:100%;margin-top:0.5rem;font-size:1rem;">Download Log</button>
+        <button class="btn" id="btn-results-export-my" style="width:100%;margin-top:0.5rem;font-size:1rem;">Export My Debug Log</button>
+        <button class="btn" id="btn-results-export-all" style="width:100%;margin-top:0.5rem;font-size:1rem;display:none;">Export ALL Players' Debug Logs</button>
+        <button class="btn" id="btn-results-audit" style="width:100%;margin-top:0.5rem;font-size:1rem;">Audit Deck</button>
         <button class="btn btn-heroic" id="btn-results-lobby" style="width:100%;margin-top:0.5rem;">Return to Lobby</button>
       </div>
     </div>
@@ -1075,7 +1078,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v76';
+    const APP_VERSION = 'shadows-v77';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -7277,6 +7280,17 @@
 
       // Download Log button
       $('btn-results-download-log').onclick = downloadGameLog;
+
+      // Debug-log export at game end (debug controls are behind this overlay otherwise).
+      // Export ALL only works while other players are still on their results screens.
+      $('btn-results-export-my').onclick = exportMyDebugLog;
+      $('btn-results-export-all').onclick = exportAllPlayersDebugLogs;
+      $('btn-results-export-all').style.display = isHost ? '' : 'none';
+      $('btn-results-audit').onclick = () => {
+        auditMyHand('results');
+        auditWhiteCardsHostSide('results');
+        showToast('Deck audit logged. Host: Export ALL Players’ Debug Logs to combine.');
+      };
 
       // Return to Lobby button
       $('btn-results-lobby').onclick = async () => {
