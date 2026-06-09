@@ -1074,7 +1074,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v73';
+    const APP_VERSION = 'shadows-v74';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1225,6 +1225,9 @@
     let debugSeq = 0;               // per-boot monotonic counter (exact intra-device order + truncation detection)
     const debugBootId = Math.random().toString(36).slice(2, 8); // distinguishes refreshes/reconnects of the same knight
     let debugServerOffset = 0;      // Firebase serverTimeOffset (ms) so timestamps are comparable across devices
+    let debugPersistTimer = null;   // debounce timer for localStorage persistence
+    let debugRestored = false;      // restore the saved buffer only once per page load
+    const DEBUG_PERSIST_MAX = 1500; // cap entries written to localStorage (iOS quota-friendly)
 
     // ═══════════════════════════════════════════════════════════════════
     //  SECTION 3: Firebase Setup
@@ -1264,6 +1267,10 @@
     window.addEventListener('unhandledrejection', e => {
       try { debugLog('error', 'unhandledrejection', { reason: String(e.reason && (e.reason.message || e.reason)) }); } catch (_) {}
     });
+    // Flush the debug buffer to localStorage before a reload/background so the last
+    // sub-second of entries survives pull-to-refresh (debug item, Change 6).
+    window.addEventListener('pagehide', () => { try { persistDebugBufferNow(); } catch (_) {} });
+    document.addEventListener('visibilitychange', () => { if (document.hidden) { try { persistDebugBufferNow(); } catch (_) {} } });
 
     // ═══════════════════════════════════════════════════════════════════
     //  SECTION 4: Utility Functions
@@ -2411,12 +2418,12 @@
       fbDb.ref('games/' + currentRoom + '/meta/grailSelfSave').set(newVal);
     });
 
-    // Detailed debug log controls (Change 6) — per-device
+    // Detailed debug log controls (Change 6) — per-device. The toggle is DISPLAY-only;
+    // collection in debugLog() runs unconditionally. Preference persists across reloads.
     $('toggle-debug-log').addEventListener('click', () => {
       detailedDebugEnabled = !detailedDebugEnabled;
-      $('toggle-debug-log').classList.toggle('on', detailedDebugEnabled);
-      $('debug-btn-row').style.display = detailedDebugEnabled ? 'flex' : 'none';
-      renderDebugPanel();
+      try { localStorage.setItem('soc_debug_enabled', detailedDebugEnabled ? '1' : '0'); } catch (e) {}
+      applyDebugToggleUI();
     });
     $('btn-export-my-debug').addEventListener('click', exportMyDebugLog);
     $('btn-export-all-debug').addEventListener('click', exportAllPlayersDebugLogs);
@@ -2468,6 +2475,11 @@
 
       // Host presence heartbeat + "host away" banner (explains stalls when host tab is asleep)
       startHostPresenceMonitor();
+
+      // Debug log: restore history saved before a reload, and re-apply the saved display toggle.
+      restoreDebugBuffer();
+      try { detailedDebugEnabled = localStorage.getItem('soc_debug_enabled') === '1'; } catch (e) {}
+      applyDebugToggleUI();
 
       // Re-render UI when tab regains focus (Firebase updates may arrive while backgrounded)
       document.addEventListener('visibilitychange', () => {
@@ -4138,16 +4150,45 @@
         debugBuffer.push(entry);
         if (debugBuffer.length > DEBUG_BUFFER_MAX) debugBuffer.shift();
         console.log('[SOC]', category, message, data !== undefined ? data : '');
-        // Persist a tail to localStorage so a refreshed/crashed device keeps recent breadcrumbs.
-        if (currentRoom) {
-          try {
-            localStorage.setItem('soc_debug_' + currentRoom,
-              JSON.stringify(debugBuffer.slice(-500)));
-          } catch (e) { /* quota — ignore */ }
-        }
+        // Persist a tail to localStorage (debounced) so a refresh/crash keeps the history.
+        scheduleDebugPersist();
         // If a debug panel is open, keep it fresh.
         if (detailedDebugEnabled) renderDebugPanel();
       } catch (e) { /* logging must never throw into game logic */ }
+    }
+
+    function debugStorageKey() { return 'soc_debug_' + (currentRoom || 'global'); }
+
+    function persistDebugBufferNow() {
+      try { localStorage.setItem(debugStorageKey(), JSON.stringify(debugBuffer.slice(-DEBUG_PERSIST_MAX))); } catch (e) { /* quota — ignore */ }
+    }
+
+    function scheduleDebugPersist() {
+      if (debugPersistTimer) return; // a write is already queued
+      debugPersistTimer = setTimeout(() => { debugPersistTimer = null; persistDebugBufferNow(); }, 1000);
+    }
+
+    // Restore the saved log after a reload so a browser refresh doesn't wipe the history.
+    // Runs once per page load, once currentRoom is known.
+    function restoreDebugBuffer() {
+      if (debugRestored) return;
+      debugRestored = true;
+      try {
+        const raw = localStorage.getItem(debugStorageKey());
+        if (!raw) return;
+        const saved = JSON.parse(raw);
+        if (Array.isArray(saved) && saved.length) {
+          debugBuffer = [...saved, ...debugBuffer].slice(-DEBUG_BUFFER_MAX);
+          debugLog('debug', 'restored debug log after reload', { count: saved.length });
+        }
+      } catch (e) { /* ignore */ }
+    }
+
+    // Toggle is display-only: collection in debugLog() is always on regardless of this.
+    function applyDebugToggleUI() {
+      const t = $('toggle-debug-log'); if (t) t.classList.toggle('on', detailedDebugEnabled);
+      const r = $('debug-btn-row'); if (r) r.style.display = detailedDebugEnabled ? 'flex' : 'none';
+      renderDebugPanel();
     }
 
     function formatDebugEntry(e) {
