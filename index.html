@@ -969,6 +969,7 @@
         <div class="debug-btn-row" id="debug-btn-row" style="display:none;">
           <button class="btn-download-log" id="btn-export-my-debug">Export My Log</button>
           <button class="btn-download-log" id="btn-export-all-debug" style="display:none;">Export ALL Players' Logs</button>
+          <button class="btn-download-log" id="btn-audit-deck">Audit Deck</button>
         </div>
         <pre class="debug-panel hidden" id="debug-panel"><div id="debug-panel-body"></div></pre>
       </div>
@@ -1074,7 +1075,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v74';
+    const APP_VERSION = 'shadows-v75';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -2427,6 +2428,11 @@
     });
     $('btn-export-my-debug').addEventListener('click', exportMyDebugLog);
     $('btn-export-all-debug').addEventListener('click', exportAllPlayersDebugLogs);
+    $('btn-audit-deck').addEventListener('click', () => {
+      auditMyHand('manual');
+      auditWhiteCardsHostSide('manual');
+      showToast('Deck audit logged. Host: Export ALL Players’ Logs to combine.');
+    });
 
     // Copy room code on tap
     $('lobby-code').addEventListener('click', () => {
@@ -2480,6 +2486,9 @@
       restoreDebugBuffer();
       try { detailedDebugEnabled = localStorage.getItem('soc_debug_enabled') === '1'; } catch (e) {}
       applyDebugToggleUI();
+
+      // Deck-integrity baseline census (delayed so private hand + quest caches populate).
+      setTimeout(() => { auditMyHand('baseline'); auditWhiteCardsHostSide('baseline'); }, 4000);
 
       // Re-render UI when tab regains focus (Firebase updates may arrive while backgrounded)
       document.addEventListener('visibilitychange', () => {
@@ -3548,6 +3557,7 @@
       reshuffleUpdates['games/' + currentRoom + '/decks/blackDrawCount'] = newBlackDraw.length;
       await fbDb.ref().update(reshuffleUpdates);
       await addLog('system', 'Draw piles reshuffled from discard piles.');
+      auditWhiteCardsHostSide('after-reshuffle');
       return true;
     }
 
@@ -3833,6 +3843,7 @@
           updates['private/' + currentRoom + '/' + myKnight + '/hand'] = myHand;
           updates['games/' + currentRoom + '/drawResults/' + snap.key] = null;
           await fbDb.ref().update(updates);
+          auditMyHand('after-draw');
         } catch (e) {
           console.error('[SOC] drawResult processing error:', e);
         }
@@ -4155,6 +4166,67 @@
         // If a debug panel is open, keep it fresh.
         if (detailedDebugEnabled) renderDebugPanel();
       } catch (e) { /* logging must never throw into game logic */ }
+    }
+
+    // ── Deck-integrity audits (white-card duplicate diagnostics) ─────────
+    // Host-side census of every white card the host can see (it cannot read other
+    // players' hands — those are reported per-device by auditMyHand). Flags duplicate
+    // ids and cross-checks any in-flight card-share pool against the other piles.
+    async function auditWhiteCardsHostSide(tag) {
+      if (!isHost || !currentRoom) return;
+      try {
+        const deckPath = 'private/' + currentRoom + '/' + hostDeckKey + '/hostDecks/';
+        const [drawSnap, discSnap] = await Promise.all([
+          fbDb.ref(deckPath + 'whiteDraw').once('value'),
+          fbDb.ref(deckPath + 'whiteDiscard').once('value'),
+        ]);
+        const draw = drawSnap.val() || [];
+        const disc = discSnap.val() || [];
+        const q = cachedQuests || {};
+        const grailQuest = (q.holyGrail?.cards || q.holyGrail?.grailCards || []).filter(c => c?.type === 'grail');
+        const locations = {
+          whiteDraw: draw,
+          whiteDiscard: disc,
+          q_holyGrail: grailQuest,
+          q_blackKnight: q.blackKnight?.whiteCards || [],
+          q_lancelot: q.lancelot?.whiteCards || [],
+          q_saxonWar: q.saxonWar?.fightCards || [],
+          q_pictWar: q.pictWar?.fightCards || [],
+          sharePool: roomData?.pendingInteraction?.pool || [],
+        };
+        // Build id → [locations] map across every visible pile.
+        const seen = {};
+        const counts = {};
+        for (const [loc, arr] of Object.entries(locations)) {
+          counts[loc] = arr.length;
+          for (const c of arr) {
+            const id = c?.id ?? '(no-id)';
+            (seen[id] = seen[id] || []).push(loc);
+          }
+        }
+        const visibleTotal = Object.values(counts).reduce((a, b) => a + b, 0);
+        const duplicateIds = Object.entries(seen).filter(([, locs]) => locs.length > 1)
+          .map(([id, locs]) => ({ id, in: locs }));
+        const poolIds = (locations.sharePool || []).map(c => c?.id);
+        const poolAlsoElsewhere = poolIds.filter(id => (seen[id] || []).some(l => l !== 'sharePool'))
+          .map(id => ({ id, in: seen[id] }));
+        debugLog('deckaudit', 'host white-card census [' + tag + ']', {
+          counts, visibleTotal, duplicateIds, poolAlsoElsewhere,
+          note: 'excludes player hands (host cannot read them) — add per-device auditMyHand for the full 84',
+        });
+      } catch (e) { debugLog('deckaudit', 'host audit failed', { err: String(e) }); }
+    }
+
+    // Per-device: report this device's own hand so the host's Export ALL can complete the census.
+    function auditMyHand(tag) {
+      try {
+        if (!myKnight || isSpectator) return;
+        const ids = myHand.map(c => ({ id: c?.id ?? '(no-id)', type: c?.type, value: c?.value }));
+        const idCounts = {};
+        for (const c of myHand) { const id = c?.id ?? '(no-id)'; idCounts[id] = (idCounts[id] || 0) + 1; }
+        const dupIds = Object.entries(idCounts).filter(([, n]) => n > 1).map(([id]) => id);
+        debugLog('deckaudit', 'hand census [' + tag + ']', { knight: myKnight, count: myHand.length, ids, dupIds });
+      } catch (e) { /* never throw */ }
     }
 
     function debugStorageKey() { return 'soc_debug_' + (currentRoom || 'global'); }
@@ -6972,6 +7044,7 @@
       updates['games/' + currentRoom + '/meta/pendingInteraction'] = null;
       await fbDb.ref().update(updates);
       await addLog('info', logMsg);
+      auditWhiteCardsHostSide('after-card-share');
       await finishCardShareMoment(interaction);
     }
 
