@@ -1078,7 +1078,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v78';
+    const APP_VERSION = 'shadows-v79';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1962,7 +1962,33 @@
 
       // Listen to meta
       const metaRef = fbDb.ref('games/' + currentRoom + '/meta');
-      gameListener = metaRef.on('value', snap => {
+      gameListener = metaRef.on('value', applyMetaSnapshot);
+
+      // Listen to spectators (for lobby display)
+      fbDb.ref('games/' + currentRoom + '/spectators').on('value', snap => {
+        const specs = snap.val() || {};
+        const specEl = $('spectator-list');
+        const names = Object.values(specs).map(s => s.displayName);
+        if (names.length > 0) {
+          specEl.style.display = '';
+          specEl.textContent = 'Spectators: ' + names.join(', ');
+        } else {
+          specEl.style.display = 'none';
+        }
+      });
+
+      // Listen to players
+      const playersRef = fbDb.ref('games/' + currentRoom + '/players');
+      playersListener = playersRef.on('value', snap => {
+        const players = snap.val() || {};
+        updateLobbyUI(players);
+      });
+    }
+
+    // Apply a meta snapshot (live listener AND on-demand re-sync from the refocus handler,
+    // so a backgrounded tab that missed a transition can self-heal). Named so it can be
+    // reused by both metaRef.on('value', …) and a fresh .once('value', …).
+    function applyMetaSnapshot(snap) {
         if (!snap.exists()) {
           showToast('Room was closed.');
           leaveRoom(true);
@@ -2023,27 +2049,6 @@
           onQuestResultChanged();
           onCinematicChanged();
         }
-      });
-
-      // Listen to spectators (for lobby display)
-      fbDb.ref('games/' + currentRoom + '/spectators').on('value', snap => {
-        const specs = snap.val() || {};
-        const specEl = $('spectator-list');
-        const names = Object.values(specs).map(s => s.displayName);
-        if (names.length > 0) {
-          specEl.style.display = '';
-          specEl.textContent = 'Spectators: ' + names.join(', ');
-        } else {
-          specEl.style.display = 'none';
-        }
-      });
-
-      // Listen to players
-      const playersRef = fbDb.ref('games/' + currentRoom + '/players');
-      playersListener = playersRef.on('value', snap => {
-        const players = snap.val() || {};
-        updateLobbyUI(players);
-      });
     }
 
     function updateLobbyUI(players) {
@@ -2260,6 +2265,9 @@
         const gp = 'games/' + currentRoom + '/';
         const pp = 'private/' + currentRoom + '/';
 
+        // Clear any leftover card-share selections from a prior/abandoned setup in this room.
+        updates[gp + 'setup'] = null;
+
         // Meta
         updates[gp + 'meta/status'] = 'setup';
         updates[gp + 'meta/currentTurnKnight'] = firstKnight;
@@ -2467,6 +2475,7 @@
       if (inGameScreen) return;
       inGameScreen = true;
       showScreen('game-screen');
+      debugLog('setup', 'enterGameScreen', { status: roomData?.status, knight: myKnight, isHost, isSpectator });
 
       // Spectators: hide hand and loyalty areas
       if (isSpectator) {
@@ -2509,6 +2518,16 @@
 
       // Re-render UI when tab regains focus (Firebase updates may arrive while backgrounded)
       document.addEventListener('visibilitychange', () => {
+        // Full re-sync on refocus: a suspended/backgrounded tab may have missed a phase
+        // transition (e.g. lobby→setup) while its Firebase listeners were frozen. Re-fetch
+        // meta and re-apply it (applyMetaSnapshot enters the game screen + re-renders),
+        // and re-render the setup overlay — so the tab self-heals without a leave+rejoin.
+        if (!document.hidden && currentRoom) {
+          fbDb.ref('games/' + currentRoom + '/meta').once('value', applyMetaSnapshot);
+          fbDb.ref('games/' + currentRoom + '/setup').once('value', s => {
+            if (roomData?.status === 'setup') renderSetupShared(s.val() || {});
+          });
+        }
         if (!document.hidden && inGameScreen && roomData) {
           console.log('[SOC] tab refocused', { isHost, myKnight });
           renderGamePlayers();
@@ -4048,6 +4067,11 @@
       const sharedEl = $('setup-shared');
       const turnOrder = roomData?.turnOrder || [];
       const allShared = turnOrder.length > 0 && turnOrder.every(kid => selections[kid]);
+      debugLog('setup', 'renderSetupShared', {
+        mySetupShared, handLen: myHand.length, selectedCardId,
+        shared: Object.keys(selections || {}), allShared,
+        overlayHidden: $('setup-overlay')?.classList.contains('hidden'), inGameScreen,
+      });
 
       sharedEl.innerHTML = turnOrder.map(kid => {
         const sel = selections[kid];
@@ -4107,18 +4131,24 @@
       const card = myHand.find(c => c.id === selectedCardId);
       if (!card) return;
 
+      // Write FIRST; only commit local state on success so a dropped write can never
+      // strand the player on "Waiting…" with the card gone and no Share button.
+      const newHand = myHand.filter(c => c.id !== card.id);
+      const updates = {};
+      updates['private/' + currentRoom + '/' + myKnight + '/hand'] = newHand;
+      updates['games/' + currentRoom + '/setup/' + myKnight] = { card, displayName: myName };
+      try {
+        await fbDb.ref().update(updates);
+      } catch (e) {
+        debugLog('setup', 'share write FAILED — local state unchanged', { knight: myKnight, err: String(e) });
+        showToast('Share failed — try again.');
+        return;
+      }
       mySetupShared = true;
       selectedCardId = null;
-
-      // Remove card from hand
-      myHand = myHand.filter(c => c.id !== card.id);
-
-      // Write: update own hand + share the card publicly
-      const updates = {};
-      updates['private/' + currentRoom + '/' + myKnight + '/hand'] = myHand;
-      updates['games/' + currentRoom + '/setup/' + myKnight] = { card, displayName: myName };
-      await fbDb.ref().update(updates);
-
+      myHand = newHand;
+      debugLog('setup', 'card shared', { knight: myKnight, cardId: card.id, handLeft: myHand.length });
+      renderHand();
       showToast('Card shared!');
     }
 
@@ -7116,6 +7146,7 @@
         updates['games/' + currentRoom + '/meta/status'] = 'playing';
         updates['games/' + currentRoom + '/meta/turnPhase'] = 'evil';
         await fbDb.ref().update(updates);
+        debugLog('setup', 'setup → playing (card share complete)', {});
       } else if (interaction.moment === 'convocation') {
         await completeSWAction();
       }
