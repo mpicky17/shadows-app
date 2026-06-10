@@ -1078,7 +1078,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v79';
+    const APP_VERSION = 'shadows-v80';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -2265,8 +2265,10 @@
         const gp = 'games/' + currentRoom + '/';
         const pp = 'private/' + currentRoom + '/';
 
-        // Clear any leftover card-share selections from a prior/abandoned setup in this room.
+        // Clear any leftover card-share selections / interaction from a prior or abandoned
+        // setup in this room (a stale cardShare pendingInteraction would hide the setup overlay).
         updates[gp + 'setup'] = null;
+        updates[gp + 'meta/pendingInteraction'] = null;
 
         // Meta
         updates[gp + 'meta/status'] = 'setup';
@@ -4067,9 +4069,17 @@
       const sharedEl = $('setup-shared');
       const turnOrder = roomData?.turnOrder || [];
       const allShared = turnOrder.length > 0 && turnOrder.every(kid => selections[kid]);
+      const pendingType = roomData?.pendingInteraction?.type ?? null;
+      // Self-correct the overlay: its visibility is otherwise only recomputed on meta
+      // changes, but during sharing only the `setup` node changes (which calls THIS fn).
+      // If the local player still needs to share and hasn't minimized and there's no real
+      // card-share in progress, make sure the overlay isn't stuck hidden.
+      if (roomData?.status === 'setup' && !mySetupShared && !setupMinimized && pendingType !== 'cardShare') {
+        $('setup-overlay').classList.remove('hidden');
+      }
       debugLog('setup', 'renderSetupShared', {
         mySetupShared, handLen: myHand.length, selectedCardId,
-        shared: Object.keys(selections || {}), allShared,
+        shared: Object.keys(selections || {}), allShared, setupMinimized, pendingType,
         overlayHidden: $('setup-overlay')?.classList.contains('hidden'), inGameScreen,
       });
 
