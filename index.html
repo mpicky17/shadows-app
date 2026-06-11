@@ -1091,7 +1091,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v82';
+    const APP_VERSION = 'shadows-v83';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1217,6 +1217,8 @@
     let refocusHooksInstalled = false; // install visibilitychange/focus/pageshow once per page
     let lastResyncAt = 0;           // debounce so stacked refocus events don't triple-fetch
     let versionSkewWarned = new Set(); // one warning per offending version string
+    let lastMetaRxKey = '';         // change-detector for 'meta rx' inbound logging
+    let lastInteractionRxKey = '';  // change-detector for interaction-render logging
     let traitorStealProcessed = false;
     let setupListener = null;
     let cachedBoard = null;
@@ -1594,8 +1596,20 @@
           if (up !== lastConnectedState) {
             debugLog('sync', 'connection ' + (up ? 'UP' : 'DOWN'),
               { prevStateMs: lastConnectedChangeAt ? Date.now() - lastConnectedChangeAt : null });
+            const wasDown = lastConnectedState === false;
             lastConnectedState = up;
             lastConnectedChangeAt = Date.now();
+            // Post-reconnect refresh: resyncOnRefocus's .once reads can race a kick
+            // (they fire before the new socket is up), and KTY4T4 showed the live meta
+            // listener can silently miss updates around a reconnect. Re-fetch state on
+            // every genuine DOWN→UP so the UI converges no matter what was missed.
+            if (up && wasDown && currentRoom) {
+              debugLog('sync', 'post-reconnect refresh');
+              fbDb.ref('games/' + currentRoom + '/meta').once('value', applyMetaSnapshot);
+              fbDb.ref('games/' + currentRoom + '/setup').once('value', s => {
+                if (roomData?.status === 'setup') renderSetupShared(s.val() || {});
+              });
+            }
           }
         });
 
@@ -2046,6 +2060,23 @@
         }
         roomData = snap.val();
         if (!roomData.galahadPowerUsed) galahadPowerUsedLocal = false;
+
+        // Inbound-path instrumentation: one line whenever a meta snapshot meaningfully
+        // changes. Its ABSENCE right after another device's write is direct evidence of
+        // a dead meta listener (the KTY4T4 stuck-"Submitting…" failure mode).
+        {
+          const pi = roomData.pendingInteraction;
+          const rxKey = [roomData.status, roomData.turnNumber, roomData.turnPhase,
+            pi?.type ?? '-', pi?.stage ?? '-', Object.keys(pi?.responses || {}).length].join('|');
+          if (rxKey !== lastMetaRxKey) {
+            lastMetaRxKey = rxKey;
+            debugLog('sync', 'meta rx', {
+              status: roomData.status, turn: roomData.turnNumber, phase: roomData.turnPhase,
+              pendingType: pi?.type ?? null, stage: pi?.stage ?? null,
+              responses: Object.keys(pi?.responses || {}).length,
+            });
+          }
+        }
 
         // Version-skew check: a stale service-worker cache once silently reloaded the
         // host into an older build mid-game (v78→v77 on 6/9) — a fork risk. The host
@@ -4117,7 +4148,21 @@
         }
       };
       beat();
-      setInterval(beat, HOST_HEARTBEAT_MS);
+      // Desktop browsers throttle background-tab setInterval to ~1/min, which made a
+      // perfectly responsive host look 169s stale (KTY4T4) and fed false host-away
+      // banners + needless connection kicks. Web Worker timers are NOT throttled, so
+      // the host drives its beat from one; plain setInterval stays as the fallback.
+      if (isHost) {
+        try {
+          const workerSrc = 'setInterval(function(){ postMessage(1); }, ' + HOST_HEARTBEAT_MS + ');';
+          const beatWorker = new Worker(URL.createObjectURL(new Blob([workerSrc], { type: 'text/javascript' })));
+          beatWorker.onmessage = beat;
+        } catch (e) {
+          setInterval(beat, HOST_HEARTBEAT_MS);
+        }
+      } else {
+        setInterval(beat, HOST_HEARTBEAT_MS);
+      }
       // Re-evaluate staleness on a timer (a stalled host simply stops sending beats).
       setInterval(updateHostPresenceBanner, HOST_HEARTBEAT_MS);
     }
@@ -4642,6 +4687,11 @@
       if (!req || !req.id || req.id === lastDebugCollectId) return;
       lastDebugCollectId = req.id;
       if (!currentRoom) return;
+      // An evicted tab reloads fresh and can reach this from its FIRST meta snapshot,
+      // before enterGameScreen has restored the saved buffer — it then uploads 3 boot
+      // lines and the whole session history is lost (happened twice to the Chrome
+      // logs). Restore first; restoreDebugBuffer is idempotent per page load.
+      try { restoreDebugBuffer(); } catch (e) { /* ignore */ }
       const who = myKnight || (isSpectator ? 'spectator_' + (myUid || '').slice(-4) : 'unknown');
       try {
         fbDb.ref('games/' + currentRoom + '/debug/' + who + '/' + req.id).set(debugBuffer);
@@ -6519,6 +6569,22 @@
       const interaction = roomData?.pendingInteraction;
       const area = $('interaction-area');
 
+      // Log when the rendered interaction actually changes (pairs with 'meta rx' to
+      // separate "snapshot never arrived" from "arrived but didn't re-render").
+      {
+        const k = interaction
+          ? interaction.type + '|' + (interaction.stage || '-') + '|' +
+            Object.keys(interaction.responses || {}).length + '|' + !!interaction.resolved
+          : 'none';
+        if (k !== lastInteractionRxKey) {
+          lastInteractionRxKey = k;
+          debugLog('sync', 'interaction render', {
+            type: interaction?.type ?? null, stage: interaction?.stage ?? null,
+            responses: Object.keys(interaction?.responses || {}).length,
+          });
+        }
+      }
+
       if (!interaction || interaction.resolved) {
         area.innerHTML = '';
         discardMode = null;
@@ -7288,16 +7354,29 @@
       });
       const acceptBtn = document.getElementById('btn-cardshare-accept');
       const rejectBtn = document.getElementById('btn-cardshare-reject');
+      // Echo watchdog: KTY4T4 proved the write can ack in 51ms while the live meta
+      // listener has silently died — the button then sticks on "Submitting…" forever
+      // because only the meta echo clears it. If our vote isn't reflected locally
+      // shortly after the ack, re-fetch meta directly (applyMetaSnapshot re-renders).
+      const verifyVoteEcho = label => () => setTimeout(() => {
+        const pi = roomData?.pendingInteraction;
+        if (currentRoom && pi && pi.type === 'cardShare' && pi.responses?.[myKnight] === undefined) {
+          debugLog('sync', label + ' echo missing — refetching meta', { stage: pi.stage ?? null });
+          fbDb.ref('games/' + currentRoom + '/meta').once('value', applyMetaSnapshot);
+        }
+      }, 3000);
       if (acceptBtn) acceptBtn.addEventListener('click', () => {
         acceptBtn.disabled = true; acceptBtn.textContent = 'Submitting…';
         if (rejectBtn) rejectBtn.disabled = true;
-        watchedWrite('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight, true, 'cardShare accept');
+        watchedWrite('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight, true, 'cardShare accept')
+          .then(verifyVoteEcho('cardShare accept'));
       });
       if (rejectBtn) rejectBtn.addEventListener('click', () => {
         if (!confirm('Reject this split and force the cards to be distributed at random?')) return;
         rejectBtn.disabled = true; rejectBtn.textContent = 'Submitting…';
         if (acceptBtn) acceptBtn.disabled = true;
-        watchedWrite('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight, false, 'cardShare reject');
+        watchedWrite('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight, false, 'cardShare reject')
+          .then(verifyVoteEcho('cardShare reject'));
       });
       const randomBtn = document.getElementById('btn-cardshare-random');
       if (randomBtn) randomBtn.addEventListener('click', () => {
