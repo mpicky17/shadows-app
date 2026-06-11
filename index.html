@@ -11,9 +11,11 @@
   <link rel="apple-touch-icon" href="icon-192.png">
 
   <!-- Firebase SDK (compat mode) -->
-  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+  <!-- crossorigin so uncaught errors inside SDK callbacks surface with real messages/stacks
+       instead of the sanitized "Script error." (gstatic serves CORS headers) -->
+  <script crossorigin="anonymous" src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script crossorigin="anonymous" src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <script crossorigin="anonymous" src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
 
   <style>
     /* ── Reset & Base ───────────────────────────────────────────────────── */
@@ -1078,7 +1080,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v80';
+    const APP_VERSION = 'shadows-v81';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1197,6 +1199,13 @@
     let hostPresenceStarted = false;
     let lastHostHeartbeat = 0;
     let hostHeartbeatListener = null;
+    // Connection-state tracking (zombie-socket diagnosis: the SDK can believe it's
+    // connected for up to ~60s after iOS froze the tab and killed the websocket)
+    let lastConnectedState = null;  // last .info/connected value (null until first event)
+    let lastConnectedChangeAt = 0;  // when it last flipped (local clock)
+    let refocusHooksInstalled = false; // install visibilitychange/focus/pageshow once per page
+    let lastResyncAt = 0;           // debounce so stacked refocus events don't triple-fetch
+    let versionSkewWarned = new Set(); // one warning per offending version string
     let traitorStealProcessed = false;
     let setupListener = null;
     let cachedBoard = null;
@@ -1232,6 +1241,16 @@
     let debugPersistTimer = null;   // debounce timer for localStorage persistence
     let debugRestored = false;      // restore the saved buffer only once per page load
     const DEBUG_PERSIST_MAX = 1500; // cap entries written to localStorage (iOS quota-friendly)
+    // Which browser this device runs (3 browsers share one phone during testing — without
+    // this, exported logs can't be attributed to the browser that misbehaved).
+    const BROWSER_ID = (() => {
+      const ua = navigator.userAgent;
+      if (/EdgiOS|Edg\//.test(ua)) return 'edge';
+      if (/CriOS|Chrome\//.test(ua)) return 'chrome';
+      if (/FxiOS|Firefox\//.test(ua)) return 'firefox';
+      if (/Safari\//.test(ua)) return 'safari';
+      return 'other';
+    })();
 
     // ═══════════════════════════════════════════════════════════════════
     //  SECTION 3: Firebase Setup
@@ -1528,16 +1547,26 @@
         if (existingUser) {
           myUid = existingUser.uid;
           console.log('[SOC] Restored persisted auth:', myUid);
+          debugLog('auth', 'restored persisted auth', { uid: myUid });
         } else {
           const cred = await fbAuth.signInAnonymously();
           myUid = cred.user.uid;
           console.log('[SOC] Created new anonymous auth:', myUid);
+          debugLog('auth', 'created new anonymous auth', { uid: myUid });
         }
 
-        // Keep myUid in sync if auth state changes later (token refresh, etc.)
+        // Keep myUid in sync if auth state changes later (token refresh, etc.).
+        // A null user or a changed UID mid-game means persistence/refresh broke
+        // (seen once as an IndexedDB error after a long iOS suspension) — every
+        // write afterwards would fail permission_denied, so make it attributable.
         fbAuth.onAuthStateChanged(user => {
-          if (user && user.uid !== myUid) {
+          if (!user) {
+            debugLog('auth', 'auth state became NULL (persistence/refresh failure?)', { hadUid: myUid });
+            return;
+          }
+          if (user.uid !== myUid) {
             console.warn('[SOC] Auth UID changed:', myUid, '->', user.uid);
+            debugLog('auth', 'auth UID changed', { from: myUid, to: user.uid });
             myUid = user.uid;
           }
         });
@@ -1546,9 +1575,17 @@
         const savedName = localStorage.getItem('shadows-player-name');
         if (savedName) myName = savedName;
 
-        // Monitor connection state
+        // Monitor connection state. Log transitions: the timestamps expose how long a
+        // resumed tab sat on a dead ("zombie") websocket before the SDK noticed.
         fbDb.ref('.info/connected').on('value', snap => {
-          setConnectionStatus(snap.val() ? 'connected' : 'disconnected');
+          const up = !!snap.val();
+          setConnectionStatus(up ? 'connected' : 'disconnected');
+          if (up !== lastConnectedState) {
+            debugLog('sync', 'connection ' + (up ? 'UP' : 'DOWN'),
+              { prevStateMs: lastConnectedChangeAt ? Date.now() - lastConnectedChangeAt : null });
+            lastConnectedState = up;
+            lastConnectedChangeAt = Date.now();
+          }
         });
 
         // Try to reconnect to a saved session
@@ -1939,6 +1976,8 @@
         uid: myUid,
         displayName: myName,
         knightId: knightId,
+        version: APP_VERSION,
+        browser: BROWSER_ID,
         life: 4,
         location: 'roundTable',
         alive: true,
@@ -1997,6 +2036,16 @@
         roomData = snap.val();
         if (!roomData.galahadPowerUsed) galahadPowerUsedLocal = false;
 
+        // Version-skew check: a stale service-worker cache once silently reloaded the
+        // host into an older build mid-game (v78→v77 on 6/9) — a fork risk. The host
+        // stamps meta/hostVersion; everyone warns once per offending version.
+        if (roomData.hostVersion && roomData.hostVersion !== APP_VERSION &&
+            !versionSkewWarned.has(roomData.hostVersion)) {
+          versionSkewWarned.add(roomData.hostVersion);
+          debugLog('version', 'VERSION SKEW vs host', { mine: APP_VERSION, host: roomData.hostVersion });
+          showToast('Version mismatch: you run ' + APP_VERSION + ', host runs ' + roomData.hostVersion + ' — refresh all devices.', 6000);
+        }
+
         // Respond to a host request to aggregate debug logs (Change 6)
         handleDebugCollectRequest();
 
@@ -2036,6 +2085,14 @@
         if (inGameScreen) {
           const cardShareActive = roomData.pendingInteraction && roomData.pendingInteraction.type === 'cardShare';
           const hideSetup = roomData.status !== 'setup' || setupMinimized || cardShareActive;
+          // Log visibility flips at the decision point: this is the only place a meta
+          // change can hide the overlay, and a meta-driven hide previously left no log
+          // line at all (renderSetupShared only logs on setup-node changes).
+          if ($('setup-overlay').classList.contains('hidden') !== hideSetup) {
+            debugLog('setup', 'overlay visibility changed', {
+              hidden: hideSetup, status: roomData.status, setupMinimized, cardShareActive: !!cardShareActive,
+            });
+          }
           $('setup-overlay').classList.toggle('hidden', hideSetup);
           // Keep the minimized pill in sync: only show it while genuinely minimized in setup.
           $('setup-minimized').classList.toggle('hidden', !(roomData.status === 'setup' && setupMinimized && !cardShareActive));
@@ -2272,6 +2329,7 @@
 
         // Meta
         updates[gp + 'meta/status'] = 'setup';
+        updates[gp + 'meta/hostVersion'] = APP_VERSION; // players warn if their build differs
         updates[gp + 'meta/currentTurnKnight'] = firstKnight;
         updates[gp + 'meta/turnPhase'] = 'setup';
         updates[gp + 'meta/turnNumber'] = 1;
@@ -2345,6 +2403,14 @@
         });
 
         await fbDb.ref().update(updates);
+        // Stamp build + per-player browser into the shared narrative log — the 6/8 game
+        // log couldn't be attributed to a version after the fact.
+        const roster = turnOrder.map(k => {
+          const p = players[k] || {};
+          const tag = [p.browser, p.version].filter(Boolean).join(' ');
+          return (p.displayName || k) + ' (' + KNIGHTS[k].name + (tag ? ', ' + tag : '') + ')';
+        }).join('; ');
+        await addLog('system', 'Game started on ' + APP_VERSION + ' — ' + roster);
         showToast('Cards dealt! Select a card to share.');
       } catch (err) {
         console.error('Start game error:', err);
@@ -2502,10 +2568,23 @@
         hostDeckKey = myKnight || '_host';
         listenForDrawRequests();
         listenForJoinRequests();
+        // Re-stamp the host's build on every (re)entry — catches a host reload that
+        // came back on a different cached version (players get the skew warning).
+        if (roomData?.status === 'setup' || roomData?.status === 'playing') {
+          fbDb.ref('games/' + currentRoom + '/meta/hostVersion').set(APP_VERSION).catch(() => {});
+        }
       }
 
       // Players: listen for draw results (cards dealt to me) — not for spectators
       if (!isSpectator) listenForDrawResults();
+
+      // Re-stamp this player's build + browser on every (re)entry so the record
+      // tracks reloads (feeds the version-skew check on other devices).
+      if (!isSpectator && myKnight) {
+        fbDb.ref('games/' + currentRoom + '/players/' + myKnight).update({
+          version: APP_VERSION, browser: BROWSER_ID,
+        }).catch(() => {});
+      }
 
       // Host presence heartbeat + "host away" banner (explains stalls when host tab is asleep)
       startHostPresenceMonitor();
@@ -2518,61 +2597,16 @@
       // Deck-integrity baseline census (delayed so private hand + quest caches populate).
       setTimeout(() => { auditMyHand('baseline'); auditWhiteCardsHostSide('baseline'); }, 4000);
 
-      // Re-render UI when tab regains focus (Firebase updates may arrive while backgrounded)
-      document.addEventListener('visibilitychange', () => {
-        // Full re-sync on refocus: a suspended/backgrounded tab may have missed a phase
-        // transition (e.g. lobby→setup) while its Firebase listeners were frozen. Re-fetch
-        // meta and re-apply it (applyMetaSnapshot enters the game screen + re-renders),
-        // and re-render the setup overlay — so the tab self-heals without a leave+rejoin.
-        if (!document.hidden && currentRoom) {
-          fbDb.ref('games/' + currentRoom + '/meta').once('value', applyMetaSnapshot);
-          fbDb.ref('games/' + currentRoom + '/setup').once('value', s => {
-            if (roomData?.status === 'setup') renderSetupShared(s.val() || {});
-          });
-        }
-        if (!document.hidden && inGameScreen && roomData) {
-          console.log('[SOC] tab refocused', { isHost, myKnight });
-          renderGamePlayers();
-          onRevealedBlackCardChanged();
-          renderPendingInteraction();
-          // Host: send a heartbeat immediately so others clear the "host away" banner fast.
-          if (isHost && currentRoom) fbDb.ref('games/' + currentRoom + '/hostHeartbeat').set(firebase.database.ServerValue.TIMESTAMP).catch(() => {});
-          updateHostPresenceBanner();
-          // Host: catch up on any draw requests missed while backgrounded
-          if (isHost) {
-            fbDb.ref('games/' + currentRoom + '/drawRequests').once('value', snap => {
-              if (!snap.exists()) return;
-              snap.forEach(child => {
-                drawRequestQueue = drawRequestQueue
-                  .then(() => processDrawRequest(child.val(), child.key))
-                  .catch(e => console.error('Catch-up draw request error:', e));
-              });
-            });
-          }
-          // Player: catch up on any draw results missed while backgrounded
-          if (!isSpectator) {
-            fbDb.ref('games/' + currentRoom + '/drawResults').once('value', async snap => {
-              if (!snap.exists()) return;
-              let caught = false;
-              snap.forEach(child => {
-                const result = child.val();
-                if (!result || result.knightId !== myKnight) return;
-                if (processedDrawResults.has(child.key)) return;
-                processedDrawResults.add(child.key);
-                const newCards = result.cards || [];
-                console.log('[SOC] drawResult catch-up', { cardCount: newCards.length, key: child.key });
-                myHand = [...myHand, ...newCards];
-                const updates = {};
-                updates['private/' + currentRoom + '/' + myKnight + '/hand'] = myHand;
-                updates['games/' + currentRoom + '/drawResults/' + child.key] = null;
-                fbDb.ref().update(updates);
-                caught = true;
-              });
-              if (caught) renderHand();
-            });
-          }
-        }
-      });
+      // Re-render UI when the tab regains focus (Firebase updates may arrive while
+      // backgrounded). Chrome iOS does not reliably fire visibilitychange on return
+      // from an app switch, so focus and pageshow are hooked too; resyncOnRefocus
+      // debounces the burst down to one re-sync. Installed once per page load.
+      if (!refocusHooksInstalled) {
+        refocusHooksInstalled = true;
+        document.addEventListener('visibilitychange', () => resyncOnRefocus('visibilitychange'));
+        window.addEventListener('focus', () => resyncOnRefocus('focus'));
+        window.addEventListener('pageshow', () => resyncOnRefocus('pageshow'));
+      }
 
       // Listen to setup selections
       listenToSetupSelections();
@@ -2623,6 +2657,79 @@
           $('setup-overlay').classList.remove('hidden');
           setupMini.classList.add('hidden');
         });
+      }
+    }
+
+    // Full re-sync when the tab returns to the foreground: a suspended/backgrounded tab
+    // may have missed a phase transition (e.g. lobby→setup) while its Firebase listeners
+    // were frozen. Re-fetch meta + setup and re-apply (applyMetaSnapshot enters the game
+    // screen + re-renders) so the tab self-heals without a leave+rejoin. Called from
+    // visibilitychange/focus/pageshow (Chrome iOS misses some of these — the trigger is
+    // logged so exported logs show which events each browser actually fires).
+    function resyncOnRefocus(eventName) {
+      if (document.hidden) return;            // only act when (back) in the foreground
+      if (!currentRoom) return;
+      const now = Date.now();
+      if (now - lastResyncAt < 1000) return;  // one re-sync per visibilitychange/focus/pageshow burst
+      lastResyncAt = now;
+      const heartbeatAge = lastHostHeartbeat ? (Date.now() + debugServerOffset - lastHostHeartbeat) : null;
+      debugLog('sync', 'refocus self-heal', { event: eventName, connected: lastConnectedState, heartbeatAgeMs: heartbeatAge });
+      // Zombie-socket kick: after iOS freezes a tab the SDK can sit on a dead websocket
+      // for up to ~60s before noticing. If the SDK already knows it's disconnected, or a
+      // non-host player sees a long-stale host heartbeat (may also just mean the host is
+      // asleep — the kick is cheap either way), force a fresh connection immediately
+      // instead of waiting out the keepalive timeout. Queued writes survive the cycle.
+      if (lastConnectedState === false ||
+          (!isHost && heartbeatAge !== null && heartbeatAge > 15000 &&
+           (roomData?.status === 'playing' || roomData?.status === 'setup'))) {
+        debugLog('sync', 'connection kick (goOffline/goOnline)', { connected: lastConnectedState, heartbeatAgeMs: heartbeatAge });
+        try { fbDb.goOffline(); fbDb.goOnline(); } catch (e) {}
+      }
+      fbDb.ref('games/' + currentRoom + '/meta').once('value', applyMetaSnapshot);
+      fbDb.ref('games/' + currentRoom + '/setup').once('value', s => {
+        if (roomData?.status === 'setup') renderSetupShared(s.val() || {});
+      });
+      if (inGameScreen && roomData) {
+        console.log('[SOC] tab refocused', { isHost, myKnight });
+        renderGamePlayers();
+        onRevealedBlackCardChanged();
+        renderPendingInteraction();
+        // Host: send a heartbeat immediately so others clear the "host away" banner fast.
+        if (isHost) fbDb.ref('games/' + currentRoom + '/hostHeartbeat').set(firebase.database.ServerValue.TIMESTAMP).catch(() => {});
+        updateHostPresenceBanner();
+        // Host: catch up on any draw requests missed while backgrounded
+        if (isHost) {
+          fbDb.ref('games/' + currentRoom + '/drawRequests').once('value', snap => {
+            if (!snap.exists()) return;
+            snap.forEach(child => {
+              drawRequestQueue = drawRequestQueue
+                .then(() => processDrawRequest(child.val(), child.key))
+                .catch(e => console.error('Catch-up draw request error:', e));
+            });
+          });
+        }
+        // Player: catch up on any draw results missed while backgrounded
+        if (!isSpectator) {
+          fbDb.ref('games/' + currentRoom + '/drawResults').once('value', async snap => {
+            if (!snap.exists()) return;
+            let caught = false;
+            snap.forEach(child => {
+              const result = child.val();
+              if (!result || result.knightId !== myKnight) return;
+              if (processedDrawResults.has(child.key)) return;
+              processedDrawResults.add(child.key);
+              const newCards = result.cards || [];
+              console.log('[SOC] drawResult catch-up', { cardCount: newCards.length, key: child.key });
+              myHand = [...myHand, ...newCards];
+              const updates = {};
+              updates['private/' + currentRoom + '/' + myKnight + '/hand'] = myHand;
+              updates['games/' + currentRoom + '/drawResults/' + child.key] = null;
+              fbDb.ref().update(updates);
+              caught = true;
+            });
+            if (caught) renderHand();
+          });
+        }
       }
     }
 
@@ -2688,6 +2795,15 @@
       const ref = fbDb.ref('games/' + currentRoom + '/players');
       ref.on('value', snap => {
         cachedPlayers = snap.val() || {};
+        // Version-skew check against other players (records carry version/browser since v81
+        // and are re-stamped on every game entry, so they track reloads).
+        for (const [kid, p] of Object.entries(cachedPlayers)) {
+          if (kid === myKnight || !p?.version || p.version === APP_VERSION) continue;
+          if (versionSkewWarned.has(kid + ':' + p.version)) continue;
+          versionSkewWarned.add(kid + ':' + p.version);
+          debugLog('version', 'VERSION SKEW vs player', { mine: APP_VERSION, knight: kid, theirs: p.version, browser: p.browser || null });
+          showToast('Version mismatch: ' + (p.displayName || kid) + ' runs ' + p.version + ' (you: ' + APP_VERSION + ') — refresh all devices.', 6000);
+        }
         // Auto-discard hand when revealed as traitor (own device handles discard)
         if (myKnight && cachedPlayers[myKnight]?.isRevealed && myHand.length > 0) {
           const discardedHand = [...myHand];
@@ -2886,6 +3002,8 @@
         uid: requestData.uid,
         displayName: requestData.displayName,
         knightId: knightId,
+        version: requestData.version || null,
+        browser: requestData.browser || null,
         life: 4,
         location: 'roundTable',
         alive: true,
@@ -2899,7 +3017,8 @@
       updates['games/' + currentRoom + '/joinRequests/' + knightId + '/status'] = 'accepted';
 
       await fbDb.ref().update(updates);
-      await addLog('system', KNIGHTS[knightId].name + ' has joined the quest!');
+      const joinTag = [requestData.browser, requestData.version].filter(Boolean).join(' ');
+      await addLog('system', KNIGHTS[knightId].name + ' has joined the quest!' + (joinTag ? ' (' + joinTag + ')' : ''));
       showToast(requestData.displayName + ' joined as ' + KNIGHTS[knightId].name);
     }
 
@@ -2918,6 +3037,8 @@
         uid: myUid,
         displayName: myName || 'Player',
         knightId: knightId,
+        version: APP_VERSION,
+        browser: BROWSER_ID,
         timestamp: firebase.database.ServerValue.TIMESTAMP,
         status: 'pending',
       });
@@ -3955,8 +4076,11 @@
     function updateHostPresenceBanner() {
       const banner = $('host-away-banner');
       if (!banner) return;
-      // Only meaningful to a non-host player during an active game.
-      if (isHost || !currentRoom || !inGameScreen || roomData?.status !== 'playing') {
+      // Only meaningful to a non-host player during an active game. Setup counts:
+      // the Divide-the-Cards step is host-only, so a sleeping host stalls setup too
+      // (on 6/9 this stalled card-sharing for 24 minutes with no indication).
+      if (isHost || !currentRoom || !inGameScreen ||
+          (roomData?.status !== 'playing' && roomData?.status !== 'setup')) {
         banner.classList.add('hidden'); return;
       }
       if (!lastHostHeartbeat) { banner.classList.add('hidden'); return; } // no heartbeat yet (older host build) — don't false-alarm
@@ -4141,6 +4265,10 @@
       const card = myHand.find(c => c.id === selectedCardId);
       if (!card) return;
 
+      // A 'share tapped' with no matching 'card shared' afterwards = the write was lost
+      // (e.g. tab frozen mid-flight, then reloaded — the suspected 6/9 stuck-setup loop).
+      debugLog('setup', 'share tapped', { knight: myKnight, cardId: card.id, connected: lastConnectedState });
+
       // Write FIRST; only commit local state on success so a dropped write can never
       // strand the player on "Waiting…" with the card gone and no Share button.
       const newHand = myHand.filter(c => c.id !== card.id);
@@ -4213,6 +4341,7 @@
           seq: ++debugSeq,               // per-boot order + truncation detection (first seq > 1 ⇒ buffer dropped earlier entries)
           boot: debugBootId,             // tells refreshes/reconnects of the same knight apart
           v: APP_VERSION,                // stamp the build so version mismatches are visible after merge
+          b: BROWSER_ID,                 // which browser on the shared phone produced this entry
           knight: myKnight || (isSpectator ? 'spectator' : 'unknown'),
           isHost: !!isHost,
           turn: roomData?.turnNumber ?? null,     // shared logical clock to align devices
@@ -4338,7 +4467,7 @@
       // Logical-clock context: turn number / phase / whose turn it is.
       const turnStr = 't' + (e.turn ?? '?') + '/' + (e.phase || '-') + (e.cur ? '/' + e.cur : '');
       return e.t + ' ' + seqStr + ' [' + (e.knight || 'unknown') + '/' + role + '/' +
-        (e.v || '?') + '/' + (e.boot || '----') + '] ' + turnStr + ' | ' +
+        (e.v || '?') + '/' + (e.b || '?') + '/' + (e.boot || '----') + '] ' + turnStr + ' | ' +
         (e.category || 'info') + ' | ' + (e.message || '') + dataStr;
     }
 
