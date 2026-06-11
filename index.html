@@ -929,6 +929,17 @@
       ⚠ The host's browser appears to be asleep — your action won't go through until they bring their tab back to the foreground.
     </div>
 
+    <!-- Export-ALL waiting banner (host only): lists devices that haven't uploaded their
+         debug buffer yet so the user can cycle those browsers awake while it waits. -->
+    <div class="host-away-banner hidden" id="export-wait-banner"
+         style="animation:none;background:#1a3a5a;border-bottom-color:#4a90d9;position:fixed;top:0;left:0;right:0;z-index:9999;">
+      <span id="export-wait-text" style="font-size:1rem;">Collecting logs…</span>
+      <div style="margin-top:0.5rem;display:flex;gap:0.5rem;justify-content:center;flex-wrap:wrap;">
+        <button class="btn btn-primary" id="btn-export-finish" style="font-size:1rem;">Finish now (skip missing)</button>
+        <button class="btn btn-danger" id="btn-export-cancel" style="font-size:1rem;">Cancel</button>
+      </div>
+    </div>
+
     <div class="game-body" id="game-body">
       <div class="board-status">
         <div class="status-item">
@@ -1080,7 +1091,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v81';
+    const APP_VERSION = 'shadows-v82';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -2046,6 +2057,14 @@
           showToast('Version mismatch: you run ' + APP_VERSION + ', host runs ' + roomData.hostVersion + ' — refresh all devices.', 6000);
         }
 
+        // Event-driven heartbeat: desktop background tabs throttle the 3s heartbeat
+        // timer to ~1/min while staying fully event-responsive (WNPQCE showed 97s
+        // "stale" on a working host). Re-beat on real activity so staleness means a
+        // genuinely stalled host. hostHeartbeat lives outside meta — no listener loop.
+        if (isHost && currentRoom && (roomData.status === 'setup' || roomData.status === 'playing')) {
+          fbDb.ref('games/' + currentRoom + '/hostHeartbeat').set(firebase.database.ServerValue.TIMESTAMP).catch(() => {});
+        }
+
         // Respond to a host request to aggregate debug logs (Change 6)
         handleDebugCollectRequest();
 
@@ -2731,6 +2750,33 @@
           });
         }
       }
+    }
+
+    // Tap-driven self-heal: a Firebase write that doesn't confirm quickly means this tab
+    // is sitting on a zombie socket RIGHT NOW — and refocus-driven healing can never help
+    // the browser the user is currently in (proven by the WNPQCE stuck-Accept trace).
+    // Log the tap, watch for the ack, and kick the connection if it stalls; the SDK
+    // re-sends the queued write after reconnect, so the action completes on its own
+    // without the user having to focus-cycle.
+    const WRITE_STALL_MS = 2500;
+    function watchedWrite(path, value, label) {
+      debugLog('write', label + ' tapped', { connected: lastConnectedState });
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (settled) return;
+        debugLog('write', label + ' write STALLED — kicking connection', { afterMs: WRITE_STALL_MS, connected: lastConnectedState });
+        try { fbDb.goOffline(); fbDb.goOnline(); } catch (e) {}
+      }, WRITE_STALL_MS);
+      return fbDb.ref(path).set(value)
+        .then(() => {
+          settled = true; clearTimeout(timer);
+          debugLog('write', label + ' write ok');
+        })
+        .catch(e => {
+          settled = true; clearTimeout(timer);
+          debugLog('write', label + ' write FAILED', { err: String(e) });
+          showToast('Action failed — try again.');
+        });
     }
 
     function listenToPrivateData() {
@@ -3724,6 +3770,9 @@
     }
 
     async function processDrawRequest(request, requestId) {
+      // Event-driven heartbeat: processing a request proves the host is alive even
+      // when its background-throttled timer hasn't beaten in a while.
+      fbDb.ref('games/' + currentRoom + '/hostHeartbeat').set(firebase.database.ServerValue.TIMESTAMP).catch(() => {});
       // Idempotency: skip if already processed (removed from Firebase)
       const reqCheck = await fbDb.ref('games/' + currentRoom + '/drawRequests/' + requestId).once('value');
       if (!reqCheck.exists()) return;
@@ -4501,38 +4550,94 @@
       downloadTextFile(text, debugFilename(String(myKnight || 'spectator')));
     }
 
-    // Host-only: request every device's buffer, merge, sort, download one file.
+    // Host-only: request every device's buffer, wait until ALL respond, merge, dedupe,
+    // download one file. Suspended browsers can't answer the request until they're
+    // foregrounded, so this keeps the request live with a status banner naming who's
+    // missing — the user cycles those browsers awake, each uploads automatically, and
+    // the export auto-finishes (or "Finish now" skips the stragglers).
+    let exportAllActive = false;
     async function exportAllPlayersDebugLogs() {
       if (!isHost || !currentRoom) { showToast('Host only.'); return; }
+      if (exportAllActive) { showToast('Export already in progress.'); return; }
+      exportAllActive = true;
       const id = 'dc_' + Date.now();
-      showToast('Collecting logs from all devices...');
-      // Pre-seed our own contribution so a solo host still gets a file.
-      try { await fbDb.ref('games/' + currentRoom + '/debug/' + (myKnight || 'host') + '/' + id)
-        .set(debugBuffer); } catch (e) {}
-      // Broadcast the request; each client's meta listener responds.
-      await fbDb.ref('games/' + currentRoom + '/meta/debugCollect').set({ id, requestedAt: Date.now() });
-      // Wait for responses, then aggregate.
-      await new Promise(r => setTimeout(r, 4000));
-      const snap = await fbDb.ref('games/' + currentRoom + '/debug').once('value');
-      const all = [];
-      snap.forEach(knightNode => {
-        const perId = knightNode.child(id).val();
-        if (Array.isArray(perId)) for (const e of perId) all.push(e);
-      });
-      all.sort((a, b) => (a.t < b.t ? -1 : a.t > b.t ? 1 : 0));
-      if (all.length === 0) { showToast('No debug logs collected.'); }
-      else {
-        const text = all.map(formatDebugEntry).join('\n');
-        downloadTextFile(text, debugFilename('ALL'));
-        showToast('Collected ' + all.length + ' entries from all devices.');
+      const hostKey = myKnight || 'host';
+      // Player devices expected to respond (the host's own buffer is pre-seeded).
+      const expected = (roomData?.turnOrder || []).filter(k => k !== myKnight);
+      const banner = $('export-wait-banner');
+      const textEl = $('export-wait-text');
+      const finishBtn = $('btn-export-finish');
+      const cancelBtn = $('btn-export-cancel');
+      let userAction = null;
+      finishBtn.onclick = () => { userAction = 'finish'; };
+      cancelBtn.onclick = () => { userAction = 'cancel'; };
+      textEl.textContent = 'Requesting logs from all devices…';
+      banner.classList.remove('hidden');
+      const describe = k => {
+        const p = cachedPlayers[k] || {};
+        return (p.displayName || k) + (p.browser ? ' (' + p.browser + ')' : '');
+      };
+      try {
+        // Pre-seed our own contribution so a solo host still gets a file.
+        try { await fbDb.ref('games/' + currentRoom + '/debug/' + hostKey + '/' + id).set(debugBuffer); } catch (e) {}
+        // Broadcast the request; each client's meta listener responds when awake.
+        await fbDb.ref('games/' + currentRoom + '/meta/debugCollect').set({ id, requestedAt: Date.now() });
+        let snap, missing;
+        for (;;) {
+          await new Promise(r => setTimeout(r, 1500));
+          snap = await fbDb.ref('games/' + currentRoom + '/debug').once('value');
+          const responded = [];
+          snap.forEach(n => { if (n.child(id).exists()) responded.push(n.key); });
+          missing = expected.filter(k => !responded.includes(k));
+          if (userAction === 'cancel') {
+            debugLog('debug', 'export ALL cancelled', { responded, missing });
+            showToast('Export cancelled.');
+            return;
+          }
+          if (missing.length === 0 || userAction === 'finish') break;
+          textEl.textContent = 'Waiting for: ' + missing.map(describe).join(', ') +
+            ' — bring each browser to the foreground and its log uploads automatically.';
+        }
+        // Aggregate, dedupe on (boot, seq, t) — guards against any double upload.
+        const all = [];
+        const seen = new Set();
+        snap.forEach(knightNode => {
+          const perId = knightNode.child(id).val();
+          if (!Array.isArray(perId)) return;
+          for (const e of perId) {
+            const key = (e.boot || '') + ':' + (e.seq ?? '') + ':' + (e.t || '');
+            if (seen.has(key)) continue;
+            seen.add(key);
+            all.push(e);
+          }
+        });
+        all.sort((a, b) => (a.t < b.t ? -1 : a.t > b.t ? 1 : 0));
+        debugLog('debug', 'export ALL complete', { entries: all.length, missing });
+        if (all.length === 0) { showToast('No debug logs collected.'); }
+        else {
+          const text = all.map(formatDebugEntry).join('\n');
+          downloadTextFile(text, debugFilename('ALL'));
+          showToast('Collected ' + all.length + ' entries.' +
+            (missing.length ? ' MISSING: ' + missing.map(describe).join(', ') : ' All devices accounted for.'), 5000);
+        }
+      } finally {
+        banner.classList.add('hidden');
+        finishBtn.onclick = null;
+        cancelBtn.onclick = null;
+        exportAllActive = false;
+        // Cleanup transient nodes.
+        try {
+          await fbDb.ref('games/' + currentRoom + '/debug').set(null);
+          await fbDb.ref('games/' + currentRoom + '/meta/debugCollect').set(null);
+        } catch (e) { /* ignore */ }
       }
-      // Cleanup transient nodes.
-      await fbDb.ref('games/' + currentRoom + '/debug').set(null);
-      await fbDb.ref('games/' + currentRoom + '/meta/debugCollect').set(null);
     }
 
     // Every device: respond to a host collection request by uploading its buffer.
     function handleDebugCollectRequest() {
+      // The host pre-seeds its own buffer in exportAllPlayersDebugLogs — responding here
+      // too duplicated every host line in the merged file (seen in the WNPQCE export).
+      if (isHost) return;
       const req = roomData?.debugCollect;
       if (!req || !req.id || req.id === lastDebugCollectId) return;
       lastDebugCollectId = req.id;
@@ -7164,31 +7269,41 @@
       area.innerHTML = html;
 
       // ── Handlers ──
+      // All card-share writes go through watchedWrite: the UI only updates from the
+      // listener echo, so a write swallowed by a zombie socket made the buttons look
+      // dead (the WNPQCE stuck-Accept) — now a stalled write kicks the connection and
+      // completes by itself. Accept/Reject also get immediate optimistic feedback.
       area.querySelectorAll('.cardshare-assign').forEach(sel => {
         sel.addEventListener('change', () => {
           const cardId = sel.getAttribute('data-card');
           const kid = sel.value;
-          const ref = fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/assignment/' + cardId);
-          if (kid) ref.set(kid); else ref.remove();
+          watchedWrite('games/' + currentRoom + '/meta/pendingInteraction/assignment/' + cardId,
+            kid || null, 'cardShare assign');
         });
       });
       const confirmBtn = document.getElementById('btn-cardshare-confirm');
       if (confirmBtn) confirmBtn.addEventListener('click', () => {
-        fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/stage').set('voting');
+        confirmBtn.disabled = true;
+        watchedWrite('games/' + currentRoom + '/meta/pendingInteraction/stage', 'voting', 'cardShare confirm-split');
       });
       const acceptBtn = document.getElementById('btn-cardshare-accept');
-      if (acceptBtn) acceptBtn.addEventListener('click', () => {
-        fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight).set(true);
-      });
       const rejectBtn = document.getElementById('btn-cardshare-reject');
+      if (acceptBtn) acceptBtn.addEventListener('click', () => {
+        acceptBtn.disabled = true; acceptBtn.textContent = 'Submitting…';
+        if (rejectBtn) rejectBtn.disabled = true;
+        watchedWrite('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight, true, 'cardShare accept');
+      });
       if (rejectBtn) rejectBtn.addEventListener('click', () => {
         if (!confirm('Reject this split and force the cards to be distributed at random?')) return;
-        fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight).set(false);
+        rejectBtn.disabled = true; rejectBtn.textContent = 'Submitting…';
+        if (acceptBtn) acceptBtn.disabled = true;
+        watchedWrite('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight, false, 'cardShare reject');
       });
       const randomBtn = document.getElementById('btn-cardshare-random');
       if (randomBtn) randomBtn.addEventListener('click', () => {
         if (!confirm('Force the cards to be distributed at random?')) return;
-        fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/forceRandom').set({ by: myKnight });
+        randomBtn.disabled = true;
+        watchedWrite('games/' + currentRoom + '/meta/pendingInteraction/forceRandom', { by: myKnight }, 'cardShare force-random');
       });
     }
 
