@@ -1091,7 +1091,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v83';
+    const APP_VERSION = 'shadows-v84';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1219,6 +1219,9 @@
     let versionSkewWarned = new Set(); // one warning per offending version string
     let lastMetaRxKey = '';         // change-detector for 'meta rx' inbound logging
     let lastInteractionRxKey = '';  // change-detector for interaction-render logging
+    let lastForegroundKickAt = 0;   // cooldown for the passive foreground watchdog
+    let lastSeenInteractionId = null; // crosstalk detection: first sight of each interaction
+    let poolWaitWarned = new Set(); // one no-pool warning per cardShare interaction
     let traitorStealProcessed = false;
     let setupListener = null;
     let cachedBoard = null;
@@ -1605,10 +1608,10 @@
             // every genuine DOWN→UP so the UI converges no matter what was missed.
             if (up && wasDown && currentRoom) {
               debugLog('sync', 'post-reconnect refresh');
-              fbDb.ref('games/' + currentRoom + '/meta').once('value', applyMetaSnapshot);
-              fbDb.ref('games/' + currentRoom + '/setup').once('value', s => {
+              freshRead('meta', applyMetaSnapshot, 'meta (post-reconnect)');
+              freshRead('setup', s => {
                 if (roomData?.status === 'setup') renderSetupShared(s.val() || {});
-              });
+              }, 'setup (post-reconnect)');
             }
           }
         });
@@ -2066,15 +2069,26 @@
         // a dead meta listener (the KTY4T4 stuck-"Submitting…" failure mode).
         {
           const pi = roomData.pendingInteraction;
+          const piResponses = Object.keys(pi?.responses || {}).length;
           const rxKey = [roomData.status, roomData.turnNumber, roomData.turnPhase,
-            pi?.type ?? '-', pi?.stage ?? '-', Object.keys(pi?.responses || {}).length].join('|');
+            pi?.type ?? '-', pi?.stage ?? '-', piResponses].join('|');
           if (rxKey !== lastMetaRxKey) {
             lastMetaRxKey = rxKey;
             debugLog('sync', 'meta rx', {
               status: roomData.status, turn: roomData.turnNumber, phase: roomData.turnPhase,
               pendingType: pi?.type ?? null, stage: pi?.stage ?? null,
-              responses: Object.keys(pi?.responses || {}).length,
+              responses: piResponses, id: pi?.id ?? null,
             });
+            // Crosstalk detector: a brand-new interaction should start with zero
+            // responses — nonzero on first sight means a late write from the previous
+            // interaction landed in this one (the MX2UEW responses:1-in-assigning case).
+            if (pi?.id && pi.id !== lastSeenInteractionId) {
+              lastSeenInteractionId = pi.id;
+              if (piResponses > 0) {
+                debugLog('sync', 'response crosstalk? new interaction already has responses',
+                  { id: pi.id, type: pi.type, responses: Object.keys(pi.responses || {}) });
+              }
+            }
           }
         }
 
@@ -2735,10 +2749,10 @@
         debugLog('sync', 'connection kick (goOffline/goOnline)', { connected: lastConnectedState, heartbeatAgeMs: heartbeatAge });
         try { fbDb.goOffline(); fbDb.goOnline(); } catch (e) {}
       }
-      fbDb.ref('games/' + currentRoom + '/meta').once('value', applyMetaSnapshot);
-      fbDb.ref('games/' + currentRoom + '/setup').once('value', s => {
+      freshRead('meta', applyMetaSnapshot, 'meta (refocus)');
+      freshRead('setup', s => {
         if (roomData?.status === 'setup') renderSetupShared(s.val() || {});
-      });
+      }, 'setup (refocus)');
       if (inGameScreen && roomData) {
         console.log('[SOC] tab refocused', { isHost, myKnight });
         renderGamePlayers();
@@ -2749,18 +2763,18 @@
         updateHostPresenceBanner();
         // Host: catch up on any draw requests missed while backgrounded
         if (isHost) {
-          fbDb.ref('games/' + currentRoom + '/drawRequests').once('value', snap => {
+          freshRead('drawRequests', snap => {
             if (!snap.exists()) return;
             snap.forEach(child => {
               drawRequestQueue = drawRequestQueue
                 .then(() => processDrawRequest(child.val(), child.key))
                 .catch(e => console.error('Catch-up draw request error:', e));
             });
-          });
+          }, 'drawRequests (refocus)');
         }
         // Player: catch up on any draw results missed while backgrounded
         if (!isSpectator) {
-          fbDb.ref('games/' + currentRoom + '/drawResults').once('value', async snap => {
+          freshRead('drawResults', async snap => {
             if (!snap.exists()) return;
             let caught = false;
             snap.forEach(child => {
@@ -2778,9 +2792,31 @@
               caught = true;
             });
             if (caught) renderHand();
-          });
+          }, 'drawResults (refocus)');
         }
       }
+    }
+
+    // Server-fresh read for self-heal paths. RTDB .once('value') serves the LOCAL CACHE
+    // whenever a live listener exists on the path (meta always has one) — so with a dead
+    // listener every "refresh" silently re-applied stale state, and even regressed it
+    // (MX2UEW: Chrome re-applied an 80s-old between-interactions gap and deadlocked the
+    // convocation card-share). .get() always attempts the server.
+    function freshRead(subPath, cb, label) {
+      if (!currentRoom) return;
+      fbDb.ref('games/' + currentRoom + '/' + subPath).get()
+        .then(cb)
+        .catch(e => debugLog('sync', 'fresh read failed: ' + label, { err: String(e) }));
+    }
+
+    // Create a pendingInteraction with identity stamps. All interactions share one
+    // Firebase path, so a late response write from a PREVIOUS interaction lands inside
+    // whatever is current (seen in MX2UEW: a convocationChoice response arrived 50ms
+    // after the cardShare replaced it). The id makes such crosstalk detectable in logs.
+    async function setPendingInteraction(obj) {
+      obj.id = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6);
+      obj.createdAt = firebase.database.ServerValue.TIMESTAMP;
+      await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set(obj);
     }
 
     // Tap-driven self-heal: a Firebase write that doesn't confirm quickly means this tab
@@ -2923,7 +2959,7 @@
           const grailHolder = findGrailHolder();
           if (grailHolder) {
             debugLog('death', 'off-turn dying — offering Holy Grail', { dyingKnight: kid, grailHolder });
-            await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set({
+            await setPendingInteraction({
               type: 'grailSave', offTurn: true, dyingKnight: kid, holderKnight: grailHolder,
               responses: {}, resolved: false,
             });
@@ -4182,6 +4218,20 @@
       const stale = (nowServer - lastHostHeartbeat) > HOST_STALE_MS;
       banner.classList.toggle('hidden', !stale);
       if (stale) debugLog('host', 'host heartbeat stale', { ageMs: nowServer - lastHostHeartbeat });
+      // Passive foreground watchdog: the v83 worker heartbeat arrives every 3s on a
+      // healthy socket, so a VISIBLE tab not receiving it has a dead inbound stream —
+      // and a passively waiting player has no other trigger (no tap, no refocus). This
+      // closes the last self-heal gap (MX2UEW: Accept button never appearing, end-turn
+      // echo arriving 37s late). Kick + server-fresh refresh, max once per 30s.
+      if (stale && !document.hidden && Date.now() - lastForegroundKickAt > 30000) {
+        lastForegroundKickAt = Date.now();
+        debugLog('sync', 'foreground staleness — kicking connection', { ageMs: nowServer - lastHostHeartbeat });
+        try { fbDb.goOffline(); fbDb.goOnline(); } catch (e) {}
+        freshRead('meta', applyMetaSnapshot, 'meta (foreground watchdog)');
+        freshRead('setup', s => {
+          if (roomData?.status === 'setup') renderSetupShared(s.val() || {});
+        }, 'setup (foreground watchdog)');
+      }
     }
 
     async function requestCardDraw(deckType, count) {
@@ -6137,7 +6187,7 @@
       } else if (name === 'Mordred') {
         // Player chooses Pict or Saxon War to attach Mordred
         await fbDb.ref('games/' + currentRoom + '/meta/revealedBlackCard').set(null);
-        await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set({
+        await setPendingInteraction({
           type: 'mordredChoice', card, drawnBy: roomData?.currentTurnKnight,
           responses: {}, resolved: false,
         });
@@ -6260,7 +6310,7 @@
 
     async function initiateMerlinCancel(card) {
       $('reveal-actions').innerHTML = '<p class="waiting-text">Merlin vote started...</p>';
-      await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set({
+      await setPendingInteraction({
         type: 'merlinCancel', card,
         totalMerlins: 0, responses: {}, cancelled: false, resolved: false,
       });
@@ -6560,7 +6610,7 @@
 
     async function startPendingInteraction(type, card) {
       await fbDb.ref('games/' + currentRoom + '/meta/revealedBlackCard').set(null);
-      await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set({
+      await setPendingInteraction({
         type, card, responses: {}, resolved: false,
       });
     }
@@ -6895,7 +6945,7 @@
       // Set up a new discard interaction
       await addLog('evil', 'No one volunteered for Morgan 5 — all knights must discard 1 White card!');
       debugLog('morgan5', 'no volunteer → all discard 1', { required: aliveKnights, responses });
-      await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set({
+      await setPendingInteraction({
         type: 'morganDiscard', card: { name: 'Morgan 5 (all discard)' },
         responses: {}, resolved: false,
       });
@@ -6995,7 +7045,7 @@
 
       // All declined — fall back to everyone discards 1
       await addLog('evil', 'No one volunteered for Morgan 1 — all knights must discard 1 White card!');
-      await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set({
+      await setPendingInteraction({
         type: 'morganDiscard', card: { name: 'Morgan 1 (all discard)' },
         responses: {}, resolved: false,
       });
@@ -7206,7 +7256,7 @@
         distributor, participants, assignment: {}, stage: 'assigning',
       };
       if (pool) interaction.pool = pool;
-      await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set(interaction);
+      await setPendingInteraction(interaction);
       if (!pool) {
         await fbDb.ref('games/' + currentRoom + '/drawRequests').push().set({
           knightId: myKnight, deckType: 'sharePool', count,
@@ -7362,7 +7412,7 @@
         const pi = roomData?.pendingInteraction;
         if (currentRoom && pi && pi.type === 'cardShare' && pi.responses?.[myKnight] === undefined) {
           debugLog('sync', label + ' echo missing — refetching meta', { stage: pi.stage ?? null });
-          fbDb.ref('games/' + currentRoom + '/meta').once('value', applyMetaSnapshot);
+          freshRead('meta', applyMetaSnapshot, 'meta (vote echo)');
         }
       }, 3000);
       if (acceptBtn) acceptBtn.addEventListener('click', () => {
@@ -7390,8 +7440,21 @@
     async function checkCardShareResolution(interaction) {
       const amDistributor = interaction.distributor === '_host' ? isHost : interaction.distributor === myKnight;
       if (!amDistributor || cardShareResolving) return;
-      // Pool must be revealed before we can act.
-      if (interaction.pool === undefined && !interaction.poolEmpty) return;
+      // Pool must be revealed before we can act. The pool arrives via the host
+      // processing a sharePool drawRequest — if the host never does (tab asleep), the
+      // share deadlocks silently; leave a marker so the log names the stall point.
+      if (interaction.pool === undefined && !interaction.poolEmpty) {
+        if (interaction.id && !poolWaitWarned.has(interaction.id)) {
+          poolWaitWarned.add(interaction.id);
+          setTimeout(() => {
+            const pi = roomData?.pendingInteraction;
+            if (pi && pi.id === interaction.id && pi.pool === undefined && !pi.poolEmpty) {
+              debugLog('sync', 'cardShare pool never revealed (host asleep?)', { id: pi.id, moment: pi.moment ?? null });
+            }
+          }, 10000);
+        }
+        return;
+      }
 
       // Guard 1: any participant forced a random draw.
       if (interaction.forceRandom) {
@@ -7878,7 +7941,7 @@
         // Check for Holy Grail save
         const grailHolder = findGrailHolder();
         if (grailHolder) {
-          await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set({
+          await setPendingInteraction({
             type: 'grailSave', dyingKnight: currentKnight, holderKnight: grailHolder,
             responses: {}, resolved: false,
           });
@@ -8305,7 +8368,7 @@
     async function performTraitorTaunt(targetKnight) {
       // Use pendingInteraction so the target's own device handles the discard
       // (consistent with Morgan 1/5 and Fate discard patterns)
-      await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set({
+      await setPendingInteraction({
         type: 'traitorSteal', targetKnight,
         responses: {}, resolved: false,
       });
@@ -9963,7 +10026,7 @@
         document.getElementById('btn-fate-reveal').disabled = true;
         heroicMode = null;
         // Set fateDiscard BEFORE revealAsTraitor to prevent taunt UI flash (Fix #13)
-        await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set({
+        await setPendingInteraction({
           type: 'fateDiscard', traitorKnight: myKnight,
           discardCount: 2, responses: {}, resolved: false,
         });
@@ -10093,7 +10156,7 @@
       } else if (name === 'Convocation') {
         selectedCardId = null;
         // Each knight chooses to return or stay; cards distributed among returners
-        await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set({
+        await setPendingInteraction({
           type: 'convocationChoice', playedBy: myKnight,
           responses: {}, resolved: false,
         });
