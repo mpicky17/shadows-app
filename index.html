@@ -1091,7 +1091,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v84';
+    const APP_VERSION = 'shadows-v85';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1220,6 +1220,7 @@
     let lastMetaRxKey = '';         // change-detector for 'meta rx' inbound logging
     let lastInteractionRxKey = '';  // change-detector for interaction-render logging
     let lastForegroundKickAt = 0;   // cooldown for the passive foreground watchdog
+    let lastOwnBeatAt = 0;          // when this device's own beat timer last ticked (sleep detector)
     let lastSeenInteractionId = null; // crosstalk detection: first sight of each interaction
     let poolWaitWarned = new Set(); // one no-pool warning per cardShare interaction
     let traitorStealProcessed = false;
@@ -1513,6 +1514,12 @@
     }
 
     function getCardDisplayName(card) {
+      // Tolerate malformed cards (a partial {id,value} card in KLF2RQ threw here on
+      // every render, making the card invisible) — show a placeholder instead.
+      if (!card || !card.type) {
+        debugLog('deckaudit', 'invalid card in render', { card: card ? JSON.stringify(card).slice(0, 100) : String(card) });
+        return card && card.value != null ? 'Fight ' + card.value + ' (?)' : '??';
+      }
       if (card.type === 'fight') return 'Fight ' + card.value;
       if (card.type === 'grail') return 'Grail';
       if (card.type === 'special') return card.name;
@@ -1523,6 +1530,7 @@
     }
 
     function getCardCSSClass(card) {
+      if (!card || !card.type) return 'fight';
       if (card.type === 'fight') return 'fight';
       if (card.type === 'grail') return 'grail';
       if (card.type === 'special') return 'special-white';
@@ -2080,13 +2088,15 @@
               responses: piResponses, id: pi?.id ?? null,
             });
             // Crosstalk detector: a brand-new interaction should start with zero
-            // responses — nonzero on first sight means a late write from the previous
-            // interaction landed in this one (the MX2UEW responses:1-in-assigning case).
+            // responses. Only meaningful when the interaction is genuinely fresh —
+            // KLF2RQ showed most warnings were benign receive-lag (a device's FIRST
+            // sight of an older interaction naturally already has votes).
             if (pi?.id && pi.id !== lastSeenInteractionId) {
               lastSeenInteractionId = pi.id;
-              if (piResponses > 0) {
+              const ageMs = pi.createdAt ? (Date.now() + debugServerOffset - pi.createdAt) : null;
+              if (piResponses > 0 && ageMs !== null && ageMs < 1500) {
                 debugLog('sync', 'response crosstalk? new interaction already has responses',
-                  { id: pi.id, type: pi.type, responses: Object.keys(pi.responses || {}) });
+                  { id: pi.id, type: pi.type, ageMs, responses: Object.keys(pi.responses || {}) });
               }
             }
           }
@@ -2736,6 +2746,16 @@
       const now = Date.now();
       if (now - lastResyncAt < 1000) return;  // one re-sync per visibilitychange/focus/pageshow burst
       lastResyncAt = now;
+      // Host long-sleep purge: writes the SDK queued while the tab was fully asleep
+      // (Edge sleeping-tabs; overnight in KLF2RQ) flush on wake and can REVERT game
+      // state — the deck revert that minted 21 duplicate cards. The write queue is
+      // memory-only, so reloading discards it; tryReconnect restores the session.
+      if (isHost && lastOwnBeatAt && now - lastOwnBeatAt > 10 * 60 * 1000) {
+        debugLog('sync', 'host slept ' + Math.round((now - lastOwnBeatAt) / 60000) + 'min — reloading to drop stale queued writes');
+        try { persistDebugBufferNow(); } catch (e) {}
+        location.reload();
+        return;
+      }
       const heartbeatAge = lastHostHeartbeat ? (Date.now() + debugServerOffset - lastHostHeartbeat) : null;
       debugLog('sync', 'refocus self-heal', { event: eventName, connected: lastConnectedState, heartbeatAgeMs: heartbeatAge });
       // Zombie-socket kick: after iOS freezes a tab the SDK can sit on a dead websocket
@@ -2807,6 +2827,18 @@
       fbDb.ref('games/' + currentRoom + '/' + subPath).get()
         .then(cb)
         .catch(e => debugLog('sync', 'fresh read failed: ' + label, { err: String(e) }));
+    }
+
+    // Response path for the local knight. myKnight is null on the spectator host, and
+    // KLF2RQ showed host-side UI flows writing votes under a literal "null" key. Route
+    // identity-less writes to a quarantine key (gates iterate participants, so it's
+    // inert) and log the call stack so the offending panel can be found and fixed.
+    function interactionResponsePath() {
+      if (!myKnight) {
+        const stack = (new Error().stack || '').split('\n').slice(1, 3).join(' | ');
+        debugLog('sync', 'response write with NULL knight (spectator host?) — quarantined', { stack });
+      }
+      return 'games/' + currentRoom + '/meta/pendingInteraction/responses/' + (myKnight || '_spectator');
     }
 
     // Create a pendingInteraction with identity stamps. All interactions share one
@@ -3071,7 +3103,7 @@
       }
       const hand = [];
       for (let i = 0; i < 5 && whiteDraw.length > 0; i++) {
-        hand.push(whiteDraw.pop());
+        { const c = popValidCard(whiteDraw); if (c) hand.push(c); }
       }
 
       // 3. Assign loyalty from unusedLoyalties
@@ -3496,7 +3528,7 @@
             if (discardCount <= 0) {
               const wasFate = discardMode === 'fateDiscard';
               discardMode = null;
-              fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
+              fbDb.ref(interactionResponsePath())
                 .set({ done: true });
               addLog('evil', getKnightDisplayName(myKnight) + (wasFate ? ' discarded cards for Fate' : ' discarded 3 cards for Morgan 5'));
             } else if (discardMode === 'morgan5') {
@@ -3517,7 +3549,7 @@
             if (discardedCard) requestWhiteDiscard([discardedCard]);
             if (discardCount <= 0) {
               discardMode = null;
-              fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
+              fbDb.ref(interactionResponsePath())
                 .set({ volunteered: true, done: true });
               addLog('evil', getKnightDisplayName(myKnight) + ' volunteered to discard 3 cards for Morgan 1!');
             } else {
@@ -3781,6 +3813,17 @@
       });
     }
 
+    // Pop the next VALID card, dropping malformed entries (a partial {id,value} card
+    // reached a hand in KLF2RQ and crashed every render of it). Logs what it skips.
+    function popValidCard(pile) {
+      while (pile.length > 0) {
+        const c = pile.pop();
+        if (c && c.id && c.type) return c;
+        debugLog('deckaudit', 'invalid card skipped at deal', { card: c ? JSON.stringify(c).slice(0, 100) : String(c) });
+      }
+      return undefined;
+    }
+
     async function reshuffleDecksIfNeeded(deckPath) {
       const [whiteDiscSnap, blackDiscSnap, whiteDrawSnap, blackDrawSnap] = await Promise.all([
         fbDb.ref(deckPath + 'whiteDiscard').once('value'),
@@ -3821,8 +3864,48 @@
       shuffle(whiteDisc);
       shuffle(blackDisc);
       // Merge: reshuffled discard at bottom, existing draw on top (pop draws from top)
-      const newWhiteDraw = [...whiteDisc, ...whiteDraw];
-      const newBlackDraw = [...blackDisc, ...blackDraw];
+      let newWhiteDraw = [...whiteDisc, ...whiteDraw];
+      let newBlackDraw = [...blackDisc, ...blackDraw];
+      // Sanitize (KLF2RQ: a stale queued write reverted whiteDraw overnight, so the
+      // reshuffle minted 21 in-pile duplicates incl. 7 cards sitting on the Grail board,
+      // plus a partial {id,value} card that crashed hand renders). Make the reshuffle
+      // self-correcting: drop malformed entries, dedupe by id, and exclude white ids
+      // currently held on quest boards / the share pool. (Hands are host-invisible —
+      // in-hand dupes can't be excluded here, but every observed dupe was quest/discard.)
+      {
+        const before = { w: newWhiteDraw.length, b: newBlackDraw.length };
+        const onBoards = new Set();
+        const q = cachedQuests || {};
+        for (const c of (q.holyGrail?.cards || [])) if (c?.id) onBoards.add(c.id);
+        for (const c of (q.blackKnight?.whiteCards || [])) if (c?.id) onBoards.add(c.id);
+        for (const c of (q.lancelot?.whiteCards || [])) if (c?.id) onBoards.add(c.id);
+        for (const c of (q.saxonWar?.fightCards || [])) if (c?.id) onBoards.add(c.id);
+        for (const c of (q.pictWar?.fightCards || [])) if (c?.id) onBoards.add(c.id);
+        for (const c of (roomData?.pendingInteraction?.pool || [])) if (c?.id) onBoards.add(c.id);
+        let invalid = 0, dupes = 0, questHeld = 0;
+        const seenW = new Set();
+        newWhiteDraw = newWhiteDraw.filter(c => {
+          if (!c || !c.id || !c.type) { invalid++; return false; }
+          if (onBoards.has(c.id)) { questHeld++; return false; }
+          if (seenW.has(c.id)) { dupes++; return false; }
+          seenW.add(c.id);
+          return true;
+        });
+        const seenB = new Set();
+        newBlackDraw = newBlackDraw.filter(c => {
+          if (!c || !c.id || !c.type) { invalid++; return false; }
+          if (seenB.has(c.id)) { dupes++; return false; }
+          seenB.add(c.id);
+          return true;
+        });
+        if (invalid || dupes || questHeld) {
+          debugLog('deckaudit', 'reshuffle sanitized', {
+            invalid, dupes, questHeld,
+            whiteBefore: before.w, whiteAfter: newWhiteDraw.length,
+            blackBefore: before.b, blackAfter: newBlackDraw.length,
+          });
+        }
+      }
       const reshuffleUpdates = {};
       reshuffleUpdates[deckPath + 'whiteDraw'] = newWhiteDraw;
       reshuffleUpdates[deckPath + 'blackDraw'] = newBlackDraw;
@@ -3971,7 +4054,7 @@
           return;
         }
         const pool = [];
-        for (let i = 0; i < count && drawPile.length > 0; i++) pool.push(drawPile.pop());
+        for (let i = 0; i < count && drawPile.length > 0; i++) { const c = popValidCard(drawPile); if (c) pool.push(c); }
         // If pile exhausted mid-draw, reshuffle and draw remainder
         if (pool.length < count && drawPile.length === 0) {
           // Persist the depleted pile FIRST so reshuffle merges only the discard and
@@ -3982,7 +4065,7 @@
             const freshSnap = await fbDb.ref(deckPath + 'whiteDraw').once('value');
             drawPile = freshSnap.val() || [];
             const remaining = count - pool.length;
-            for (let i = 0; i < remaining && drawPile.length > 0; i++) pool.push(drawPile.pop());
+            for (let i = 0; i < remaining && drawPile.length > 0; i++) { const c = popValidCard(drawPile); if (c) pool.push(c); }
           }
         }
         const updates = {};
@@ -4078,7 +4161,8 @@
 
       const drawnCards = [];
       for (let i = 0; i < count && drawPile.length > 0; i++) {
-        drawnCards.push(drawPile.pop());
+        const c = popValidCard(drawPile);
+        if (c) drawnCards.push(c);
       }
 
       // If pile exhausted mid-draw, reshuffle and draw remainder
@@ -4092,7 +4176,8 @@
           drawPile = freshSnap.val() || [];
           const remaining = count - drawnCards.length;
           for (let i = 0; i < remaining && drawPile.length > 0; i++) {
-            drawnCards.push(drawPile.pop());
+            const c = popValidCard(drawPile);
+            if (c) drawnCards.push(c);
           }
         }
       }
@@ -4179,6 +4264,7 @@
       hostPresenceStarted = true;
       // Host emits a heartbeat while actively running a game.
       const beat = () => {
+        lastOwnBeatAt = Date.now(); // gap in own ticks = the tab was fully asleep
         if (isHost && currentRoom && (roomData?.status === 'playing' || roomData?.status === 'setup')) {
           fbDb.ref('games/' + currentRoom + '/hostHeartbeat').set(firebase.database.ServerValue.TIMESTAMP).catch(() => {});
         }
@@ -4267,7 +4353,7 @@
           pile = (await fbDb.ref(deckPath + 'whiteDraw').once('value')).val() || [];
           if (pile.length === 0) break;
         }
-        drawn.push(pile.pop());
+        { const c = popValidCard(pile); if (c) drawn.push(c); }
       }
       if (drawn.length === 0) return;
       const discard = (await fbDb.ref(deckPath + 'whiteDiscard').once('value')).val() || [];
@@ -6365,14 +6451,14 @@
         html += '<p style="color:var(--text-dim);font-size:1rem;">You are revealed — auto-passing...</p>';
         if (!overlayVisible) html += '</div>';
         area.innerHTML = html;
-        fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
+        fbDb.ref(interactionResponsePath())
           .set({ done: true, merlinsOffered: 0 });
         return;
       } else if (!myDone && merlinCount === 0) {
         // No Merlins — auto-pass
         if (!overlayVisible) html += '</div>';
         area.innerHTML = html;
-        fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
+        fbDb.ref(interactionResponsePath())
           .set({ done: true, merlinsOffered: 0 });
         return;
       } else if (!myDone) {
@@ -6414,7 +6500,7 @@
       const prev = roomData.pendingInteraction?.responses?.[myKnight];
       const prevOffered = prev?.merlinsOffered || 0;
       const prevCards = prev?.offeredCards || [];
-      await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
+      await fbDb.ref(interactionResponsePath())
         .set({ merlinsOffered: prevOffered + 1, offeredCards: [...prevCards, merlinCard] });
 
       showToast('Merlin offered! You can offer more or confirm done.');
@@ -6424,7 +6510,7 @@
       const prev = roomData.pendingInteraction?.responses?.[myKnight];
       const offered = prev?.merlinsOffered || 0;
       const offeredCards = prev?.offeredCards || [];
-      await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
+      await fbDb.ref(interactionResponsePath())
         .set({ done: true, merlinsOffered: offered, offeredCards });
     }
 
@@ -6442,7 +6528,7 @@
         await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
         renderHand();
       }
-      await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
+      await fbDb.ref(interactionResponsePath())
         .set({ done: true, merlinsOffered: 0 });
     }
 
@@ -6717,12 +6803,12 @@
 
       const p = cachedPlayers[myKnight];
       if (!p || p.alive === false) {
-        fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight).set({ done: true });
+        fbDb.ref(interactionResponsePath()).set({ done: true });
         return;
       }
 
       if (myHand.length === 0) {
-        fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight).set({ done: true });
+        fbDb.ref(interactionResponsePath()).set({ done: true });
         return;
       }
 
@@ -6809,7 +6895,7 @@
       if (myHand.length === 0) {
         // Auto-respond if no cards (rule: discard only "if they have at least one")
         debugLog('morgan5', 'auto-skip discard — no white cards', { knight: myKnight, handSize: 0 });
-        fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
+        fbDb.ref(interactionResponsePath())
           .set({ done: true });
         return;
       }
@@ -6836,7 +6922,7 @@
       discardMode = null;
       await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
       await requestWhiteDiscard([card]);
-      await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
+      await fbDb.ref(interactionResponsePath())
         .set({ done: true });
       debugLog('morgan5', 'discarded 1 card', { knight: myKnight, handSizeAfter: myHand.length });
       showToast('Card discarded.');
@@ -6875,7 +6961,7 @@
         document.getElementById('btn-m5-life').addEventListener('click', async () => {
           const life = cachedPlayers[myKnight]?.life ?? 4;
           await fbDb.ref('games/' + currentRoom + '/players/' + myKnight + '/life').set(Math.max(0, life - 2));
-          await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight).set({ done: true });
+          await fbDb.ref(interactionResponsePath()).set({ done: true });
           await addLog('evil', getKnightDisplayName(myKnight) + ' lost 2 Life Points from Morgan 5');
         });
         if (canDiscard) {
@@ -6911,11 +6997,11 @@
       document.getElementById('btn-m5-volunteer').addEventListener('click', async () => {
         const life = cachedPlayers[myKnight]?.life ?? 4;
         await fbDb.ref('games/' + currentRoom + '/players/' + myKnight + '/life').set(Math.max(0, life - 2));
-        await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight).set({ volunteered: true, done: true });
+        await fbDb.ref(interactionResponsePath()).set({ volunteered: true, done: true });
         await addLog('evil', getKnightDisplayName(myKnight) + ' volunteered 2 Life Points for Morgan 5!');
       });
       document.getElementById('btn-m5-decline').addEventListener('click', async () => {
-        await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight).set({ declined: true, done: true });
+        await fbDb.ref(interactionResponsePath()).set({ declined: true, done: true });
       });
     }
 
@@ -7005,12 +7091,12 @@
       if (canVolunteer) {
         document.getElementById('btn-m1-volunteer').addEventListener('click', async () => {
           discardMode = 'morgan1volunteer'; discardCount = 3; selectedCardId = null;
-          await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight).set({ volunteering: true });
+          await fbDb.ref(interactionResponsePath()).set({ volunteering: true });
           renderMorgan1DiscardUI();
         });
       }
       document.getElementById('btn-m1-decline').addEventListener('click', async () => {
-        await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight).set({ declined: true, done: true });
+        await fbDb.ref(interactionResponsePath()).set({ declined: true, done: true });
       });
     }
 
@@ -7127,7 +7213,7 @@
             requestWhiteDiscard([stolenCard]);
             renderHand();
           }
-          fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
+          fbDb.ref(interactionResponsePath())
             .set({ done: true });
           area.innerHTML = '<div class="interaction-panel"><h3>Traitor\'s Taunt</h3>' +
             '<p>A card was stolen from your hand!</p></div>';
@@ -7179,7 +7265,7 @@
       const atCamelot = myPlayer.location === 'roundTable' || myPlayer.location === 'siege';
       if (atCamelot) {
         // Auto-respond: already at Camelot, count as returning
-        fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
+        fbDb.ref(interactionResponsePath())
           .set({ returning: true, done: true });
         return;
       }
@@ -7190,11 +7276,11 @@
         '<button class="btn btn-heroic" id="btn-conv-stay" style="margin-top:0.5rem;opacity:0.7;">Stay at ' + getLocationLabel(myPlayer.location) + '</button></div>';
 
       document.getElementById('btn-conv-return').addEventListener('click', async () => {
-        await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
+        await fbDb.ref(interactionResponsePath())
           .set({ returning: true, done: true });
       });
       document.getElementById('btn-conv-stay').addEventListener('click', async () => {
-        await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight)
+        await fbDb.ref(interactionResponsePath())
           .set({ returning: false, done: true });
       });
     }
@@ -7418,14 +7504,14 @@
       if (acceptBtn) acceptBtn.addEventListener('click', () => {
         acceptBtn.disabled = true; acceptBtn.textContent = 'Submitting…';
         if (rejectBtn) rejectBtn.disabled = true;
-        watchedWrite('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight, true, 'cardShare accept')
+        watchedWrite(interactionResponsePath(), true, 'cardShare accept')
           .then(verifyVoteEcho('cardShare accept'));
       });
       if (rejectBtn) rejectBtn.addEventListener('click', () => {
         if (!confirm('Reject this split and force the cards to be distributed at random?')) return;
         rejectBtn.disabled = true; rejectBtn.textContent = 'Submitting…';
         if (acceptBtn) acceptBtn.disabled = true;
-        watchedWrite('games/' + currentRoom + '/meta/pendingInteraction/responses/' + myKnight, false, 'cardShare reject')
+        watchedWrite(interactionResponsePath(), false, 'cardShare reject')
           .then(verifyVoteEcho('cardShare reject'));
       });
       const randomBtn = document.getElementById('btn-cardshare-random');
