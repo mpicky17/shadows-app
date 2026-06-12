@@ -1091,7 +1091,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v86';
+    const APP_VERSION = 'shadows-v87';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -3944,6 +3944,8 @@
           percivalPeek: { card: topCard },
           percivalPeeked: true,
         });
+        // Coverage logging: the peek itself is public knowledge (the card is not).
+        await addLog('info', getKnightDisplayName('percival') + ' peeked at the top Black card (Percival power)');
         await fbDb.ref('games/' + currentRoom + '/drawRequests/' + requestId).remove();
         return;
       }
@@ -3952,6 +3954,12 @@
       if (deckType === 'armorReveal') {
         const isPercivalDecline = (knightId === 'percival' && !roomData.percivalPeeked);
         const { card1, card2 } = await armorDrawTwoCards(deckPath);
+        // Coverage logging: the draw-2-pick-1 happens host-side and previously left no trace.
+        if (card1 && card2) {
+          await addLog('info', getKnightDisplayName(knightId) + " drew 2 Black cards (Lancelot's Armor) — playing 1, returning the other");
+        } else if (card1) {
+          await addLog('info', getKnightDisplayName(knightId) + " drew the last Black card (Lancelot's Armor — no 2nd card available)");
+        }
         const updates = {};
         if (!card1) {
           // Deck totally empty — nothing to draw.
@@ -7950,12 +7958,16 @@
       }
     }
 
-    async function prematureDeath(knightId) {
+    async function prematureDeath(knightId, byHost = false) {
       // Set life to 0
       await fbDb.ref('games/' + currentRoom + '/players/' + knightId + '/life').set(0);
       // Kill directly — no Grail save for voluntary/forced departure
       await killKnight(knightId);
-      await addLog('system', getKnightDisplayName(knightId) + ' has left the quest permanently.');
+      // Coverage logging: distinguish a player pressing their own "Permanently Leave
+      // Game" button from the host removing them.
+      await addLog('system', getKnightDisplayName(knightId) + (byHost
+        ? ' was removed from the game by the host.'
+        : ' has left the quest permanently (own choice).'));
       if (roomData?.status === 'ended') return;
       // If dying knight was the current turn knight, advance turn
       if (roomData?.currentTurnKnight === knightId) {
@@ -8015,7 +8027,7 @@
 
     async function hostRemovePlayer(knightId) {
       if (!isHost) return;
-      await prematureDeath(knightId);
+      await prematureDeath(knightId, true);
     }
 
     async function advanceTurn() {
@@ -8986,6 +8998,11 @@
       const whiteSum = rawWhiteSum + (hasExcalibur ? 1 : 0);
       const kayPresent = knightsPresent.includes('kay') && cachedPlayers['kay']?.alive !== false;
 
+      // Coverage logging: the +1 was only visible in the overlay text, never the game log.
+      if (hasExcalibur) {
+        const holder = knightsPresent.find(kid => cachedPlayers[kid]?.relics?.excalibur);
+        await addLog('info', 'Excalibur (' + getKnightDisplayName(holder) + ') adds +1 to the combat total: ' + rawWhiteSum + ' → ' + whiteSum);
+      }
       const anyFaceDown = preRevealBlackCards.some(c => c.faceDown);
       await fbDb.ref('games/' + currentRoom + '/meta/combatResolution').set({
         questKey, whiteCards, blackCards, preRevealBlackCards, whiteSum, blackSum,
