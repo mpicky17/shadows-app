@@ -1091,7 +1091,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v92';
+    const APP_VERSION = 'shadows-v93';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -4718,6 +4718,10 @@
     function debugStorageKey() { return 'soc_debug_' + (currentRoom || 'global'); }
 
     function persistDebugBufferNow() {
+      // Don't persist until the buffer has been claimed for the current room — otherwise a prior
+      // game's in-memory buffer gets written under the new room's key during the room-change
+      // window and pollutes its export (F2EXND restored 1384 prior-game lines despite v92).
+      if (debugBufferRoom !== currentRoom) return;
       try { localStorage.setItem(debugStorageKey(), JSON.stringify(debugBuffer.slice(-DEBUG_PERSIST_MAX))); } catch (e) { /* quota — ignore */ }
     }
 
@@ -6052,7 +6056,7 @@
         const swords = cachedBoard?.swords || [];
         swords.push({ color: 'black', source: 'excalibur' });
         swords.push({ color: 'black', source: 'excalibur' });
-        if (roomData?.persistentEffects?.mistOfAvalon) swords.push({ color: 'black', source: 'mistOfAvalon' });
+        await pushMistSword(swords);
         updates['games/' + currentRoom + '/board/swords'] = swords;
 
         // Knights on quest lose 1 LP and return to Round Table
@@ -6121,7 +6125,7 @@
         updates['games/' + currentRoom + '/quests/holyGrail/status'] = 'lost';
         const swords = cachedBoard?.swords || [];
         for (let i = 0; i < 3; i++) swords.push({ color: 'black', source: 'holyGrail' });
-        if (roomData?.persistentEffects?.mistOfAvalon) swords.push({ color: 'black', source: 'mistOfAvalon' });
+        await pushMistSword(swords);
         updates['games/' + currentRoom + '/board/swords'] = swords;
 
         const knightsPresent = quest.knightsPresent || [];
@@ -6179,7 +6183,7 @@
         updates['games/' + currentRoom + '/quests/' + questKey + '/status'] = 'lost';
         const swords = cachedBoard?.swords || [];
         swords.push({ color: 'black', source: questKey });
-        if (roomData?.persistentEffects?.mistOfAvalon) swords.push({ color: 'black', source: 'mistOfAvalon' });
+        await pushMistSword(swords);
         updates['games/' + currentRoom + '/board/swords'] = swords;
 
         // +2 siege engines
@@ -6371,7 +6375,7 @@
               updates['games/' + currentRoom + '/quests/holyGrail/status'] = 'lost';
               const swords = cachedBoard?.swords || [];
               for (let i = 0; i < 3; i++) swords.push({ color: 'black', source: 'holyGrail' });
-              if (roomData?.persistentEffects?.mistOfAvalon) swords.push({ color: 'black', source: 'mistOfAvalon' });
+              await pushMistSword(swords);
               updates['games/' + currentRoom + '/board/swords'] = swords;
               const knightsPresent = quest.knightsPresent || [];
               for (const kid of knightsPresent) {
@@ -6408,7 +6412,7 @@
           updates['games/' + currentRoom + '/quests/holyGrail/status'] = 'lost';
           const swords = cachedBoard?.swords || [];
           for (let i = 0; i < 3; i++) swords.push({ color: 'black', source: 'holyGrail' });
-          if (roomData?.persistentEffects?.mistOfAvalon) swords.push({ color: 'black', source: 'mistOfAvalon' });
+          await pushMistSword(swords);
           updates['games/' + currentRoom + '/board/swords'] = swords;
           const knightsPresent = quest.knightsPresent || [];
           for (const kid of knightsPresent) {
@@ -7265,7 +7269,7 @@
       if (newWarriors >= 4) {
         const swords = cachedBoard?.swords || [];
         swords.push({ color: 'black', source: questKey });
-        if (roomData?.persistentEffects?.mistOfAvalon) swords.push({ color: 'black', source: 'mistOfAvalon' });
+        await pushMistSword(swords);
         const lossUpdates = {};
         lossUpdates['games/' + currentRoom + '/board/swords'] = swords;
         const siegeCount = (cachedBoard?.siegeEngines || 0) + 2;
@@ -7741,6 +7745,7 @@
         updates['games/' + currentRoom + '/meta/status'] = 'playing';
         updates['games/' + currentRoom + '/meta/turnPhase'] = 'evil';
         await fbDb.ref().update(updates);
+        await addLog('info', 'Turn 1: ' + getKnightDisplayName(roomData.currentTurnKnight) + '\'s turn');
         debugLog('setup', 'setup → playing (card share complete)', {});
       } else if (interaction.moment === 'convocation') {
         await completeSWAction();
@@ -8207,10 +8212,13 @@
         return;
       }
 
+      // Compute the next turn number ONCE — recomputing after the await below let the meta echo
+      // bump roomData.turnNumber first, inflating the logged label by one (F2EXND "Turn 3").
+      const nextTurnNumber = (roomData.turnNumber || 1) + 1;
       const updates = {};
       updates['games/' + currentRoom + '/meta/currentTurnKnight'] = nextKnight;
       updates['games/' + currentRoom + '/meta/turnPhase'] = 'evil';
-      updates['games/' + currentRoom + '/meta/turnNumber'] = (roomData.turnNumber || 1) + 1;
+      updates['games/' + currentRoom + '/meta/turnNumber'] = nextTurnNumber;
       updates['games/' + currentRoom + '/meta/evilActionTaken'] = false;
       updates['games/' + currentRoom + '/meta/heroicActionTaken'] = false;
       updates['games/' + currentRoom + '/meta/sacrificeUsed'] = false;
@@ -8237,8 +8245,8 @@
       selectedCardId = null;
       galahadPowerUsedLocal = false;
 
-      await addLog('info', 'Turn ' + ((roomData.turnNumber || 1) + 1) + ': ' + getKnightDisplayName(nextKnight) + '\'s turn');
-      debugLog('turn', 'finishTurnAdvance', { from: currentKnight, to: nextKnight, turnNumber: (roomData.turnNumber || 1) + 1 });
+      await addLog('info', 'Turn ' + nextTurnNumber + ': ' + getKnightDisplayName(nextKnight) + '\'s turn');
+      debugLog('turn', 'finishTurnAdvance', { from: currentKnight, to: nextKnight, turnNumber: nextTurnNumber });
     }
 
     function getNextAliveKnight(currentKnight) {
@@ -9468,9 +9476,7 @@
           await addSword('white', 'blackKnight');
           for (const kid of knightsOnQuest) {
             if (isDying(kid)) continue;
-            let life = Math.min(6, (cachedPlayers[kid]?.life ?? 4) + 1);
-            if (kid === 'palamedes') life = Math.min(6, life + 1);
-            updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
+            await applyVictoryLife(updates, kid, 1);
           }
           if (sharers.length > 0) await distributeCardsAmongKnights(3, sharers);
           else await drawWhiteToDiscard(3);
@@ -9483,9 +9489,7 @@
           }
           for (const kid of knightsOnQuest) {
             if (isDying(kid)) continue;
-            let life = Math.min(6, (cachedPlayers[kid]?.life ?? 4) + 1);
-            if (kid === 'palamedes') life = Math.min(6, life + 1);
-            updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
+            await applyVictoryLife(updates, kid, 1);
           }
           if (sharers.length > 0) await distributeCardsAmongKnights(4, sharers);
           else await drawWhiteToDiscard(4);
@@ -9494,9 +9498,7 @@
           for (let i = 0; i < 2; i++) await addSword('white', 'dragon');
           for (const kid of knightsOnQuest) {
             if (isDying(kid)) continue;
-            let life = Math.min(6, (cachedPlayers[kid]?.life ?? 4) + 2);
-            if (kid === 'palamedes') life = Math.min(6, life + 1);
-            updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
+            await applyVictoryLife(updates, kid, 2);
           }
           await shareQuestSpoils(7, knightsOnQuest);
           updates['games/' + currentRoom + '/meta/cinematic'] = { type: 'dragonWin', id: Date.now() };
@@ -9607,6 +9609,26 @@
     //  SECTION 13F: Non-Combat Quest Resolution
     // ═══════════════════════════════════════════════════════════════════
 
+    // Push Mist of Avalon's extra Black Sword (if active) onto a swords array and log it, so the
+    // non-combat loss paths match the combat path's logging. Mutates `swords` in place.
+    async function pushMistSword(swords) {
+      if (!roomData?.persistentEffects?.mistOfAvalon) return;
+      swords.push({ color: 'black', source: 'mistOfAvalon' });
+      await addLog('evil', 'Mist of Avalon: extra Black Sword from quest loss!');
+    }
+
+    // Apply quest-victory Life to a knight (capped at 6) and add Sir Palamedes' Saracen +1 bonus,
+    // logging the bonus so it's verifiable. Writes into the caller's `updates` batch.
+    async function applyVictoryLife(updates, kid, baseGain) {
+      let life = Math.min(6, (cachedPlayers[kid]?.life ?? 4) + baseGain);
+      if (kid === 'palamedes') {
+        const boosted = Math.min(6, life + 1);
+        if (boosted > life) await addLog('info', getKnightDisplayName('palamedes') + ' gains +1 extra Life Point (Saracen — victorious quest)');
+        life = boosted;
+      }
+      updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
+    }
+
     async function resolveQuestVictory(questKey) {
       const q = cachedQuests[questKey];
       if (!q) return;
@@ -9619,9 +9641,7 @@
         if (!isDying(myKnight)) updates['games/' + currentRoom + '/players/' + myKnight + '/relics/excalibur'] = true;
         for (const kid of knightsOnQuest) {
           if (!isDying(kid)) {
-            let life = Math.min(6, (cachedPlayers[kid]?.life ?? 4) + 1);
-            if (kid === 'palamedes') life = Math.min(6, life + 1);
-            updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
+            await applyVictoryLife(updates, kid, 1);
           }
           updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
         }
@@ -9646,9 +9666,7 @@
         if (grailToCompleter) updates['games/' + currentRoom + '/players/' + myKnight + '/relics/holyGrail'] = true;
         for (const kid of knightsOnQuest) {
           if (!isDying(kid)) {
-            let life = Math.min(6, (cachedPlayers[kid]?.life ?? 4) + 1);
-            if (kid === 'palamedes') life = Math.min(6, life + 1);
-            updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
+            await applyVictoryLife(updates, kid, 1);
           }
           updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
         }
@@ -9672,9 +9690,7 @@
         await addSword('white', questKey);
         for (const kid of knightsOnQuest) {
           if (!isDying(kid)) {
-            let life = Math.min(6, (cachedPlayers[kid]?.life ?? 4) + 1);
-            if (kid === 'palamedes') life = Math.min(6, life + 1);
-            updates['games/' + currentRoom + '/players/' + kid + '/life'] = life;
+            await applyVictoryLife(updates, kid, 1);
           }
           updates['games/' + currentRoom + '/players/' + kid + '/location'] = 'roundTable';
         }
