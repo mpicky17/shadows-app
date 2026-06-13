@@ -1091,7 +1091,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v90';
+    const APP_VERSION = 'shadows-v91';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -2932,6 +2932,11 @@
         prevCachedQuests = JSON.parse(JSON.stringify(newQuests));
         cachedQuests = newQuests;
         renderQuests();
+        // Quest availability gates the heroic menu (e.g. "Play Fight Card"). The quests
+        // listener must refresh turn actions too, or a menu built against stale/not-yet-loaded
+        // quest data (e.g. right after a mid-turn reload) keeps the option hidden until some
+        // unrelated re-render — HXZ4HU t35: Dragon fight option missing until Arthur's swap.
+        if (roomData?.status === 'playing') renderTurnActions();
       });
     }
 
@@ -3892,11 +3897,15 @@
         const before = { w: newWhiteDraw.length, b: newBlackDraw.length };
         const onBoards = new Set();
         const q = cachedQuests || {};
-        for (const c of (q.holyGrail?.cards || [])) if (c?.id) onBoards.add(c.id);
-        for (const c of (q.blackKnight?.whiteCards || [])) if (c?.id) onBoards.add(c.id);
-        for (const c of (q.lancelot?.whiteCards || [])) if (c?.id) onBoards.add(c.id);
-        for (const c of (q.saxonWar?.fightCards || [])) if (c?.id) onBoards.add(c.id);
-        for (const c of (q.pictWar?.fightCards || [])) if (c?.id) onBoards.add(c.id);
+        // Only hold cards still on an ACTIVE quest. A completed quest's cards were discarded;
+        // if its array isn't cleared, treating them as "on board" would permanently drop those
+        // legitimately-discarded ids from the reshuffled draw pile (e.g. won Holy Grail cards).
+        const active = qk => q[qk]?.status === 'active';
+        if (active('holyGrail')) for (const c of (q.holyGrail.cards || [])) if (c?.id) onBoards.add(c.id);
+        if (active('blackKnight')) for (const c of (q.blackKnight.whiteCards || [])) if (c?.id) onBoards.add(c.id);
+        if (active('lancelot')) for (const c of (q.lancelot.whiteCards || [])) if (c?.id) onBoards.add(c.id);
+        if (active('saxonWar')) for (const c of (q.saxonWar.fightCards || [])) if (c?.id) onBoards.add(c.id);
+        if (active('pictWar')) for (const c of (q.pictWar.fightCards || [])) if (c?.id) onBoards.add(c.id);
         for (const c of (roomData?.pendingInteraction?.pool || [])) if (c?.id) onBoards.add(c.id);
         let invalid = 0, dupes = 0, questHeld = 0;
         const seenW = new Set();
@@ -4144,10 +4153,7 @@
       if (deckType === 'discardWhite') {
         const cardsToDiscard = request.cards || [];
         if (cardsToDiscard.length > 0) {
-          const discardSnap = await fbDb.ref(deckPath + 'whiteDiscard').once('value');
-          const discard = discardSnap.val() || [];
-          discard.push(...cardsToDiscard);
-          await fbDb.ref(deckPath + 'whiteDiscard').set(discard);
+          await pushWhiteDiscard(deckPath, cardsToDiscard);
         }
         await fbDb.ref('games/' + currentRoom + '/drawRequests/' + requestId).remove();
         return;
@@ -4349,14 +4355,32 @@
       await ref.set({ knightId: myKnight, deckType, count, timestamp: firebase.database.ServerValue.TIMESTAMP });
     }
 
+    // White card ids (w1..w84) are globally unique, so a pile must never hold an id twice.
+    // Drop malformed entries and dedupe by id — guards against a discard being applied twice
+    // under reconnect/retry churn (HXZ4HU: 16 duplicate ids accumulated in whiteDiscard).
+    function dedupeById(arr) {
+      const seen = new Set();
+      const out = [];
+      for (const c of (arr || [])) {
+        if (!c || !c.id) continue;
+        if (seen.has(c.id)) continue;
+        seen.add(c.id);
+        out.push(c);
+      }
+      return out;
+    }
+
+    // Host-only: append to whiteDiscard, deduped by id (read→merge→dedupe→set).
+    async function pushWhiteDiscard(deckPath, cards) {
+      const cur = (await fbDb.ref(deckPath + 'whiteDiscard').once('value')).val() || [];
+      await fbDb.ref(deckPath + 'whiteDiscard').set(dedupeById([...cur, ...cards]));
+    }
+
     async function requestWhiteDiscard(cards) {
       if (!cards || cards.length === 0) return;
       if (isHost) {
         const deckPath = 'private/' + currentRoom + '/' + hostDeckKey + '/hostDecks/';
-        const discardSnap = await fbDb.ref(deckPath + 'whiteDiscard').once('value');
-        const discard = discardSnap.val() || [];
-        discard.push(...cards);
-        await fbDb.ref(deckPath + 'whiteDiscard').set(discard);
+        await pushWhiteDiscard(deckPath, cards);
       } else {
         await fbDb.ref('games/' + currentRoom + '/drawRequests').push().set({
           knightId: myKnight, deckType: 'discardWhite', cards,
@@ -4384,7 +4408,7 @@
       discard.push(...drawn);
       const updates = {};
       updates[deckPath + 'whiteDraw'] = pile;
-      updates[deckPath + 'whiteDiscard'] = discard;
+      updates[deckPath + 'whiteDiscard'] = dedupeById(discard);
       updates['games/' + currentRoom + '/decks/whiteDrawCount'] = pile.length;
       await fbDb.ref().update(updates);
     }
@@ -4733,7 +4757,7 @@
         String(d.getHours()).padStart(2, '0') +
         String(d.getMinutes()).padStart(2, '0') +
         String(d.getSeconds()).padStart(2, '0');
-      return ts + '_Room_' + (currentRoom || 'none') + '_' + suffix + '.txt';
+      return ts + '_Room_' + (currentRoom || 'none') + '_debug_' + suffix + '.txt';
     }
 
     function downloadTextFile(text, filename) {
@@ -4988,7 +5012,7 @@
             String(d.getMinutes()).padStart(2, '0') +
             String(d.getSeconds()).padStart(2, '0');
         }
-        const filename = fileTs + '_Room_' + currentRoom + '.txt';
+        const filename = fileTs + '_Room_' + currentRoom + '_narrative.txt';
 
         const blob = new Blob([text], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
