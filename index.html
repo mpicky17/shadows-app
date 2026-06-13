@@ -1091,7 +1091,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v88';
+    const APP_VERSION = 'shadows-v89';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1173,6 +1173,7 @@
     let inGameScreen = false;
     let myLoyalty = null;
     let myHand = [];
+    let handLoaded = false;     // true once the private-hand listener has delivered at least once
     let selectedCardId = null;  // card selected in hand (for setup)
     let mySetupShared = false;  // have I shared a card in setup?
     // Quest cinematics: map event → video file (static assets at repo root, streamed from network).
@@ -1223,7 +1224,7 @@
     let lastOwnBeatAt = 0;          // when this device's own beat timer last ticked (sleep detector)
     let lastSeenInteractionId = null; // crosstalk detection: first sight of each interaction
     let poolWaitWarned = new Set(); // one no-pool warning per cardShare interaction
-    let traitorStealProcessed = false;
+    let traitorStealProcessedId = null;   // interaction.id whose steal we've already processed
     let setupListener = null;
     let cachedBoard = null;
     let cachedQuests = null;
@@ -2297,6 +2298,8 @@
       inGameScreen = false;
       myLoyalty = null;
       myHand = [];
+      handLoaded = false;
+      traitorStealProcessedId = null;
       selectedCardId = null;
       mySetupShared = false;
       lastCinematicId = null;
@@ -2895,9 +2898,14 @@
         myLoyalty = data.loyalty || null;
         const rawHand = data.hand || [];
         myHand = Array.isArray(rawHand) ? rawHand : Object.values(rawHand);
+        handLoaded = true;
         renderLoyalty();
         renderHand();
         renderTurnActions();
+        // A traitorSteal panel may have rendered before the hand loaded (it waits on
+        // handLoaded); re-render it now that myHand is populated so it can resolve.
+        const pi = roomData?.pendingInteraction;
+        if (pi && pi.type === 'traitorSteal' && pi.targetKnight === myKnight) renderPendingInteraction();
         if (roomData?.combatResolution && heroicMode !== 'kayExtra') onCombatResolutionChanged();
       });
     }
@@ -7219,25 +7227,44 @@
       const myResponse = interaction.responses?.[myKnight];
 
       if (myKnight === targetKnight) {
-        if (!myResponse && !traitorStealProcessed) {
-          // Auto-discard a random card on target's own device
-          traitorStealProcessed = true;
-          if (myHand.length > 0) {
-            const idx = Math.floor(Math.random() * myHand.length);
-            const stolenCard = myHand.splice(idx, 1)[0];
-            fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
-            requestWhiteDiscard([stolenCard]);
-            renderHand();
-          }
-          fbDb.ref(interactionResponsePath())
-            .set({ done: true });
+        if (myResponse) {
+          area.innerHTML = '<div class="interaction-panel"><h3>Traitor\'s Taunt</h3>' +
+            '<p>A card was taken from your hand.</p></div>';
+          checkTraitorStealResolution(interaction);
+          return;
+        }
+        if (traitorStealProcessedId === interaction.id) {
+          // Already processed locally this interaction — waiting for the response round-trip.
+          area.innerHTML = '<div class="interaction-panel"><h3>Traitor\'s Taunt</h3>' +
+            '<p>Resolving…</p></div>';
+          checkTraitorStealResolution(interaction);
+          return;
+        }
+        if (!handLoaded) {
+          // Don't act before the private hand has loaded, or we'd falsely report a steal
+          // and remove nothing (HXZ4HU: panel rendered pre-hand-load).
+          area.innerHTML = '<div class="interaction-panel"><h3>Traitor\'s Taunt</h3>' +
+            '<p>Resolving…</p></div>';
+          return;
+        }
+        // Auto-discard a random card on the target's own device. Latch per interaction.id so
+        // a second taunt on the same knight isn't skipped (the old global flag never reset
+        // on the target's device — it only reset on the traitor's turn).
+        traitorStealProcessedId = interaction.id;
+        if (myHand.length > 0) {
+          const idx = Math.floor(Math.random() * myHand.length);
+          const stolenCard = myHand.splice(idx, 1)[0];
+          fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
+          requestWhiteDiscard([stolenCard]);
+          renderHand();
           area.innerHTML = '<div class="interaction-panel"><h3>Traitor\'s Taunt</h3>' +
             '<p>A card was stolen from your hand!</p></div>';
-        } else if (myResponse) {
+        } else {
           area.innerHTML = '<div class="interaction-panel"><h3>Traitor\'s Taunt</h3>' +
-            '<p>A card was stolen from your hand.</p></div>';
-          checkTraitorStealResolution(interaction);
+            '<p>You had no cards to steal.</p></div>';
         }
+        fbDb.ref(interactionResponsePath())
+          .set({ done: true });
       } else {
         area.innerHTML = '<div class="interaction-panel"><h3>Traitor\'s Taunt</h3>' +
           '<p class="waiting-text">Stealing from ' + getKnightDisplayName(targetKnight) + '...</p></div>';
@@ -7249,7 +7276,6 @@
       if (!isMyTurn()) return;
       const responses = interaction.responses || {};
       if (responses[interaction.targetKnight]) {
-        traitorStealProcessed = false;
         await fbDb.ref('games/' + currentRoom + '/meta').update({
           pendingInteraction: null,
           traitorPhase: 'helpEvil',
