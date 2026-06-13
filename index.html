@@ -1091,7 +1091,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v91';
+    const APP_VERSION = 'shadows-v92';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1252,6 +1252,7 @@
     // can on-demand aggregate every device's buffer via meta/debugCollect.
     const DEBUG_BUFFER_MAX = 2000;
     let debugBuffer = [];           // in-memory ring buffer of {t, seq, boot, v, knight, isHost, turn, phase, category, message, data}
+    let debugBufferRoom = null;     // room the in-memory buffer belongs to (reset on room change)
     let detailedDebugEnabled = false; // controls the on-screen debug panel visibility
     let lastDebugCollectId = null;  // dedupe host aggregation requests
     let debugSeq = 0;               // per-boot monotonic counter (exact intra-device order + truncation detection)
@@ -2669,6 +2670,10 @@
       startHostPresenceMonitor();
 
       // Debug log: restore history saved before a reload, and re-apply the saved display toggle.
+      // On an in-session room change, drop the prior game's in-memory buffer so it doesn't bleed
+      // into this room's export (XF4V2C carried ~1600 lines from the previous game).
+      if (debugBufferRoom && debugBufferRoom !== currentRoom) { debugBuffer = []; debugRestored = false; }
+      debugBufferRoom = currentRoom;
       restoreDebugBuffer();
       try { detailedDebugEnabled = localStorage.getItem('soc_debug_enabled') === '1'; } catch (e) {}
       applyDebugToggleUI();
@@ -2905,7 +2910,8 @@
         // A traitorSteal panel may have rendered before the hand loaded (it waits on
         // handLoaded); re-render it now that myHand is populated so it can resolve.
         const pi = roomData?.pendingInteraction;
-        if (pi && pi.type === 'traitorSteal' && pi.targetKnight === myKnight) renderPendingInteraction();
+        const handGatedTypes = ['traitorSteal', 'fateDiscard', 'morganDiscard'];
+        if (pi && handGatedTypes.includes(pi.type) && !pi.responses?.[myKnight]) renderPendingInteraction();
         if (roomData?.combatResolution && heroicMode !== 'kayExtra') onCombatResolutionChanged();
       });
     }
@@ -3650,7 +3656,14 @@
         },
       ];
 
-      el.innerHTML = questInfo.map(qi => {
+      // Global Vivien indicator — Merlin cards are blocked until a quest is won. Clears
+      // automatically when persistentEffects.vivien flips false on a quest win.
+      const vivienBadge = roomData?.persistentEffects?.vivien
+        ? '<div class="quest-chip effect-chip" style="border-color:var(--red-bright);background:rgba(200,40,40,0.12);">' +
+          '<div class="qname" style="color:var(--red-bright);">🚫 <span style="text-decoration:line-through;">Merlin</span> blocked</div>' +
+          '<div class="qinfo">Vivien — no Merlin cards until a quest is won</div></div>'
+        : '';
+      el.innerHTML = vivienBadge + questInfo.map(qi => {
         const q = cachedQuests[qi.key];
         if (!q || q.status === 'completed' || q.status === 'won') return '';
         const lostStyle = q.status === 'lost' ? ' style="opacity:0.5;border-color:var(--red-bright);"' : '';
@@ -3661,8 +3674,8 @@
                '<div class="qinfo">' + qi.info(q) + heroismTag + moaTag + '</div></div>';
       }).join('');
 
-      // Tap a quest chip to open its detail overlay.
-      el.querySelectorAll('.quest-chip').forEach(chip => {
+      // Tap a quest chip to open its detail overlay (skip the non-quest effect badge).
+      el.querySelectorAll('.quest-chip:not(.effect-chip)').forEach(chip => {
         chip.addEventListener('click', () => showQuestDetail(chip.dataset.questKey));
       });
     }
@@ -6850,14 +6863,28 @@
         return;
       }
 
+      // Spectator host has no knight/hand — never write a response (it would land under the
+      // _spectator key and skew resolution). Just show a waiting state.
+      if (!myKnight) {
+        area.innerHTML = '<div class="interaction-panel"><h3>Fate — Traitor Revealed</h3>' +
+          '<p>Waiting for opponents to discard...</p></div>';
+        return;
+      }
+
       const p = cachedPlayers[myKnight];
       if (!p || p.alive === false) {
         fbDb.ref(interactionResponsePath()).set({ done: true });
         return;
       }
 
-      if (myHand.length === 0) {
+      // Don't auto-skip before the private hand has loaded, or a real knight falsely reports
+      // "no cards" and skips a mandatory discard (handLoaded gate, mirrors the v89 steal fix).
+      if (handLoaded && myHand.length === 0) {
         fbDb.ref(interactionResponsePath()).set({ done: true });
+        return;
+      }
+      if (!handLoaded) {
+        area.innerHTML = '<div class="interaction-panel"><h3>Fate — Traitor Revealed!</h3><p>Resolving…</p></div>';
         return;
       }
 
@@ -6882,8 +6909,10 @@
         const p = cachedPlayers[kid];
         return p && p.alive !== false;
       });
-      const responses = Object.keys(interaction.responses || {});
-      if (responses.length >= required.length) {
+      // Require each REQUIRED knight to have actually responded — counting raw responses let a
+      // stray _spectator (host) response inflate the total and skip the lone real knight (XF4V2C).
+      // (Empty required → vacuously true → resolves when no living opponents remain.)
+      if (required.every(kid => interaction.responses?.[kid])) {
         await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set(null);
         discardMode = null;
         discardCount = 0;
@@ -6946,11 +6975,22 @@
         return;
       }
 
-      if (myHand.length === 0) {
+      // Spectator host has no knight/hand — never write a response (would skew resolution).
+      if (!myKnight) {
+        area.innerHTML = '<div class="interaction-panel"><h3>Morgan 1</h3>' +
+          '<p>Waiting for knights to discard...</p></div>';
+        return;
+      }
+
+      if (handLoaded && myHand.length === 0) {
         // Auto-respond if no cards (rule: discard only "if they have at least one")
         debugLog('morgan5', 'auto-skip discard — no white cards', { knight: myKnight, handSize: 0 });
         fbDb.ref(interactionResponsePath())
           .set({ done: true });
+        return;
+      }
+      if (!handLoaded) {
+        area.innerHTML = '<div class="interaction-panel"><h3>Morgan 1</h3><p>Resolving…</p></div>';
         return;
       }
 
@@ -7365,8 +7405,9 @@
         return p && p.alive !== false && !p.isRevealed;
       });
       const responses = interaction.responses || {};
-      const respondedCount = Object.keys(responses).length;
-      if (respondedCount < aliveKnights.length) return;
+      // Each alive non-revealed knight must have responded — a stray _spectator response must not
+      // satisfy the gate in place of a real knight (XF4V2C count-based resolver bug).
+      if (!aliveKnights.every(kid => responses[kid] !== undefined)) return;
 
       // All responded — move returners and distribute cards
       const returners = aliveKnights.filter(kid => responses[kid]?.returning);
@@ -7710,18 +7751,24 @@
     async function checkInteractionResolution(interaction) {
       if (!isMyTurn()) return;
       const turnOrder = roomData?.turnOrder || [];
-      const aliveKnights = turnOrder.filter(kid => cachedPlayers[kid]?.alive !== false);
-      const responsesCount = Object.keys(interaction.responses || {}).length;
+      // Exclude revealed traitors (no hand to discard), matching the other resolvers.
+      const aliveKnights = turnOrder.filter(kid => cachedPlayers[kid]?.alive !== false && !cachedPlayers[kid]?.isRevealed);
+      const responses = interaction.responses || {};
+      const responsesCount = Object.keys(responses).length;
 
-      // Morgan 5 only requires the drawing knight's response (single-player choice)
-      const requiredCount = interaction.type === 'morgan5Choice' ? 1 : aliveKnights.length;
+      // Verify each required knight actually responded, rather than counting raw responses — a
+      // stray _spectator (host) response otherwise inflated the count and skipped a real knight
+      // (XF4V2C Morgan 1: resolved on _spectator/arthur/palamedes with Kay never discarding).
+      const allResponded = interaction.type === 'morgan5Choice'
+        ? Object.keys(responses).some(k => k !== '_spectator')   // single-drawer choice
+        : aliveKnights.every(kid => responses[kid]);
 
       debugLog('interaction', 'checkInteractionResolution', {
-        type: interaction.type, required: aliveKnights, requiredCount,
-        responded: Object.keys(interaction.responses || {}), responsesCount,
+        type: interaction.type, required: aliveKnights,
+        responded: Object.keys(responses), responsesCount, allResponded,
       });
 
-      if (responsesCount >= requiredCount) {
+      if (allResponded) {
         await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set(null);
         if (await checkGameEnd()) return;
         await advanceToHeroicPhase();
@@ -7984,6 +8031,14 @@
       }
       if (p?.relics?.lancelotArmor) {
         updates['games/' + currentRoom + '/players/' + knightId + '/relics/lancelotArmor'] = null;
+      }
+      // Remove the dead knight from any quest they were on, so they don't linger on the board /
+      // in combat / spoils / move counts (XF4V2C: Palamedes stayed at Pict War after dying).
+      for (const [qk, q] of Object.entries(cachedQuests || {})) {
+        if ((q?.knightsPresent || []).includes(knightId)) {
+          updates['games/' + currentRoom + '/quests/' + qk + '/knightsPresent'] =
+            q.knightsPresent.filter(k => k !== knightId);
+        }
       }
       await fbDb.ref().update(updates);
       await addLog('system', getKnightDisplayName(knightId) + ' has fallen!');
@@ -9325,8 +9380,10 @@
       // Actions — only active player can finalize
       const actionsEl = $('combat-actions');
       if (isMyTurn()) {
-        // Kay extra card prompt
-        if (res.kayPrompt && !res.kayPlayed && myKnight === 'kay') {
+        // Kay extra card prompt — only if not already winning (an extra card can't help a win;
+        // ties go to Evil, so it only matters when white <= black). XF4V2C: Kay won Lancelot
+        // on the cards in play yet was still asked.
+        if (res.kayPrompt && !res.kayPlayed && myKnight === 'kay' && winner !== 'white') {
           const hasFight = myHand.some(c => c.type === 'fight');
           actionsEl.innerHTML =
             '<p style="color:var(--gold);font-size:1rem;">Sir Kay — Play 1 extra Fight card?</p>' +
@@ -9342,7 +9399,7 @@
           document.getElementById('btn-finalize-combat').addEventListener('click', () =>
             finalizeCombatResult(res.questKey, winner));
         }
-      } else if (res.kayPrompt && !res.kayPlayed && myKnight === 'kay') {
+      } else if (res.kayPrompt && !res.kayPlayed && myKnight === 'kay' && winner !== 'white') {
         // Kay is not the active player but can still play extra card
         const hasFight = myHand.some(c => c.type === 'fight');
         actionsEl.innerHTML =
@@ -9888,6 +9945,11 @@
     async function performSacrifice() {
       const life = cachedPlayers[myKnight]?.life ?? 4;
       if (life <= 0) { showToast('Not enough life to sacrifice!'); return; }
+      // Warn before sacrificing the last LP — the extra action proceeds, then the knight dies.
+      if (life - 1 <= 0) {
+        const ok = confirm('Dead players do not receive quest benefits and cannot partake in life points from special white cards. Only the Holy Grail can save you! Are you sure you want to die?');
+        if (!ok) { renderTurnActions(); return; }
+      }
 
       const updates = {};
       updates['games/' + currentRoom + '/players/' + myKnight + '/life'] = life - 1;
