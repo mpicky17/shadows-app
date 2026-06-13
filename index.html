@@ -1091,7 +1091,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v87';
+    const APP_VERSION = 'shadows-v88';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1238,6 +1238,7 @@
     let pendingJoinKnight = null;
     let discardMode = null;
     let discardCount = 0;
+    let fateDiscardInitId = null;   // interaction.id we've already initialized fate-discard for
     let heroicMode = null;       // 'move'|'playCard'|'fightSiege'|'heal'|'specialWhite'|null
     let skipNextQuestRender = false;
     let heroicSubState = {};     // context for current heroic sub-action
@@ -2309,6 +2310,7 @@
       pendingJoinKnight = null;
       discardMode = null;
       discardCount = 0;
+      fateDiscardInitId = null;
       heroicMode = null;
       heroicSubState = {};
       lastHeroicAction = null;
@@ -6733,6 +6735,7 @@
         area.innerHTML = '';
         discardMode = null;
         discardCount = 0;
+        fateDiscardInitId = null;
         return;
       }
 
@@ -6820,8 +6823,13 @@
         return;
       }
 
-      discardMode = 'fateDiscard';
-      discardCount = Math.min(interaction.discardCount || 2, myHand.length);
+      // Initialize once per interaction. Re-renders (intermediate taps, meta syncs) must NOT
+      // reset the count, or it oscillates 2→1→2 and never reaches 0 (HXZ4HU stuck-discard bug).
+      if (fateDiscardInitId !== interaction.id) {
+        fateDiscardInitId = interaction.id;
+        discardMode = 'fateDiscard';
+        discardCount = Math.min(interaction.discardCount || 2, myHand.length);
+      }
 
       area.innerHTML = '<div class="interaction-panel"><h3>Fate — Traitor Revealed!</h3>' +
         '<p style="color:var(--danger);font-size:1rem;">Discard ' + discardCount + ' card' + (discardCount > 1 ? 's' : '') + '</p>' +
