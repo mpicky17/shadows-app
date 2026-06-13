@@ -1091,7 +1091,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v89';
+    const APP_VERSION = 'shadows-v90';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -2978,6 +2978,12 @@
         // Reactively resolve any knight who hit 0 LP on someone else's turn (Change 5).
         // Driven by the host; the active turn knight's death stays deferred to end of turn.
         if (isHost && roomData?.status === 'playing') resolveImmediateDeaths();
+        // Backstop: catch on-turn deaths killed on a player's own device (killKnight's host
+        // check can't run there). cachedPlayers is fresh in this listener, so gate cheaply on it.
+        if (isHost && roomData?.status === 'playing' &&
+            (roomData.turnOrder || []).some(kid => cachedPlayers[kid]?.alive === false)) {
+          checkAllLoyalDead();
+        }
         renderGamePlayers();
       });
     }
@@ -7967,29 +7973,32 @@
         await requestWhiteDiscard(discardedHand);
         renderHand();
       }
-      // Check if all loyal knights are dead (host only — requires private loyalty data)
-      if (isHost) {
-        const turnOrder = roomData?.turnOrder || [];
-        const aliveKnights = turnOrder.filter(kid => {
-          const pl = cachedPlayers[kid];
-          return pl && pl.alive !== false && kid !== knightId; // exclude the knight who just died
-        });
-        if (aliveKnights.length > 0) {
-          let allTraitors = true;
-          for (const kid of aliveKnights) {
-            const snap = await fbDb.ref('private/' + currentRoom + '/' + hostDeckKey + '/hostDecks/loyalties/' + kid).once('value');
-            if (snap.val() !== 'traitor') { allTraitors = false; break; }
-          }
-          if (allTraitors) {
-            await writeAllLoyalties();
-            await fbDb.ref('games/' + currentRoom + '/meta').update({
-              status: 'ended', winner: 'evil', endReason: 'allLoyalDead',
-            });
-            await addLog('system', 'GAME OVER: All Loyal Knights have fallen! Evil wins!');
-            showToast('Game Over! All Loyal Knights have fallen!');
-          }
-        }
+      // End the game if no loyal knight is left alive (host only — needs private loyalty).
+      await checkAllLoyalDead();
+    }
+
+    // Host-only. Ends the game (Evil wins) when no LOYAL knight is still alive — even though a
+    // revealed traitor remains alive and keeps the turn order non-empty. Reads alive flags
+    // FRESH (cachedPlayers lags writes; during a multi-death sweep an already-killed knight
+    // still shows alive in the mirror — HXZ4HU: both loyals died, no Evil win). Early-returns
+    // on the first living loyal, so normal play costs ~1 read.
+    async function checkAllLoyalDead() {
+      if (!isHost || !currentRoom || !roomData || roomData.status !== 'playing' || !hostDeckKey) return false;
+      const turnOrder = roomData.turnOrder || [];
+      for (const kid of turnOrder) {
+        const alive = (await fbDb.ref('games/' + currentRoom + '/players/' + kid + '/alive').once('value')).val();
+        if (alive === false) continue;                       // dead — doesn't keep the game going
+        const loy = (await fbDb.ref('private/' + currentRoom + '/' + hostDeckKey + '/hostDecks/loyalties/' + kid).once('value')).val();
+        if (loy !== 'traitor') return false;                 // a loyal knight is still alive
       }
+      // No living loyal remains.
+      await writeAllLoyalties();
+      await fbDb.ref('games/' + currentRoom + '/meta').update({
+        status: 'ended', winner: 'evil', endReason: 'allLoyalDead',
+      });
+      await addLog('system', 'GAME OVER: All Loyal Knights have fallen! Evil wins!');
+      showToast('Game Over! All Loyal Knights have fallen!');
+      return true;
     }
 
     async function prematureDeath(knightId, byHost = false) {
