@@ -1091,7 +1091,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v93';
+    const APP_VERSION = 'shadows-v94';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -5063,7 +5063,9 @@
       const area = $('turn-action-area');
       if (!roomData || roomData.status !== 'playing') { area.innerHTML = ''; return; }
       // Don't show actions if a pending interaction is active
-      if (roomData.pendingInteraction && !roomData.pendingInteraction.resolved) { area.innerHTML = ''; return; }
+      // Require a real `type` — a partial write can leave a typeless {responses:…} husk that
+      // would otherwise blank the turn UI forever (NEFE5L: traitor Help-Evil never rendered).
+      if (roomData.pendingInteraction && roomData.pendingInteraction.type && !roomData.pendingInteraction.resolved) { area.innerHTML = ''; return; }
       // Don't show actions if a card is being revealed
       if (roomData.revealedBlackCard) { area.innerHTML = ''; return; }
       // Don't show actions if quest result overlay is showing
@@ -6786,11 +6788,16 @@
         }
       }
 
-      if (!interaction || interaction.resolved) {
+      if (!interaction || !interaction.type || interaction.resolved) {
         area.innerHTML = '';
         discardMode = null;
         discardCount = 0;
         fateDiscardInitId = null;
+        // A late responses/{knight} write landing after a pendingInteraction:null clear can
+        // re-create a typeless {responses:…} husk that jams every interaction gate. Nuke it.
+        if (isHost && interaction && !interaction.type && !interaction.resolved) {
+          fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set(null);
+        }
         return;
       }
 
@@ -8236,6 +8243,8 @@
       updates['games/' + currentRoom + '/meta/traitorPhase'] = null;
       updates['games/' + currentRoom + '/meta/morgan2Remaining'] = null;
       updates['games/' + currentRoom + '/meta/clairvoyance'] = null;
+      // Safety net: a stale/typeless interaction husk must never survive a turn advance.
+      updates['games/' + currentRoom + '/meta/pendingInteraction'] = null;
       await fbDb.ref().update(updates);
 
       // Reset local heroic state
