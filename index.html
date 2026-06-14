@@ -1091,7 +1091,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v95';
+    const APP_VERSION = 'shadows-v96';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1178,10 +1178,13 @@
     let mySetupShared = false;  // have I shared a card in setup?
     // Quest cinematics: map event → video file (static assets at repo root, streamed from network).
     const CINEMATICS = {
-      dragonWin:     'dragon-win.mp4',
-      dragonLose:    'dragon-lose.mp4',
-      excaliburWin:  'sword-win.mp4',
-      excaliburLose: 'sword-lose.mp4',
+      dragonWin:       'dragon-win.mp4',
+      dragonLose:      'dragon-lose.mp4',
+      excaliburWin:    'sword-win.mp4',
+      excaliburLose:   'sword-lose.mp4',
+      blackKnightWin:  'black-knight-win.mp4',
+      blackKnightLose: 'black-knight-lose.mp4',
+      grailLose:       'grail-lose.mp4',
     };
     let lastCinematicId = null;  // dedupe cinematic playback across re-renders/reconnects
     let combatStageTimer = null; // drives the combat reveal animation (Change 2)
@@ -6140,6 +6143,7 @@
           questKey: 'holyGrail', result: 'defeat', cards, fromEvil: true,
           summary: '3 Black Swords, -1 LP. Holy Grail removed from game.',
         };
+        updates['games/' + currentRoom + '/meta/cinematic'] = { type: 'grailLose', id: Date.now() };
 
         await fbDb.ref().update(updates);
         await addLog('quest', 'Holy Grail quest LOST! 3 Black Swords, -1 LP. Holy Grail removed from game.');
@@ -6388,6 +6392,7 @@
                 questKey: 'holyGrail', result: 'defeat', cards, fromEvil: true,
                 summary: '3 Black Swords. Holy Grail removed from game.',
               };
+              updates['games/' + currentRoom + '/meta/cinematic'] = { type: 'grailLose', id: Date.now() };
               await fbDb.ref().update(updates);
               await addLog('quest', 'Holy Grail quest LOST! 3 Black Swords added.');
               await applyHeroismSword('holyGrail', 'black');
@@ -6425,6 +6430,7 @@
             questKey: 'holyGrail', result: 'defeat', cards, fromEvil: true,
             summary: '3 Black Swords. Holy Grail removed from game.',
           };
+          updates['games/' + currentRoom + '/meta/cinematic'] = { type: 'grailLose', id: Date.now() };
           await fbDb.ref().update(updates);
           await addLog('quest', 'Holy Grail quest LOST! 3 Black Swords added.');
           await applyHeroismSword('holyGrail', 'black');
@@ -9498,6 +9504,7 @@
           }
           if (sharers.length > 0) await distributeCardsAmongKnights(3, sharers);
           else await drawWhiteToDiscard(3);
+          updates['games/' + currentRoom + '/meta/cinematic'] = { type: 'blackKnightWin', id: Date.now() };
           await addLog('quest', 'Black Knight Tournament WON! 1 White Sword, +1 LP, 3 cards shared.');
         } else if (questKey === 'lancelot' && q.phase === 'lancelot') {
           await addSword('white', 'lancelot');
@@ -9529,6 +9536,7 @@
           for (const kid of knightsOnQuest) {
             updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.max(0, (cachedPlayers[kid]?.life ?? 4) - 1);
           }
+          updates['games/' + currentRoom + '/meta/cinematic'] = { type: 'blackKnightLose', id: Date.now() };
           await addLog('quest', 'Black Knight Tournament LOST! 1 Black Sword, -1 LP.');
         } else if (questKey === 'lancelot' && q.phase === 'lancelot') {
           await addSword('black', 'lancelot');
