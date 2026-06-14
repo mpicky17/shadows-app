@@ -1091,7 +1091,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v94';
+    const APP_VERSION = 'shadows-v95';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -7996,6 +7996,15 @@
       // Remove Excalibur and Holy Grail (Armor stays per rules)
       if (p?.relics?.excalibur) updates['games/' + currentRoom + '/players/' + knightId + '/relics/excalibur'] = null;
       if (p?.relics?.holyGrail) updates['games/' + currentRoom + '/players/' + knightId + '/relics/holyGrail'] = null;
+      // Remove the revealed traitor from any quest they were on, so they don't linger as a present
+      // knight and wrongly receive quest spoils/relics (NEFE5L: a revealed Kay was awarded Lancelot's
+      // Armor at quest victory). Mirrors killKnight's removal; reveal was missed in v92.
+      for (const [qk, q] of Object.entries(cachedQuests || {})) {
+        if ((q?.knightsPresent || []).includes(knightId)) {
+          updates['games/' + currentRoom + '/quests/' + qk + '/knightsPresent'] =
+            q.knightsPresent.filter(k => k !== knightId);
+        }
+      }
       await fbDb.ref().update(updates);
       // Discard all white cards (traitor's own device handles via auto-discard listener)
       if (knightId === myKnight) {
