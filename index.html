@@ -1091,7 +1091,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v96';
+    const APP_VERSION = 'shadows-v97';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -4185,6 +4185,15 @@
       // Write all loyalties for results screen (non-host triggered game end)
       if (deckType === 'writeLoyalties') {
         await writeAllLoyalties();
+        await fbDb.ref('games/' + currentRoom + '/drawRequests/' + requestId).remove();
+        return;
+      }
+
+      // Finalize the 12-sword endgame on the host: reveal a still-hidden Traitor + flip 2 swords,
+      // then score. A non-host can't read loyalties, so it delegates the whole tally here.
+      // (HMXQCW bug: a player-completed 12th sword skipped the flip and mis-scored as a loyal win.)
+      if (deckType === 'finalizeSwordCount') {
+        await finalizeSwordCountEnd();
         await fbDb.ref('games/' + currentRoom + '/drawRequests/' + requestId).remove();
         return;
       }
@@ -7835,49 +7844,62 @@
         return true;
       }
 
-      // 12+ total swords — final scoring
+      // 12+ total swords — final scoring. The hidden-Traitor reveal + 2-sword flip needs the
+      // host's private loyalty data, so the actual tally is centralized in finalizeSwordCountEnd().
+      // A non-host trigger (e.g. a player completing the war that places the 12th sword) delegates
+      // the whole finalization to the host instead of scoring locally — otherwise the flip is
+      // skipped and the winner is mis-computed (HMXQCW: a Traitor win was recorded as a loyal win).
       if (swords.length >= 12) {
-        // Hidden traitor reveal (host only to protect private data)
         if (isHost) {
-          for (const kid of (roomData?.turnOrder || [])) {
-            const p = cachedPlayers[kid];
-            if (p && p.alive !== false && !p.isRevealed) {
-              const loyaltySnap = await fbDb.ref('private/' + currentRoom + '/' + hostDeckKey + '/hostDecks/loyalties/' + kid).once('value');
-              if (loyaltySnap.val() === 'traitor') {
-                await fbDb.ref('games/' + currentRoom + '/players/' + kid + '/isRevealed').set(true);
-                let flipped = 0;
-                for (let i = 0; i < swords.length && flipped < 2; i++) {
-                  if (swords[i].color === 'white') { swords[i].color = 'black'; flipped++; }
-                }
-                if (flipped > 0) await fbDb.ref('games/' + currentRoom + '/board/swords').set(swords);
-                await addLog('system', getKnightDisplayName(kid) + ' was the TRAITOR! ' + flipped + ' White Sword(s) flipped to Black!');
-                break;
-              }
-            }
-          }
+          await finalizeSwordCountEnd();
+        } else {
+          await fbDb.ref('games/' + currentRoom + '/drawRequests').push().set({ knightId: myKnight || '_spectator', deckType: 'finalizeSwordCount', timestamp: firebase.database.ServerValue.TIMESTAMP });
+          showToast('Tallying final swords…');
         }
-        // Recount after potential traitor flip
-        const finalSwords = cachedBoard.swords || swords;
-        const whiteSwords = finalSwords.filter(s => s.color === 'white').length;
-        const finalBlack = finalSwords.filter(s => s.color === 'black').length;
-        const winner = whiteSwords > finalBlack ? 'loyal' : 'evil';
-
-        // Write all loyalties for results screen
-        if (isHost) { await writeAllLoyalties(); }
-        else { await fbDb.ref('games/' + currentRoom + '/drawRequests').push().set({ knightId: myKnight || '_spectator', deckType: 'writeLoyalties', timestamp: firebase.database.ServerValue.TIMESTAMP }); }
-
-        await fbDb.ref('games/' + currentRoom + '/meta').update({
-          status: 'ended', winner, endReason: 'swordCount',
-        });
-        const msg = winner === 'loyal'
-          ? 'GAME OVER: Loyal Knights prevail! (' + whiteSwords + ' White vs ' + finalBlack + ' Black)'
-          : 'GAME OVER: Evil wins! (' + finalBlack + ' Black vs ' + whiteSwords + ' White)';
-        await addLog('system', msg);
-        showToast(msg);
         return true;
       }
 
       return false;
+    }
+
+    // Host-only: at the 12-sword endgame, reveal a still-hidden ALIVE Traitor and flip up to 2
+    // White Swords to Black, then score and end the game. Called inline when the host triggers the
+    // 12th sword, and via the 'finalizeSwordCount' drawRequest when a non-host does (only the host
+    // can read loyalties). Reads swords fresh so it never races a stale cache.
+    async function finalizeSwordCountEnd() {
+      const swordsSnap = await fbDb.ref('games/' + currentRoom + '/board/swords').once('value');
+      const swords = swordsSnap.val() || [];
+
+      for (const kid of (roomData?.turnOrder || [])) {
+        const p = cachedPlayers[kid];
+        if (p && p.alive !== false && !p.isRevealed) {
+          const loyaltySnap = await fbDb.ref('private/' + currentRoom + '/' + hostDeckKey + '/hostDecks/loyalties/' + kid).once('value');
+          if (loyaltySnap.val() === 'traitor') {
+            await fbDb.ref('games/' + currentRoom + '/players/' + kid + '/isRevealed').set(true);
+            let flipped = 0;
+            for (let i = 0; i < swords.length && flipped < 2; i++) {
+              if (swords[i].color === 'white') { swords[i].color = 'black'; flipped++; }
+            }
+            if (flipped > 0) await fbDb.ref('games/' + currentRoom + '/board/swords').set(swords);
+            await addLog('system', getKnightDisplayName(kid) + ' was the TRAITOR! ' + flipped + ' White Sword(s) flipped to Black!');
+            break;
+          }
+        }
+      }
+
+      const whiteSwords = swords.filter(s => s.color === 'white').length;
+      const blackSwords = swords.filter(s => s.color === 'black').length;
+      const winner = whiteSwords > blackSwords ? 'loyal' : 'evil';
+
+      await writeAllLoyalties();
+      await fbDb.ref('games/' + currentRoom + '/meta').update({
+        status: 'ended', winner, endReason: 'swordCount',
+      });
+      const msg = winner === 'loyal'
+        ? 'GAME OVER: Loyal Knights prevail! (' + whiteSwords + ' White vs ' + blackSwords + ' Black)'
+        : 'GAME OVER: Evil wins! (' + blackSwords + ' Black vs ' + whiteSwords + ' White)';
+      await addLog('system', msg);
+      showToast(msg);
     }
 
     function renderResultsScreen() {
