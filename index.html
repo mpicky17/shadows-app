@@ -1074,6 +1074,12 @@
         <div class="results-stats" id="results-stats"></div>
         <h3 style="color:var(--gold);margin-bottom:0.5rem;font-size:1rem;">Knights of the Round Table</h3>
         <div class="results-knights" id="results-knights"></div>
+        <div id="results-key-row" style="display:none;width:100%;margin-top:0.5rem;text-align:left;background:var(--bg-card);border-radius:var(--radius);padding:0.75rem;">
+          <label style="font-size:0.85rem;display:block;margin-bottom:0.4rem;">Anthropic API key (host) — needed for AI analysis</label>
+          <input class="input" id="results-api-key" type="password" placeholder="sk-ant-... (Developer Platform key)" autocomplete="off" spellcheck="false" style="width:100%;">
+          <button class="btn" id="btn-results-save-key" style="width:100%;margin-top:0.4rem;font-size:0.85rem;padding:0.4rem;">Save key & analyze</button>
+          <div style="font-size:0.72rem;color:var(--text-dim);margin-top:0.4rem;">Saved only in this browser (localStorage). Requires a console.anthropic.com Developer-Platform key with credits — a Claude Pro subscription does <em>not</em> include API access.</div>
+        </div>
         <button class="btn btn-heroic" id="btn-results-analyze" style="width:100%;margin-top:0.5rem;font-size:1rem;display:none;">✨ Analyze Game (AI)</button>
         <div id="analysis-panel" style="display:none;width:100%;margin-top:0.5rem;text-align:left;background:var(--bg-card);border-radius:var(--radius);padding:0.75rem;max-height:50vh;overflow-y:auto;white-space:pre-wrap;font-size:0.85rem;line-height:1.4;"></div>
         <button class="btn" id="btn-results-download-log" style="width:100%;margin-top:0.5rem;font-size:1rem;">Download Log</button>
@@ -1106,7 +1112,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v101';
+    const APP_VERSION = 'shadows-v102';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -5489,7 +5495,12 @@ You will be given a block of VERIFIED METRICS computed deterministically from th
     async function analyzeGame() {
       if (!isHost) { showToast('Only the host can run the AI analysis.'); return; }
       const apiKey = getStoredAnalysisKey();
-      if (!apiKey) { showToast('Set your Anthropic API key in Game Settings first (host only).', 5000); return; }
+      if (!apiKey) {
+        const keyRow = $('results-key-row');
+        if (keyRow) { keyRow.style.display = 'block'; $('results-api-key')?.focus(); }
+        showToast('Enter your Anthropic API key above to analyze.', 5000);
+        return;
+      }
       const btn = $('btn-results-analyze');
       const orig = btn.textContent;
       btn.disabled = true; btn.textContent = 'Analyzing… (10–30s)';
@@ -8557,6 +8568,22 @@ You will be given a block of VERIFIED METRICS computed deterministically from th
       } else {
         $('analysis-panel').style.display = 'none';
       }
+
+      // Inline API-key entry (host) — so a finished game can be analyzed without
+      // detouring through the lobby Game Settings. Key handling is identical to
+      // the lobby field: localStorage only, never Firebase/DOM-text.
+      const keyRow = $('results-key-row');
+      keyRow.style.display = (isHost && !getStoredAnalysisKey()) ? 'block' : 'none';
+      $('btn-results-save-key').onclick = () => {
+        const v = ($('results-api-key').value || '').trim();
+        if (!v) { showToast('Enter an API key first.'); return; }
+        try { localStorage.setItem(ANALYSIS_KEY_STORE, v); } catch (e) {}
+        $('results-api-key').value = '';
+        keyRow.style.display = 'none';
+        refreshAnalysisKeyStatus();
+        showToast('API key saved to this browser.');
+        analyzeGame();
+      };
 
       // Debug-log export at game end (debug controls are behind this overlay otherwise).
       // Export ALL only works while other players are still on their results screens.
