@@ -904,6 +904,19 @@
         <div class="toggle" id="toggle-grail-self-save" role="button" tabindex="0"></div>
         <div style="font-size:0.75rem;color:var(--text-dim);width:100%;margin-top:0.25rem;">If on, a knight who dies playing the winning Holy Grail card keeps the Grail and may drink it to save themselves. If off, that Grail is lost and they die.</div>
       </div>
+      <div class="setting-row" id="setting-analysis-key" style="flex-wrap:wrap;">
+        <label style="width:100%;margin-bottom:0.4rem;">AI Game Analysis — Anthropic API key (host only)</label>
+        <input class="input" id="analysis-api-key" type="password" placeholder="sk-ant-... (Developer Platform key)" autocomplete="off" spellcheck="false" style="width:100%;">
+        <div style="display:flex;gap:0.5rem;width:100%;margin-top:0.4rem;">
+          <button class="btn" id="btn-save-analysis-key" style="flex:1;font-size:0.85rem;padding:0.4rem;">Save key</button>
+          <button class="btn btn-danger" id="btn-clear-analysis-key" style="flex:1;font-size:0.85rem;padding:0.4rem;">Clear</button>
+        </div>
+        <div style="font-size:0.75rem;color:var(--text-dim);width:100%;margin-top:0.4rem;">
+          Stored <strong>only in this browser</strong> (localStorage) — never sent to Firebase or other players. Used to auto-generate a post-game analyst report at the end-game screen.
+          Requires a <strong>console.anthropic.com Developer-Platform API key with credits</strong> — a Claude Pro subscription does <em>not</em> include API access. Set a low spend cap on the key.
+          <span id="analysis-key-status" style="display:block;margin-top:0.25rem;color:var(--gold);"></span>
+        </div>
+      </div>
     </div>
 
     <div class="lobby-actions">
@@ -1061,6 +1074,8 @@
         <div class="results-stats" id="results-stats"></div>
         <h3 style="color:var(--gold);margin-bottom:0.5rem;font-size:1rem;">Knights of the Round Table</h3>
         <div class="results-knights" id="results-knights"></div>
+        <button class="btn btn-heroic" id="btn-results-analyze" style="width:100%;margin-top:0.5rem;font-size:1rem;display:none;">✨ Analyze Game (AI)</button>
+        <div id="analysis-panel" style="display:none;width:100%;margin-top:0.5rem;text-align:left;background:var(--bg-card);border-radius:var(--radius);padding:0.75rem;max-height:50vh;overflow-y:auto;white-space:pre-wrap;font-size:0.85rem;line-height:1.4;"></div>
         <button class="btn" id="btn-results-download-log" style="width:100%;margin-top:0.5rem;font-size:1rem;">Download Log</button>
         <button class="btn" id="btn-results-export-my" style="width:100%;margin-top:0.5rem;font-size:1rem;">Export My Debug Log</button>
         <button class="btn" id="btn-results-export-all" style="width:100%;margin-top:0.5rem;font-size:1rem;display:none;">Export ALL Players' Debug Logs</button>
@@ -1091,7 +1106,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v100';
+    const APP_VERSION = 'shadows-v101';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1887,6 +1902,7 @@
       // Show/hide host controls
       $('host-settings').style.display = isHost ? '' : 'none';
       $('btn-start').style.display = isHost ? '' : 'none';
+      refreshAnalysisKeyStatus();
 
       // Build knight selection grid
       renderKnightGrid();
@@ -2085,6 +2101,16 @@
         }
         roomData = snap.val();
         if (!roomData.galahadPowerUsed) galahadPowerUsedLocal = false;
+
+        // Live broadcast of the AI analysis: when the host writes meta/analysis,
+        // every client on the results screen re-renders the report (text only).
+        if (roomData.status === 'ended' && roomData.analysis && roomData.analysis.text) {
+          const panel = $('analysis-panel'), overlay = $('results-overlay');
+          if (panel && overlay && !overlay.classList.contains('hidden') &&
+              panel.dataset.shownLen !== String(roomData.analysis.text.length)) {
+            showAnalysisPanel(roomData.analysis.text);
+          }
+        }
 
         // Inbound-path instrumentation: one line whenever a meta snapshot meaningfully
         // changes. Its ABSENCE right after another device's write is direct evidence of
@@ -2531,6 +2557,22 @@
 
     $('btn-create').addEventListener('click', createRoom);
     $('btn-join').addEventListener('click', joinRoom);
+
+    // ── AI Game Analysis: host-only API key (localStorage only) ──────────
+    $('btn-save-analysis-key').addEventListener('click', () => {
+      const v = ($('analysis-api-key').value || '').trim();
+      if (!v) { showToast('Enter an API key first.'); return; }
+      try { localStorage.setItem(ANALYSIS_KEY_STORE, v); } catch (e) {}
+      $('analysis-api-key').value = '';
+      refreshAnalysisKeyStatus();
+      showToast('API key saved to this browser.');
+    });
+    $('btn-clear-analysis-key').addEventListener('click', () => {
+      try { localStorage.removeItem(ANALYSIS_KEY_STORE); } catch (e) {}
+      $('analysis-api-key').value = '';
+      refreshAnalysisKeyStatus();
+      showToast('API key cleared.');
+    });
     $('btn-return-game').addEventListener('click', async () => {
       const ok = await tryReconnect();
       if (!ok) {
@@ -5094,6 +5136,440 @@
         console.error('[SOC] Download log failed:', e);
         showToast('Failed to download log.');
       }
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    //  SECTION 11B: AI Post-Game Analysis (host-only, browser-direct)
+    // ═══════════════════════════════════════════════════════════════════
+    // The host runs a tournament-analyst report with their OWN Anthropic
+    // Developer-Platform API key (NOT Claude Pro). Key lives only in this
+    // browser's localStorage — never written to Firebase, never sent to
+    // other players, never rendered into the DOM. Metrics are tallied
+    // deterministically by computeGameMetrics() and fed to the model as
+    // ground truth; the finished report text (only) is broadcast via
+    // meta/analysis so every player still on the results screen sees it.
+
+    const ANALYSIS_KEY_STORE = 'soc_anthropic_key';
+    function getStoredAnalysisKey() {
+      try { return (localStorage.getItem(ANALYSIS_KEY_STORE) || '').trim(); } catch (e) { return ''; }
+    }
+    function refreshAnalysisKeyStatus() {
+      const el = $('analysis-key-status');
+      if (!el) return;
+      el.textContent = getStoredAnalysisKey() ? '✓ A key is saved in this browser.' : 'No key saved yet.';
+    }
+
+    const ANALYST_PROMPT = `You are an expert tournament-level analyst for the board game Shadows Over Camelot.
+
+You have deep knowledge of: Official Rules, Official FAQ, all Knight abilities, all Relics, all Special White Cards, Hidden Traitor games, advanced cooperative strategy, tempo management, siege-engine management, quest prioritization, and end-game optimization.
+
+You are analyzing a completed game log. Your goal is to determine: how well each player performed; whether each knight was used optimally; why the game was won or lost; which strategic decisions mattered most; and which rules or FAQ edge cases occurred.
+
+GAME OBJECTIVES
+The Loyal Knights win if: Camelot survives; fewer than 7 Black Swords are present; fewer than 12 Siege Engines are present; and the Loyal Knights have a MAJORITY of White Swords at game end (a tie goes to Evil).
+Evil wins immediately if: the 12th Siege Engine is placed; the 7th Black Sword is placed; or all Loyal Knights die. The Traitor wins whenever Evil wins.
+
+STRATEGIC PRINCIPLES
+1. White Swords win games — evaluate every action by its contribution toward White Sword generation. Collecting cards, relics, and defeating siege engines are means, not ends.
+2. Siege Engines are a timer — they create pressure that eventually causes losses. Was Camelot protected early enough? Were siege engines ignored too long, or overreacted to?
+3. Tempo beats perfection — a quest completed today often beats a perfectly optimized quest three turns later. BUT in a hidden-traitor game, rushing the sword count toward the 12-sword endgame reveal can hand the game to a concealed traitor; unmasking the traitor before the final scoring is a real win condition.
+4. Knight specialization matters — evaluate whether each player used their knight to its strengths.
+
+KNIGHT STRATEGY REFERENCE
+King Arthur — Quartermaster / card broker: stay near Camelot early, exchange aggressively, feed closers. Poor play: hoarding, rarely exchanging.
+Sir Tristan — Mobile closer / relief pitcher: build resources, join quests near completion, finish, redeploy. Poor play: camping one quest, fighting siege unnecessarily, staying at Camelot too long.
+Sir Kay — Combat specialist / siege duelist: join combat quests, finish Dragon/Lancelot/Black Knight, personally clear siege engines. FAQ: Kay only assists combat quests he is physically present in; he cannot assist another knight's siege-engine fight.
+Sir Gawain — Card engine: draw heavily early, become a combat contributor later. Poor play: leaving Camelot too early, drawing forever without contributing.
+Sir Percival — Threat analyst / black-card manager: guide Evil choices via peeks, reduce Black-deck variance, protect Camelot from surprise losses. Best relic: Lancelot's Armor.
+Sir Galahad — Crisis manager / special-card expert: maximize Special White cards, save powerful cards for critical moments, manipulate tempo.
+Sir Palamedes — Tempo knight / life-for-progress: spend life aggressively, recover through successful quests, stay active. Poor play: overly cautious.
+
+RELIC STRATEGY REFERENCE
+Excalibur — +1 combat strength (incl. siege fights); may be sacrificed to cancel a Black Card. Ideal owners: Kay, Tristan, Gawain. High value: preventing a loss / stopping devastating Black Cards.
+Holy Grail — save a dying knight, restore to 4 Life, one-time use. FAQ: a knight who spends their final life to complete a quest does NOT receive quest spoils even if saved by the Grail.
+Lancelot's Armor — draw 2 Black Cards, resolve one, bury one. Best owner: Percival.
+
+IMPORTANT FAQ EDGE CASES
+Tristan's completion return is free. Kay cannot assist another knight's siege-engine fight. Heroism may be played remotely. Merlin cannot prevent the 12th siege engine after it appears. Lady of the Lake may complete Excalibur remotely; the completer receives Excalibur; knights present receive reward cards and life; if nobody is present, reward cards are drawn and discarded. If a dying knight completes Excalibur remotely with Lady of the Lake and another knight uses the Holy Grail, the Grail user receives Excalibur; if the dying knight uses their own Grail, they keep Excalibur; if not saved, Excalibur is lost when they die.
+
+ANALYSIS TASKS — produce, in order:
+Game Summary; Timeline of Key Events; Player Reports; Knight Utilization Review; Relic Utilization Review; Quest Prioritization Review; Siege Management Review; Rules & FAQ Review; MVP Rankings; Alternative Winning Lines; Biggest Mistakes; Biggest Plays; Final Verdict.
+For every player provide: Knight; Role Classification; Strengths; Weaknesses; Missed Opportunities; Quest Impact Grades; Relic Usage Grade; Overall Grade. Use grades A+ A A- B+ B B- C+ C C- D+ D D- F. Support all conclusions with evidence from the game log.
+
+You will be given a block of VERIFIED METRICS computed deterministically from the game data, followed by the full narrative log. Treat the verified metrics as ground truth — do NOT recompute or contradict those counts. Begin your report by restating the Key Metrics, weave the per-player Awards in near the end, and ground every claim in the log.`;
+
+    // ── Deterministic metrics engine ─────────────────────────────────────
+    // Parses the structured log (each entry carries {type, knight, message})
+    // plus the live end-state (board/players/quests/meta). Attribution uses
+    // entry.knight (the writer = actor for player-action logs), falling back
+    // to leading-name matching. Counts whose source isn't present are 0/na.
+    function computeGameMetrics(entries, live) {
+      let board = live?.board || {};
+      let players = live?.players || {};
+      let quests = live?.quests || {};
+      const meta = live?.meta || {};
+
+      // Fallback for offline/empty-cache runs: recover end-state from the
+      // [SNAPSHOT] "DATA {…}" log line (Option A) when live state is missing.
+      if ((!board.swords || !board.swords.length) && Array.isArray(entries)) {
+        for (let i = entries.length - 1; i >= 0; i--) {
+          const dm = /^DATA (\{.*\})$/.exec(entries[i].message || '');
+          if (!dm) continue;
+          try {
+            const snap = JSON.parse(dm[1]);
+            board = { swords: (snap.swords?.colors || []).map(c => ({ color: c })), siegeEngines: snap.siegeEngines || 0 };
+            players = {};
+            for (const k of (snap.knights || [])) players[k.knight] = { displayName: k.name, life: k.life, alive: k.alive, isRevealed: k.isRevealed, relics: k.relics };
+            quests = snap.quests || {};
+          } catch (e) {}
+          break;
+        }
+      }
+      const order = meta.turnOrder || Object.keys(players);
+
+      // name → knight resolution (display names + canonical knight names)
+      const nameToKnight = [];
+      for (const kid of Object.keys(KNIGHTS)) {
+        const dn = players[kid]?.displayName;
+        if (dn) nameToKnight.push({ needle: dn, kid });
+        nameToKnight.push({ needle: KNIGHTS[kid].name, kid });
+      }
+      nameToKnight.sort((a, b) => b.needle.length - a.needle.length); // longest first
+      const knightByLeadingName = (msg) => {
+        for (const { needle, kid } of nameToKnight) {
+          if (msg.startsWith(needle)) return kid;
+        }
+        return null;
+      };
+      const actorOf = (e) => (e.knight && KNIGHTS[e.knight]) ? e.knight : knightByLeadingName(e.message || '');
+
+      const P = {};
+      for (const kid of order) {
+        if (!KNIGHTS[kid]) continue;
+        const p = players[kid] || {};
+        P[kid] = {
+          knight: kid, name: p.displayName || KNIGHTS[kid].name,
+          drawActions: 0, cardsDrawn: 0, lpSacrificed: 0, selfHeals: 0,
+          questMoves: 0, fightCards: 0, fightValue: 0, peeks: 0, grailCards: 0,
+          siegeFightsAttempted: 0, siegeFightsWon: 0, siegeFightsLost: 0,
+          siegePlaced: 0, loseLPDeeds: 0, lpLostEvil: 0, specialWhites: 0,
+          merlinPlays: 0, excaliburPushes: 0, arthurExchanges: 0, turns: 0,
+          blackCardsDrawn: 0,
+          life: (p.life ?? null), alive: (p.alive !== false), isRevealed: !!p.isRevealed,
+          relics: { excalibur: !!p.relics?.excalibur, holyGrail: !!p.relics?.holyGrail, lancelotArmor: !!p.relics?.lancelotArmor },
+        };
+      }
+      const ensure = (kid) => (kid && P[kid]) ? P[kid] : null;
+
+      const G = {
+        winner: meta.winner || null, endReason: meta.endReason || null,
+        turns: meta.turnNumber ?? null, appVersion: meta.hostVersion || null,
+        playerCount: order.length,
+        questsWon: 0, questsLost: 0, questResults: [],
+        siegePlacedEvents: 0, peakSiege: 0,
+        siegeFightsWon: 0, merlinSiegeRemovals: 0,
+        specialBlack: [], merlinCancels: 0,
+        despairOnGrail: 0, despairRemoved: 0,
+        excaliburMovesEvil: 0, excaliburMovesKnights: 0,
+        mistActive: false, heroismExtra: 0,
+        lpSacrificedTotal: 0, loseLPDeedsTotal: 0,
+        traitorKnight: null, traitorRevealed: false, swordsFlipped: 0,
+        accusationsCorrect: 0, accusationsFalse: 0,
+        finalWhite: 0, finalBlack: 0, siegeFinal: board.siegeEngines || 0,
+      };
+
+      const m = (msg, re) => re.exec(msg);
+      for (const e of entries) {
+        const msg = e.message || '';
+        // ── turn ownership (for black-draw derivation) ──
+        let mt = m(msg, /^Turn \d+: (.+)'s turn$/);
+        if (mt) { const k = knightByLeadingName(mt[1]) || null; const pp = ensure(k); if (pp) pp.turns++; continue; }
+
+        // ── per-player actions (attributed via writer) ──
+        const a = ensure(actorOf(e));
+        if (a) {
+          let mm;
+          if ((mm = m(msg, /drew (\d+) White cards? at the Round Table/))) { a.drawActions++; a.cardsDrawn += (+mm[1]); continue; }
+          if (/sacrificed 1 LP for another action/.test(msg)) { a.lpSacrificed++; G.lpSacrificedTotal++; continue; }
+          if (/healed \(\+1 LP\)/.test(msg)) { a.selfHeals++; continue; }
+          if (/ moved to /.test(msg) && !/Excalibur|Grail/.test(msg)) { a.questMoves++; continue; }
+          if ((mm = m(msg, /played Fight (\d+) on /))) { a.fightCards++; a.fightValue += (+mm[1]); continue; }
+          if ((mm = m(msg, /played an extra Fight (\d+) on siege fight/))) { a.fightCards++; a.fightValue += (+mm[1]); continue; }
+          if ((mm = m(msg, /played an extra Fight (\d+)!/))) { a.fightCards++; a.fightValue += (+mm[1]); continue; }
+          if (/peeked at the top Black card/.test(msg)) { a.peeks++; continue; }
+          if (/placed a Grail card \(/.test(msg)) { a.grailCards++; continue; }
+          if ((mm = m(msg, /fought a siege engine \(Fight \d+ vs d8=\d+\) — (WON|LOST)!/))) {
+            a.siegeFightsAttempted++; if (mm[1] === 'WON') { a.siegeFightsWon++; G.siegeFightsWon++; } else a.siegeFightsLost++; continue;
+          }
+          if (/added a Siege Engine \(/.test(msg) && !/Traitor|Morgan/.test(msg)) { a.siegePlaced++; G.siegePlacedEvents++; }
+          if (/lost 1 Life Point \(\d+ remaining\)/.test(msg)) { a.loseLPDeeds++; a.lpLostEvil++; G.loseLPDeedsTotal++; }
+          if (/moved Excalibur toward the knights/.test(msg)) { a.excaliburPushes++; G.excaliburMovesKnights++; }
+          if (/used Merlin to /.test(msg)) { a.merlinPlays++; a.specialWhites++; }
+          if (/ played (Merlin|Fate|Piety|Heroism|Reinforcements|Clairvoyance|Messenger|Lady of the Lake|Convocation)\b/.test(msg)) { a.specialWhites++; }
+          if (/placed Heroism on /.test(msg)) { a.specialWhites++; }
+          if (/King Arthur is exchanging a card with/.test(msg)) { a.arthurExchanges++; }
+        }
+
+        // ── group / board events (some overlap the above intentionally) ──
+        let mm;
+        if ((mm = m(msg, /\((\d+)\/12\)/))) { const n = +mm[1]; if (n > G.peakSiege) G.peakSiege = n; }
+        if (/used Merlin to remove 1 Siege Engine/.test(msg)) G.merlinSiegeRemovals++;
+        if ((mm = m(msg, /Special Black card applied: (.+)$/))) G.specialBlack.push(mm[1]);
+        if (/was cancelled by Merlin!/.test(msg)) G.merlinCancels++;
+        if (/Despair placed on Holy Grail/.test(msg)) G.despairOnGrail++;
+        if (/removed a Despair card from the Holy Grail/.test(msg) || /Merlin to remove last Despair/.test(msg)) G.despairRemoved++;
+        if (/Excalibur moves toward Evil/.test(msg)) G.excaliburMovesEvil++;
+        if (/Mist of Avalon active/.test(msg)) G.mistActive = true;
+        if (/Heroism adds 1 extra/.test(msg)) G.heroismExtra++;
+        if ((mm = m(msg, /was the TRAITOR! (\d+) White Sword/))) { G.traitorRevealed = true; G.swordsFlipped += (+mm[1]); G.traitorKnight = G.traitorKnight || knightByLeadingName(msg); }
+        if (/has been revealed as the TRAITOR/.test(msg)) { G.traitorRevealed = true; }
+        if (/is the TRAITOR! 1 White Sword added/.test(msg)) G.accusationsCorrect++;
+        if (/is LOYAL! 1 White Sword flipped to Black/.test(msg)) G.accusationsFalse++;
+
+        // quest outcomes
+        const qpairs = [
+          [/Quest for Excalibur WON/, 'Excalibur', 'WON'], [/Excalibur quest LOST/, 'Excalibur', 'LOST'],
+          [/Quest for the Holy Grail WON|Holy Grail quest WON/, 'Holy Grail', 'WON'], [/Holy Grail quest LOST/, 'Holy Grail', 'LOST'],
+          [/Black Knight Tournament WON/, 'Black Knight', 'WON'], [/Black Knight Tournament LOST/, 'Black Knight', 'LOST'],
+          [/Quest for Lancelot WON/, 'Lancelot', 'WON'], [/Quest for Lancelot LOST/, 'Lancelot', 'LOST'],
+          [/Dragon's Quest WON/, 'Dragon', 'WON'], [/Dragon's Quest LOST/, 'Dragon', 'LOST'],
+          [/War WON/, 'War', 'WON'], [/War LOST/, 'War', 'LOST'],
+        ];
+        for (const [re, qn, res] of qpairs) {
+          if (re.test(msg)) { G.questResults.push({ quest: qn, result: res }); if (res === 'WON') G.questsWon++; else G.questsLost++; }
+        }
+      }
+
+      // derive per-player black cards drawn (≈ turns − siege deeds − lose-LP deeds)
+      for (const kid of Object.keys(P)) {
+        const pp = P[kid];
+        pp.blackCardsDrawn = Math.max(0, pp.turns - pp.siegePlaced - pp.loseLPDeeds);
+      }
+
+      // end-state swords (live board authoritative)
+      const sw = board.swords || [];
+      G.finalWhite = sw.filter(s => s && s.color === 'white').length;
+      G.finalBlack = sw.filter(s => s && s.color === 'black').length;
+      if (!G.traitorKnight) { for (const kid of order) if (players[kid]?.isRevealed) { G.traitorKnight = kid; break; } }
+
+      return { group: G, players: P };
+    }
+
+    // ── Player awards: one distinct tongue-in-cheek award each ────────────
+    function assignAwards(metrics) {
+      const P = metrics.players;
+      const keys = Object.keys(P);
+      const awards = [
+        { name: 'Benedict Arnold', note: 'unmasked as the Traitor', val: k => P[k].isRevealed ? 1 : 0 },
+        { name: 'Siege Slayer', note: 'siege engines destroyed', val: k => P[k].siegeFightsWon },
+        { name: 'The All-Seeing Eye', note: 'peeks at the Black deck', val: k => P[k].peeks },
+        { name: 'Rocky', note: 'fight cards played', val: k => P[k].fightCards },
+        { name: 'The Quartermaster', note: 'cards drawn at the Round Table', val: k => P[k].cardsDrawn },
+        { name: 'Best Supporting Actor', note: 'helpful Special White cards played', val: k => P[k].specialWhites },
+        { name: 'Grail Keeper', note: 'Grail cards placed', val: k => P[k].grailCards },
+        { name: "Excalibur's Chosen", note: 'pushes of Excalibur toward the knights', val: k => P[k].excaliburPushes },
+        { name: 'Globetrotter', note: 'quest redeployments', val: k => P[k].questMoves },
+        { name: 'Glutton for Punishment', note: 'self-inflicted Lose-1-LP deeds', val: k => P[k].loseLPDeeds },
+        { name: 'The Martyr', note: 'LP sacrificed for extra actions', val: k => P[k].lpSacrificed },
+        { name: 'Self-Care Champion', note: 'self-heals', val: k => P[k].selfHeals },
+        { name: 'Harbinger of Doom', note: 'Black cards drawn (est.)', val: k => P[k].blackCardsDrawn },
+      ];
+      const result = {}; const taken = new Set();
+      for (const a of awards) {
+        let best = null, bestV = 0;
+        for (const k of keys) { if (taken.has(k)) continue; const v = a.val(k); if (v > bestV) { bestV = v; best = k; } }
+        if (best != null) { result[best] = { name: a.name, note: a.note, value: bestV }; taken.add(best); }
+        if (taken.size === keys.length) break;
+      }
+      const fallbacks = [
+        { name: 'Lone Wolf', note: 'kept to themselves' }, { name: 'Pacifist', note: 'stayed out of the fray' },
+        { name: 'The Understudy', note: 'quietly along for the ride' }, { name: 'The Bystander', note: 'present and accounted for' },
+        { name: 'Wallflower', note: 'low-key all game' }, { name: 'The Tourist', note: 'just here for the scenery' },
+      ];
+      let fi = 0;
+      for (const k of keys) if (!result[k]) result[k] = { ...fallbacks[fi++ % fallbacks.length], value: 0 };
+      return result;
+    }
+
+    // ── Render the verified metrics + awards as a plain-text block ────────
+    function formatMetricsBlock(metrics, awards) {
+      const G = metrics.group, P = metrics.players;
+      const L = [];
+      L.push('════════ KEY METRICS (verified, deterministic) ════════');
+      L.push('Result: ' + (G.winner === 'loyal' ? 'LOYAL KNIGHTS WIN' : 'EVIL WINS') +
+        '  ·  Final swords: ' + G.finalWhite + ' White / ' + G.finalBlack + ' Black' +
+        '  ·  End: ' + (G.endReason || '?') + '  ·  Turns: ' + (G.turns ?? '?'));
+      L.push('Quests won/lost: ' + G.questsWon + ' / ' + G.questsLost +
+        (G.questResults.length ? '  (' + G.questResults.map(q => q.quest + ':' + q.result).join(', ') + ')' : ''));
+      L.push('Siege engines — peak ' + G.peakSiege + '/12, final ' + G.siegeFinal +
+        '  ·  Siege fights won by knights: ' + G.siegeFightsWon + '  ·  Merlin siege removals: ' + G.merlinSiegeRemovals);
+      L.push('Special Black resolved: ' + (G.specialBlack.length ? G.specialBlack.join(', ') : 'none') +
+        '  ·  Merlin cancels: ' + G.merlinCancels + '  ·  Mist of Avalon: ' + (G.mistActive ? 'ACTIVE' : 'no'));
+      L.push('Grail: Despair placed ' + G.despairOnGrail + ', removed ' + G.despairRemoved +
+        '  ·  Excalibur pushes — toward Evil ' + G.excaliburMovesEvil + ', toward knights ' + G.excaliburMovesKnights);
+      L.push('Heroism bonus swords: ' + G.heroismExtra + '  ·  LP sacrificed (group): ' + G.lpSacrificedTotal +
+        '  ·  Lose-1-LP deeds (group): ' + G.loseLPDeedsTotal);
+      L.push('Traitor: ' + (G.traitorKnight ? (P[G.traitorKnight]?.name || G.traitorKnight) + (G.traitorRevealed ? ' (revealed' + (G.swordsFlipped ? ', flipped ' + G.swordsFlipped + ' swords' : '') + ')' : ' (hidden)') : 'none detected') +
+        '  ·  Accusations correct/false: ' + G.accusationsCorrect + '/' + G.accusationsFalse);
+      L.push('');
+      L.push('──────── PER-PLAYER ────────');
+      for (const kid of Object.keys(P)) {
+        const p = P[kid];
+        L.push((p.name + ' (' + KNIGHTS[kid].name + ')' + (p.isRevealed ? ' [TRAITOR]' : '')) + ':');
+        L.push('  RT draws ' + p.drawActions + ' (' + p.cardsDrawn + ' cards) · quest moves ' + p.questMoves +
+          ' · fight cards ' + p.fightCards + ' (Σ' + p.fightValue + ') · grail cards ' + p.grailCards +
+          ' · peeks ' + p.peeks);
+        L.push('  siege fights ' + p.siegeFightsWon + 'W/' + p.siegeFightsLost + 'L · siege placed ' + p.siegePlaced +
+          ' · special whites ' + p.specialWhites + ' · LP sacrificed ' + p.lpSacrificed + ' · self-heals ' + p.selfHeals +
+          ' · lose-LP deeds ' + p.loseLPDeeds + ' · black drawn ~' + p.blackCardsDrawn);
+        const relics = [p.relics.excalibur && 'Excalibur', p.relics.holyGrail && 'Holy Grail', p.relics.lancelotArmor && "Lancelot's Armor"].filter(Boolean);
+        L.push('  end: ' + (p.alive ? (p.life + ' LP, alive') : 'DEAD') + (relics.length ? ' · relics: ' + relics.join(', ') : ''));
+      }
+      L.push('');
+      L.push('──────── AWARDS (one each) ────────');
+      for (const kid of Object.keys(P)) {
+        const a = awards[kid];
+        if (a) L.push('  ' + P[kid].name + ' (' + KNIGHTS[kid].name + ') — "' + a.name + '"' + (a.value ? ' (' + a.value + ' ' + a.note + ')' : ' — ' + a.note));
+      }
+      return L.join('\n');
+    }
+
+    // ── The Anthropic call (browser-direct) ──────────────────────────────
+    async function callAnthropic(systemPrompt, userText, apiKey) {
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({
+          model: 'claude-opus-4-8',
+          max_tokens: 8000,
+          thinking: { type: 'adaptive' },
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userText }],
+        }),
+      });
+      if (!resp.ok) {
+        let detail = '';
+        try { const j = await resp.json(); detail = j?.error?.message || JSON.stringify(j); }
+        catch (e) { try { detail = await resp.text(); } catch (e2) {} }
+        throw new Error('API ' + resp.status + (detail ? ': ' + detail : ''));
+      }
+      const data = await resp.json();
+      const parts = (data.content || []).filter(b => b.type === 'text').map(b => b.text);
+      return parts.join('\n').trim();
+    }
+
+    function showAnalysisPanel(text) {
+      const panel = $('analysis-panel');
+      if (!panel) return;
+      panel.textContent = text;                 // textContent — never innerHTML (no key/markup injection)
+      panel.dataset.shownLen = String(text.length);
+      panel.style.display = 'block';
+    }
+
+    function downloadAnalysisText(text) {
+      try {
+        const d = new Date();
+        const ts = d.getFullYear().toString() + String(d.getMonth() + 1).padStart(2, '0') + String(d.getDate()).padStart(2, '0') +
+          '_' + String(d.getHours()).padStart(2, '0') + String(d.getMinutes()).padStart(2, '0') + String(d.getSeconds()).padStart(2, '0');
+        const blob = new Blob([text], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = ts + '_Room_' + currentRoom + '_analysis.txt';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      } catch (e) { console.warn('[SOC] analysis download failed:', e); }
+    }
+
+    // Host-only: compute metrics, call Anthropic, broadcast + download the report.
+    async function analyzeGame() {
+      if (!isHost) { showToast('Only the host can run the AI analysis.'); return; }
+      const apiKey = getStoredAnalysisKey();
+      if (!apiKey) { showToast('Set your Anthropic API key in Game Settings first (host only).', 5000); return; }
+      const btn = $('btn-results-analyze');
+      const orig = btn.textContent;
+      btn.disabled = true; btn.textContent = 'Analyzing… (10–30s)';
+      showAnalysisPanel('Generating the analyst report on the host… this usually takes 10–30 seconds.');
+      try {
+        const snap = await fbDb.ref('games/' + currentRoom + '/log').orderByChild('timestamp').once('value');
+        const entries = []; snap.forEach(c => entries.push(c.val()));
+        const narrative = entries.map(e => '[' + new Date(e.timestamp).toLocaleString() + '] [' + (e.type || 'info').toUpperCase() + '] ' + e.message).join('\n');
+        const metrics = computeGameMetrics(entries, { board: cachedBoard, players: cachedPlayers, quests: cachedQuests, meta: roomData });
+        const awards = assignAwards(metrics);
+        const metricsBlock = formatMetricsBlock(metrics, awards);
+        const userText = metricsBlock + '\n\n=== FULL NARRATIVE LOG ===\n' + narrative;
+        const report = await callAnthropic(ANALYST_PROMPT, userText, apiKey);
+        const full = metricsBlock + '\n\n═══════════ ANALYST REPORT ═══════════\n\n' + report;
+        await fbDb.ref('games/' + currentRoom + '/meta/analysis').set({
+          text: full, model: 'claude-opus-4-8', generatedAt: firebase.database.ServerValue.TIMESTAMP,
+        }).catch(() => {});
+        showAnalysisPanel(full);
+        downloadAnalysisText(full);
+        showToast('Analysis complete — shared with players on the results screen.');
+        btn.textContent = '✨ Re-analyze Game (AI)';
+      } catch (e) {
+        console.error('[SOC] Analyze failed:', e);
+        const em = e.message || String(e);
+        let msg = 'Analysis failed: ' + em;
+        if (/\b401\b/.test(em)) msg = 'Analysis failed: invalid API key (401). Check the key in Game Settings.';
+        else if (/\b429\b/.test(em)) msg = 'Analysis failed: rate-limited or out of credits (429).';
+        else if (/Failed to fetch|NetworkError|CORS/i.test(em)) msg = 'Analysis failed: network/CORS error reaching Anthropic.';
+        showToast(msg, 6000);
+        showAnalysisPanel(msg);
+        btn.textContent = orig;
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    // ── End-of-game snapshot (Option A): one guarded [SNAPSHOT] entry so
+    //    every narrative export is self-contained for retrospective analysis.
+    async function writeEndGameSnapshot() {
+      if (!currentRoom) return;
+      try {
+        // Single-writer guard: first caller flips null→true and proceeds; others abort.
+        const guardRef = fbDb.ref('games/' + currentRoom + '/meta/snapshotLogged');
+        const res = await guardRef.transaction(cur => cur ? undefined : true);
+        if (!res.committed) return;
+        const [bSnap, pSnap, qSnap, mSnap] = await Promise.all([
+          fbDb.ref('games/' + currentRoom + '/board').once('value'),
+          fbDb.ref('games/' + currentRoom + '/players').once('value'),
+          fbDb.ref('games/' + currentRoom + '/quests').once('value'),
+          fbDb.ref('games/' + currentRoom + '/meta').once('value'),
+        ]);
+        const board = bSnap.val() || {}, players = pSnap.val() || {}, quests = qSnap.val() || {}, meta = mSnap.val() || {};
+        const swords = board.swords || [];
+        const white = swords.filter(s => s && s.color === 'white').length;
+        const black = swords.filter(s => s && s.color === 'black').length;
+        const order = meta.turnOrder || Object.keys(players);
+        const knights = order.filter(kid => KNIGHTS[kid]).map(kid => {
+          const p = players[kid] || {};
+          return {
+            knight: kid, name: p.displayName || KNIGHTS[kid].name,
+            life: (p.life ?? null), alive: (p.alive !== false), isRevealed: !!p.isRevealed,
+            relics: { excalibur: !!p.relics?.excalibur, holyGrail: !!p.relics?.holyGrail, lancelotArmor: !!p.relics?.lancelotArmor },
+          };
+        });
+        const questSnap = {};
+        for (const [qk, q] of Object.entries(quests)) {
+          questSnap[qk] = { status: q?.status || 'active' };
+          if (q?.grailCards != null) questSnap[qk].grail = q.grailCards;
+          if (q?.excaliburPosition != null) questSnap[qk].excaliburPosition = q.excaliburPosition;
+        }
+        const data = {
+          winner: meta.winner || null, endReason: meta.endReason || null, turn: meta.turnNumber ?? null,
+          swords: { white, black, colors: swords.map(s => (s && s.color) || '?') },
+          siegeEngines: board.siegeEngines || 0, knights, quests: questSnap,
+        };
+        const lpList = knights.map(k => KNIGHTS[k.knight].name + ' ' + (k.alive ? k.life : '☠')).join(', ');
+        await addLog('snapshot', 'FINAL STATE — ' + (meta.winner === 'loyal' ? 'Loyal Knights win' : 'Evil wins') + ' (' + (meta.endReason || '') + ') after turn ' + (meta.turnNumber ?? '?'));
+        await addLog('snapshot', 'Final swords: ' + white + 'W / ' + black + 'B  ·  Siege: ' + (board.siegeEngines || 0) + '/12  ·  LP — ' + lpList);
+        await addLog('snapshot', 'DATA ' + JSON.stringify(data));
+      } catch (e) { console.warn('[SOC] snapshot write failed:', e); }
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -7925,6 +8401,7 @@
           cinematic: { type: 'camelotLose', id: Date.now() },
         });
         await addLog('system', 'GAME OVER: 12 Siege Engines surround Camelot! Evil wins!');
+        await writeEndGameSnapshot();
         showToast('Game Over! Evil wins — 12 Siege Engines!');
         return true;
       }
@@ -7940,6 +8417,7 @@
           cinematic: { type: 'camelotLose', id: Date.now() },
         });
         await addLog('system', 'GAME OVER: 7+ Black Swords on the Round Table! Evil wins!');
+        await writeEndGameSnapshot();
         showToast('Game Over! Evil wins — too many Black Swords!');
         return true;
       }
@@ -7999,6 +8477,7 @@
         ? 'GAME OVER: Loyal Knights prevail! (' + whiteSwords + ' White vs ' + blackSwords + ' Black)'
         : 'GAME OVER: Evil wins! (' + blackSwords + ' Black vs ' + whiteSwords + ' White)';
       await addLog('system', msg);
+      await writeEndGameSnapshot();
       showToast(msg);
     }
 
@@ -8066,6 +8545,18 @@
 
       // Download Log button
       $('btn-results-download-log').onclick = downloadGameLog;
+
+      // AI analysis: host runs it; everyone on the results screen sees the broadcast.
+      const analyzeBtn = $('btn-results-analyze');
+      analyzeBtn.onclick = analyzeGame;
+      analyzeBtn.style.display = isHost ? '' : 'none';
+      const existingAnalysis = roomData?.analysis?.text;
+      if (existingAnalysis) {
+        showAnalysisPanel(existingAnalysis);
+        if (isHost) analyzeBtn.textContent = '✨ Re-analyze Game (AI)';
+      } else {
+        $('analysis-panel').style.display = 'none';
+      }
 
       // Debug-log export at game end (debug controls are behind this overlay otherwise).
       // Export ALL only works while other players are still on their results screens.
@@ -8226,6 +8717,7 @@
         cinematic: { type: 'camelotLose', id: Date.now() },
       });
       await addLog('system', 'GAME OVER: All Loyal Knights have fallen! Evil wins!');
+      await writeEndGameSnapshot();
       showToast('Game Over! All Loyal Knights have fallen!');
       return true;
     }
@@ -8354,6 +8846,7 @@
           cinematic: { type: 'camelotLose', id: Date.now() },
         });
         await addLog('system', 'GAME OVER: All Knights have fallen! Evil wins!');
+        await writeEndGameSnapshot();
         showToast('Game Over! All Knights have fallen!');
         return;
       }
