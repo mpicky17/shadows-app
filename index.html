@@ -1112,7 +1112,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v102';
+    const APP_VERSION = 'shadows-v103';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -5506,8 +5506,31 @@ You will be given a block of VERIFIED METRICS computed deterministically from th
       btn.disabled = true; btn.textContent = 'Analyzing… (10–30s)';
       showAnalysisPanel('Generating the analyst report on the host… this usually takes 10–30 seconds.');
       try {
-        const snap = await fbDb.ref('games/' + currentRoom + '/log').orderByChild('timestamp').once('value');
-        const entries = []; snap.forEach(c => entries.push(c.val()));
+        // Fetch the log via .get() (forces a server read — bypasses the cold-cache
+        // shortcut of .once('value') that returned a partial snapshot when Analyze
+        // was clicked right after reopening/waking the host tab). Also run .once()
+        // purely as a diagnostic so we can see once-vs-get counts at the real moment.
+        const logRef = fbDb.ref('games/' + currentRoom + '/log').orderByChild('timestamp');
+        const [getSnap, onceSnap] = await Promise.all([
+          logRef.get(),
+          logRef.once('value').catch(() => null),
+        ]);
+        const entries = []; getSnap.forEach(c => { entries.push(c.val()); });
+        let onceN = 0; if (onceSnap) onceSnap.forEach(() => { onceN++; });
+        const getN = entries.length;
+        console.log('[SOC][diag] analyze log fetch — once=' + onceN + ' get=' + getN);
+        showToast('Log fetch — once=' + onceN + ' get=' + getN, 4000);
+
+        // Spend guard: never send a near-empty log to the API. If the game is clearly
+        // real/ended but we somehow got a truncated read, abort before the paid call.
+        const gameIsReal = (cachedBoard && cachedBoard.swords && cachedBoard.swords.length) || ((roomData?.turnNumber || 0) > 5);
+        if (gameIsReal && getN < 10) {
+          showToast('Could not load the full game log (once=' + onceN + ' get=' + getN + ') — try again in a moment.', 7000);
+          showAnalysisPanel('Analysis aborted: the game log came back truncated (got ' + getN + ' entries). No API call was made. Reopen the room and try again.');
+          btn.disabled = false; btn.textContent = orig;
+          return;
+        }
+
         const narrative = entries.map(e => '[' + new Date(e.timestamp).toLocaleString() + '] [' + (e.type || 'info').toUpperCase() + '] ' + e.message).join('\n');
         const metrics = computeGameMetrics(entries, { board: cachedBoard, players: cachedPlayers, quests: cachedQuests, meta: roomData });
         const awards = assignAwards(metrics);
