@@ -1112,7 +1112,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v105';
+    const APP_VERSION = 'shadows-v106';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -5202,7 +5202,13 @@ ANALYSIS TASKS — produce, in order:
 Game Summary; Timeline of Key Events; Player Reports; Knight Utilization Review; Relic Utilization Review; Quest Prioritization Review; Siege Management Review; Rules & FAQ Review; MVP Rankings; Alternative Winning Lines; Biggest Mistakes; Biggest Plays; Final Verdict.
 For every player provide: Knight; Role Classification; Strengths; Weaknesses; Missed Opportunities; Quest Impact Grades; Relic Usage Grade; Overall Grade. Use grades A+ A A- B+ B B- C+ C C- D+ D D- F. Support all conclusions with evidence from the game log.
 
-You will be given a block of VERIFIED METRICS computed deterministically from the game data, followed by the full narrative log. Treat the verified metrics as ground truth — do NOT recompute or contradict those counts. Begin your report by restating the Key Metrics, weave the per-player Awards in near the end, and ground every claim in the log.`;
+You will be given a block of VERIFIED METRICS computed deterministically from the game data, followed by the full narrative log. Treat the verified metrics as ground truth — do NOT recompute or contradict those counts.
+
+OUTPUT STYLE — read carefully:
+- Do NOT reprint or restate the metrics block; it is already shown to the reader directly above your report. Reference specific numbers as evidence, but never reproduce the table.
+- Be CONCISE and high-signal. Tight bullets, no filler, no throat-clearing, no "as we can see." Cover every section above, but earn each sentence — aim for sharp insight over length. Per player, a few crisp bullets, not an essay.
+- Bring some HUMOR. This is a beer-and-pretzels game night, not a court martial — write like a witty sports commentator roasting friends. Land a tongue-in-cheek jab or two per player (especially the awards and the biggest blunders), keep the traitor's section deliciously smug, and let the Final Verdict have a punchline. Stay genuinely insightful and evidence-grounded; the humor rides on top of real analysis, it doesn't replace it.
+- Weave each player's Award (given in the metrics block) into their write-up with a one-line snarky justification.`;
 
     // ── Deterministic metrics engine ─────────────────────────────────────
     // Parses the structured log (each entry carries {type, knight, message})
@@ -5452,7 +5458,7 @@ You will be given a block of VERIFIED METRICS computed deterministically from th
         },
         body: JSON.stringify({
           model: 'claude-opus-4-8',
-          max_tokens: 16000,   // report ~5–7K + adaptive-thinking headroom (8K truncated the report to empty)
+          max_tokens: 20000,   // concise report + adaptive-thinking headroom (8K→empty, 16K→truncated mid-report)
           thinking: { type: 'adaptive' },
           system: systemPrompt,
           messages: [{ role: 'user', content: userText }],
