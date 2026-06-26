@@ -1112,7 +1112,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v104';
+    const APP_VERSION = 'shadows-v105';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -5452,7 +5452,7 @@ You will be given a block of VERIFIED METRICS computed deterministically from th
         },
         body: JSON.stringify({
           model: 'claude-opus-4-8',
-          max_tokens: 8000,
+          max_tokens: 16000,   // report ~5–7K + adaptive-thinking headroom (8K truncated the report to empty)
           thinking: { type: 'adaptive' },
           system: systemPrompt,
           messages: [{ role: 'user', content: userText }],
@@ -5466,7 +5466,11 @@ You will be given a block of VERIFIED METRICS computed deterministically from th
       }
       const data = await resp.json();
       const parts = (data.content || []).filter(b => b.type === 'text').map(b => b.text);
-      return parts.join('\n').trim();
+      const text = parts.join('\n').trim();
+      console.log('[SOC][diag] anthropic stop_reason=' + (data.stop_reason || '?') + ' textLen=' + text.length +
+        ' usage=' + JSON.stringify(data.usage || {}));
+      if (!text) throw new Error('model returned no report text (stop_reason: ' + (data.stop_reason || 'unknown') + ')');
+      return text;
     }
 
     function showAnalysisPanel(text) {
@@ -5539,7 +5543,25 @@ You will be given a block of VERIFIED METRICS computed deterministically from th
         const awards = assignAwards(metrics);
         const metricsBlock = formatMetricsBlock(metrics, awards);
         const userText = metricsBlock + '\n\n=== FULL NARRATIVE LOG ===\n' + narrative;
-        const report = await callAnthropic(ANALYST_PROMPT, userText, apiKey);
+        let report;
+        try {
+          report = await callAnthropic(ANALYST_PROMPT, userText, apiKey);
+        } catch (callErr) {
+          // Token-limit truncation: the model produced no report text. Preserve the
+          // (valid, deterministic) metrics instead of losing everything, and don't
+          // broadcast an empty report.
+          if (/no report text/i.test(callErr.message || '')) {
+            const partial = metricsBlock + '\n\n═══════════ ANALYST REPORT ═══════════\n\n' +
+              '⚠ The AI narrative came back empty (the model hit the token limit before writing the report). ' +
+              'The verified metrics above are valid — click "✨ Re-analyze Game" to retry the write-up.';
+            showAnalysisPanel(partial);
+            downloadAnalysisText(partial);
+            showToast('AI report was truncated — metrics saved; please Re-analyze to retry.', 7000);
+            btn.disabled = false; btn.textContent = '✨ Re-analyze Game (AI)';
+            return;
+          }
+          throw callErr;
+        }
         const full = metricsBlock + '\n\n═══════════ ANALYST REPORT ═══════════\n\n' + report;
         await fbDb.ref('games/' + currentRoom + '/meta/analysis').set({
           text: full, model: 'claude-opus-4-8', generatedAt: firebase.database.ServerValue.TIMESTAMP,
