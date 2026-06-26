@@ -1091,7 +1091,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v99';
+    const APP_VERSION = 'shadows-v100';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1191,6 +1191,9 @@
       camelotLose:     'camelot-lose.mp4',
     };
     let lastCinematicId = null;  // dedupe cinematic playback across re-renders/reconnects
+    let cinematicQueue = [];     // local queue so a quest-win clip finishes before a game-over clip
+    let cinematicPlaying = false;
+    let cinematicWatchdog = null;
     let combatStageTimer = null; // drives the combat reveal animation (Change 2)
     let resolvingDeaths = false; // re-entry guard for off-turn death resolution (Change 5)
     // Percival's Lancelot's-Armor decline flow (client-local UI stage; only the acting player interacts)
@@ -1246,6 +1249,7 @@
     let pendingJoinKnight = null;
     let discardMode = null;
     let discardCount = 0;
+    let morgan1Staged = [];         // Morgan-1 volunteer: card ids staged (not yet discarded) until the claim wins
     let fateDiscardInitId = null;   // interaction.id we've already initialized fate-discard for
     let heroicMode = null;       // 'move'|'playCard'|'fightSiege'|'heal'|'specialWhite'|null
     let skipNextQuestRender = false;
@@ -2311,6 +2315,7 @@
       selectedCardId = null;
       mySetupShared = false;
       lastCinematicId = null;
+      cinematicQueue = []; cinematicPlaying = false; clearTimeout(cinematicWatchdog);
       setupMinimized = false;
       cardShareResolving = false;
       cachedBoard = null;
@@ -3387,6 +3392,7 @@
         const el = document.createElement('div');
         el.className = 'hand-card ' + getCardCSSClass(card);
         if (card.id === selectedCardId) el.classList.add('selected');
+        if (discardMode === 'morgan1volunteer' && morgan1Staged.includes(card.id)) el.classList.add('multi-selected');
         // Heroic mode dimming & multi-select
         if (heroicMode === 'playCard') {
           if (!validateCardForQuest(card, getMyLocation())) el.classList.add('dimmed');
@@ -3590,24 +3596,15 @@
             renderHand();
           }
         } else if (discardMode === 'morgan1volunteer') {
-          // Auto-discard on tap for Morgan 1 volunteer (3 cards)
-          if (selectedCardId) {
-            const discardedCard = myHand.find(c => c.id === selectedCardId);
-            myHand = myHand.filter(c => c.id !== selectedCardId);
-            selectedCardId = null;
-            discardCount--;
-            fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
-            if (discardedCard) requestWhiteDiscard([discardedCard]);
-            if (discardCount <= 0) {
-              discardMode = null;
-              fbDb.ref(interactionResponsePath())
-                .set({ volunteered: true, done: true });
-              addLog('evil', getKnightDisplayName(myKnight) + ' volunteered to discard 3 cards for Morgan 1!');
-            } else {
-              renderMorgan1DiscardUI();
-            }
-            renderHand();
-          }
+          // Stage the selection — do NOT remove/discard yet. Cards are only discarded once
+          // this knight wins the volunteer claim (claimMorgan1Volunteer), so losing the race
+          // to another volunteer can never lose cards (KQYZCJ t21: Tristan lost a card to Kay).
+          selectedCardId = null;
+          const i = morgan1Staged.indexOf(cardId);
+          if (i >= 0) morgan1Staged.splice(i, 1);
+          else if (morgan1Staged.length < 3) morgan1Staged.push(cardId);
+          renderMorgan1DiscardUI();
+          renderHand();
         }
         return;
       }
@@ -3919,11 +3916,12 @@
           return true;
         });
       }
-      shuffle(whiteDisc);
-      shuffle(blackDisc);
-      // Merge: reshuffled discard at bottom, existing draw on top (pop draws from top)
-      let newWhiteDraw = [...whiteDisc, ...whiteDraw];
-      let newBlackDraw = [...blackDisc, ...blackDraw];
+      // Reshuffle = fully randomize the whole deck: combine the existing draw remnant with
+      // the discard and shuffle them together (not discard-at-bottom). This voids any prior
+      // Clairvoyance ordering, as a real reshuffle should. Both decks reshuffle together
+      // whenever either pile runs out.
+      let newWhiteDraw = shuffle([...whiteDraw, ...whiteDisc]);
+      let newBlackDraw = shuffle([...blackDraw, ...blackDisc]);
       // Sanitize (KLF2RQ: a stale queued write reverted whiteDraw overnight, so the
       // reshuffle minted 21 in-pile duplicates incl. 7 cards sitting on the Grail board,
       // plus a partial {id,value} card that crashed hand renders). Make the reshuffle
@@ -5950,8 +5948,17 @@
         html += '</div><div style="display:flex;gap:3px;justify-content:center;flex-wrap:wrap;">';
         for (let i = 0; i < maxB; i++) {
           const c = bc[i];
+          // Lancelot/Dragon cards carry lancelotValue/dragonValue (no `value`) — reading
+          // `c.value` here rendered "undefined" for the face-up card. Use the phase-aware
+          // value (mirrors the quest summary at the getQuestProgress helper).
+          const bv = c
+            ? (c.faceDown ? '?'
+               : (questKey === 'lancelot'
+                  ? (questData.phase === 'dragon' ? c.dragonValue : c.lancelotValue)
+                  : c.value))
+            : null;
           html += c
-            ? '<div class="combat-card black-side" style="width:24px;min-height:32px;font-size:0.625rem;"><div style="font-weight:700;">' + (c.faceDown ? '?' : c.value) + '</div></div>'
+            ? '<div class="combat-card black-side" style="width:24px;min-height:32px;font-size:0.625rem;"><div style="font-weight:700;">' + bv + '</div></div>'
             : '<div style="width:24px;height:32px;border-radius:3px;border:1px dashed rgba(139,26,26,0.3);"></div>';
         }
         html += '</div>';
@@ -6629,23 +6636,25 @@
     }
 
     async function confirmMerlinDone() {
-      const prev = roomData.pendingInteraction?.responses?.[myKnight];
-      const offered = prev?.merlinsOffered || 0;
-      const offeredCards = prev?.offeredCards || [];
-      await fbDb.ref(interactionResponsePath())
-        .set({ done: true, merlinsOffered: offered, offeredCards });
+      // Only flip `done` — never re-set merlinsOffered/offeredCards from cached roomData.
+      // Tapping "Done" before our own offer write echoed back used to overwrite the response
+      // with an empty offeredCards, so a failed vote never returned the Merlin (lost card) and
+      // a >3 vote dropped the offerer from the selection (unwinnable). update() merges instead.
+      await fbDb.ref(interactionResponsePath()).update({ done: true });
     }
 
     async function passMerlinOffer() {
-      const prev = roomData.pendingInteraction?.responses?.[myKnight];
-      const prevOffered = prev?.merlinsOffered || 0;
+      // Read the response FRESH (not cached roomData) so we always see our own offer write —
+      // a stale cache here would miss the offered cards and fail to return them.
+      const prev = (await fbDb.ref(interactionResponsePath()).once('value')).val() || {};
+      const prevOffered = prev.merlinsOffered || 0;
       // If they offered some, return those Merlins first
       if (prevOffered > 0) {
         // Decrement totalMerlins
         await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/totalMerlins')
           .transaction(current => Math.max(0, (current || 0) - prevOffered));
         // Return actual offered cards to hand
-        const offeredCards = prev?.offeredCards || [];
+        const offeredCards = prev.offeredCards || [];
         myHand.push(...offeredCards);
         await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
         renderHand();
@@ -6847,6 +6856,7 @@
         area.innerHTML = '';
         discardMode = null;
         discardCount = 0;
+        morgan1Staged = [];   // interaction cleared (e.g. another knight won the Morgan-1 volunteer) — drop staging; staged cards were never removed from hand
         fateDiscardInitId = null;
         // A late responses/{knight} write landing after a pendingInteraction:null clear can
         // re-create a typeless {responses:…} husk that jams every interaction gate. Nuke it.
@@ -7228,9 +7238,9 @@
       }
 
       if (myResponse?.volunteering) {
-        // Restore discard mode if re-rendered while volunteering
+        // Restore discard mode if re-rendered while volunteering (morgan1Staged persists locally)
         if (discardMode !== 'morgan1volunteer') {
-          discardMode = 'morgan1volunteer'; discardCount = 3; selectedCardId = null;
+          discardMode = 'morgan1volunteer'; selectedCardId = null;
         }
         renderMorgan1DiscardUI();
         return;
@@ -7250,9 +7260,10 @@
 
       if (canVolunteer) {
         document.getElementById('btn-m1-volunteer').addEventListener('click', async () => {
-          discardMode = 'morgan1volunteer'; discardCount = 3; selectedCardId = null;
+          discardMode = 'morgan1volunteer'; morgan1Staged = []; selectedCardId = null;
           await fbDb.ref(interactionResponsePath()).set({ volunteering: true });
           renderMorgan1DiscardUI();
+          renderHand();
         });
       }
       document.getElementById('btn-m1-decline').addEventListener('click', async () => {
@@ -7262,9 +7273,56 @@
 
     function renderMorgan1DiscardUI() {
       const area = $('interaction-area');
+      const n = morgan1Staged.length;
+      const remaining = 3 - n;
       area.innerHTML = '<div class="interaction-panel"><h3>Morgan 1 — Volunteer</h3>' +
-        '<p>Select ' + discardCount + ' more card' + (discardCount > 1 ? 's' : '') + ' to discard</p>' +
+        '<p>' + (remaining > 0
+          ? 'Tap ' + remaining + ' more card' + (remaining !== 1 ? 's' : '') + ' to discard (' + n + '/3 selected)'
+          : '3 cards selected — confirm to discard them') + '</p>' +
+        '<button class="btn btn-danger" id="btn-m1-confirm"' + (n !== 3 ? ' disabled' : '') + '>Confirm — Discard 3</button>' +
+        '<button class="btn" id="btn-m1-cancel" style="margin-top:0.5rem;opacity:0.8;">Cancel</button>' +
         '</div>';
+      const confirmBtn = document.getElementById('btn-m1-confirm');
+      if (confirmBtn) confirmBtn.addEventListener('click', claimMorgan1Volunteer);
+      const cancelBtn = document.getElementById('btn-m1-cancel');
+      if (cancelBtn) cancelBtn.addEventListener('click', async () => {
+        discardMode = null; morgan1Staged = []; selectedCardId = null;
+        await fbDb.ref(interactionResponsePath()).remove();   // withdraw my 'volunteering' marker
+        renderMorgan1VolunteerPanel(roomData?.pendingInteraction);
+        renderHand();
+      });
+    }
+
+    // Win the volunteer atomically before discarding, so a lost race never loses cards.
+    async function claimMorgan1Volunteer() {
+      if (morgan1Staged.length !== 3) return;
+      const pi = roomData?.pendingInteraction;
+      if (!pi || pi.type !== 'morgan1Volunteer') {
+        // Already resolved (someone else volunteered) — keep my cards.
+        discardMode = null; morgan1Staged = []; selectedCardId = null;
+        showToast('The Morgan 1 volunteer was already resolved — your cards are kept.');
+        renderHand();
+        return;
+      }
+      const claimRef = fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction/volunteerClaimedBy');
+      const res = await claimRef.transaction(cur => (cur == null ? myKnight : undefined));
+      if (!res.committed || res.snapshot.val() !== myKnight) {
+        // Another knight claimed first — keep all cards.
+        discardMode = null; morgan1Staged = []; selectedCardId = null;
+        showToast('Another knight volunteered first — your cards are kept.');
+        renderHand();
+        return;
+      }
+      // Claim won — now remove + discard the 3 staged cards.
+      const staged = morgan1Staged.slice();
+      const discarded = myHand.filter(c => staged.includes(c.id));
+      myHand = myHand.filter(c => !staged.includes(c.id));
+      discardMode = null; morgan1Staged = []; selectedCardId = null;
+      await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
+      if (discarded.length > 0) await requestWhiteDiscard(discarded);
+      await fbDb.ref(interactionResponsePath()).set({ volunteered: true, done: true });
+      await addLog('evil', getKnightDisplayName(myKnight) + ' volunteered to discard 3 cards for Morgan 1!');
+      renderHand();
     }
 
     async function checkMorgan1VolunteerResolution(interaction) {
@@ -9243,8 +9301,19 @@
       const cin = roomData?.cinematic;
       if (!cin || cin.id === lastCinematicId) return;
       lastCinematicId = cin.id;
+      if (!CINEMATICS[cin.type]) return;
+      // Enqueue rather than overwrite: when a quest win immediately ends the game, the
+      // quest-win clip and the game-over clip are written moments apart (KQYZCJ: Dragon win
+      // → camelot-lose). Queueing lets the quest clip finish before the end-game clip plays.
+      cinematicQueue.push(cin);
+      if (!cinematicPlaying) playNextCinematic();
+    }
+
+    function playNextCinematic() {
+      const cin = cinematicQueue.shift();
+      if (!cin) { cinematicPlaying = false; return; }
+      cinematicPlaying = true;
       const src = CINEMATICS[cin.type];
-      if (!src) return;
       const overlay = $('cinematic-overlay');
       const v = $('cinematic-video');
       const soundBtn = $('btn-cinematic-sound');
@@ -9252,19 +9321,35 @@
       if (!v.src.endsWith(src)) v.src = src;
       try { v.currentTime = 0; } catch (e) {}
       overlay.classList.remove('hidden');
+      // Watchdog: if playback can't actually start (autoplay blocked on a backgrounded tab —
+      // common when driving several players from one device, or a passive observer at game
+      // over), auto-advance so the client isn't trapped behind a black overlay.
+      clearTimeout(cinematicWatchdog);
+      let started = false;
+      const onPlaying = () => { started = true; };
+      v.addEventListener('playing', onPlaying, { once: true });
+      cinematicWatchdog = setTimeout(() => {
+        v.removeEventListener('playing', onPlaying);
+        if (!started) { debugLog('cinematic', 'playback never started — auto-advanced', { type: cin.type, src }); endCinematic(); }
+      }, 3000);
       // Attempt playback with sound; fall back to muted + a tap-for-sound button if autoplay is blocked.
       v.muted = false;
       v.play().catch(() => {
         v.muted = true;
-        v.play().catch(() => {});
         soundBtn.classList.remove('hidden');
+        v.play().catch(() => {});
       });
     }
 
+    // Advance the queue: called on video 'ended', Skip, or the watchdog. Plays the next
+    // queued clip, or closes the overlay when the queue is empty.
     function endCinematic() {
-      const overlay = $('cinematic-overlay');
+      clearTimeout(cinematicWatchdog);
       const v = $('cinematic-video');
       v.pause();
+      if (cinematicQueue.length > 0) { playNextCinematic(); return; }
+      cinematicPlaying = false;
+      const overlay = $('cinematic-overlay');
       overlay.classList.add('hidden');
       $('btn-cinematic-sound').classList.add('hidden');
       // Only the turn player clears the shared flag; other clients just stop locally
@@ -9768,6 +9853,10 @@
         if (grailWhiteCards.length > 0) await requestWhiteDiscard(grailWhiteCards);
         updates['games/' + currentRoom + '/quests/holyGrail/status'] = 'won';
         updates['games/' + currentRoom + '/quests/holyGrail/knightsPresent'] = [];
+        // Clear the card array on completion: its cards were just discarded, and a stale
+        // array makes the same ids show up in two places once they reshuffle back into the
+        // draw pile (KQYZCJ audit: won-Grail cards duplicated in whiteDraw + q_holyGrail).
+        updates['games/' + currentRoom + '/quests/holyGrail/cards'] = [];
         const grailDest = grailToCompleter ? getKnightDisplayName(myKnight)
           : (completerDying ? 'lost (completing knight is dying)' : getKnightDisplayName(myKnight));
         if (completerDying) debugLog('grail', 'holyGrail won by dying knight', { grailSelfSave: !!roomData?.grailSelfSave, grailToCompleter });
@@ -9817,7 +9906,10 @@
       heroicSubState = { selectedCards: [] };
       selectedCardId = null;
       const fightCount = myHand.filter(c => c.type === 'fight').length;
-      addLog('info', getKnightDisplayName(myKnight) + ' started siege fight (' + fightCount + ' Fight cards available, location: ' + getMyLocation() + ')');
+      // Public log must not reveal hand info (fight-card count) to other players — keep the
+      // count in the private debug log only.
+      addLog('info', getKnightDisplayName(myKnight) + ' started a siege fight');
+      debugLog('combat', 'siege fight started', { fightCount, location: getMyLocation() });
       renderHand();
       renderTurnActions();
     }
