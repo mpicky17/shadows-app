@@ -703,7 +703,7 @@
     .overlay-minimize-btn { position: absolute; top: 0.5rem; right: 0.75rem; background: var(--border); color: var(--text-dim); border: none; border-radius: 4px; padding: 0.25rem 0.5rem; font-size: 0.75rem; cursor: pointer; z-index: 10; }
     .overlay-minimized { position: fixed; right: 0.75rem; bottom: 0.75rem; z-index: 201; padding: 0.5rem 1rem; color: var(--gold); font-size: 1rem; cursor: pointer; white-space: nowrap; background: rgba(20,15,10,0.95); border: 2px solid var(--gold); border-radius: 24px; box-shadow: 0 2px 12px rgba(0,0,0,0.6); }
     .overlay-minimized.hidden { display: none; }
-    .cinematic-overlay { position: fixed; inset: 0; z-index: 260; background: #000; display: flex; align-items: center; justify-content: center; }
+    .cinematic-overlay { position: fixed; inset: 0; z-index: 320; background: #000; display: flex; align-items: center; justify-content: center; }
     .cinematic-overlay.hidden { display: none; }
     #cinematic-video { width: 100%; height: 100%; object-fit: contain; }
     #btn-cinematic-skip { position: absolute; top: 1rem; right: 1rem; z-index: 2; }
@@ -1091,7 +1091,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v97';
+    const APP_VERSION = 'shadows-v98';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1184,7 +1184,11 @@
       excaliburLose:   'sword-lose.mp4',
       blackKnightWin:  'black-knight-win.mp4',
       blackKnightLose: 'black-knight-lose.mp4',
+      lancelotWin:     'armor-win.mp4',
+      lancelotLose:    'armor-lose.mp4',
+      grailWin:        'grail-win.mp4',
       grailLose:       'grail-lose.mp4',
+      camelotLose:     'camelot-lose.mp4',
     };
     let lastCinematicId = null;  // dedupe cinematic playback across re-renders/reconnects
     let combatStageTimer = null; // drives the combat reveal animation (Change 2)
@@ -7824,6 +7828,7 @@
         else { await fbDb.ref('games/' + currentRoom + '/drawRequests').push().set({ knightId: myKnight || '_spectator', deckType: 'writeLoyalties', timestamp: firebase.database.ServerValue.TIMESTAMP }); }
         await fbDb.ref('games/' + currentRoom + '/meta').update({
           status: 'ended', winner: 'evil', endReason: 'siege',
+          cinematic: { type: 'camelotLose', id: Date.now() },
         });
         await addLog('system', 'GAME OVER: 12 Siege Engines surround Camelot! Evil wins!');
         showToast('Game Over! Evil wins — 12 Siege Engines!');
@@ -7838,6 +7843,7 @@
         else { await fbDb.ref('games/' + currentRoom + '/drawRequests').push().set({ knightId: myKnight || '_spectator', deckType: 'writeLoyalties', timestamp: firebase.database.ServerValue.TIMESTAMP }); }
         await fbDb.ref('games/' + currentRoom + '/meta').update({
           status: 'ended', winner: 'evil', endReason: 'blackSwords',
+          cinematic: { type: 'camelotLose', id: Date.now() },
         });
         await addLog('system', 'GAME OVER: 7+ Black Swords on the Round Table! Evil wins!');
         showToast('Game Over! Evil wins — too many Black Swords!');
@@ -7892,9 +7898,9 @@
       const winner = whiteSwords > blackSwords ? 'loyal' : 'evil';
 
       await writeAllLoyalties();
-      await fbDb.ref('games/' + currentRoom + '/meta').update({
-        status: 'ended', winner, endReason: 'swordCount',
-      });
+      const swordCountMeta = { status: 'ended', winner, endReason: 'swordCount' };
+      if (winner === 'evil') swordCountMeta.cinematic = { type: 'camelotLose', id: Date.now() };
+      await fbDb.ref('games/' + currentRoom + '/meta').update(swordCountMeta);
       const msg = winner === 'loyal'
         ? 'GAME OVER: Loyal Knights prevail! (' + whiteSwords + ' White vs ' + blackSwords + ' Black)'
         : 'GAME OVER: Evil wins! (' + blackSwords + ' Black vs ' + whiteSwords + ' White)';
@@ -8123,6 +8129,7 @@
       await writeAllLoyalties();
       await fbDb.ref('games/' + currentRoom + '/meta').update({
         status: 'ended', winner: 'evil', endReason: 'allLoyalDead',
+        cinematic: { type: 'camelotLose', id: Date.now() },
       });
       await addLog('system', 'GAME OVER: All Loyal Knights have fallen! Evil wins!');
       showToast('Game Over! All Loyal Knights have fallen!');
@@ -8250,6 +8257,7 @@
         else { await fbDb.ref('games/' + currentRoom + '/drawRequests').push().set({ knightId: myKnight || '_spectator', deckType: 'writeLoyalties', timestamp: firebase.database.ServerValue.TIMESTAMP }); }
         await fbDb.ref('games/' + currentRoom + '/meta').update({
           status: 'ended', winner: 'evil', endReason: 'allDead',
+          cinematic: { type: 'camelotLose', id: Date.now() },
         });
         await addLog('system', 'GAME OVER: All Knights have fallen! Evil wins!');
         showToast('Game Over! All Knights have fallen!');
@@ -9540,6 +9548,7 @@
           }
           if (sharers.length > 0) await distributeCardsAmongKnights(4, sharers);
           else await drawWhiteToDiscard(4);
+          updates['games/' + currentRoom + '/meta/cinematic'] = { type: 'lancelotWin', id: Date.now() };
           await addLog('quest', 'Quest for Lancelot WON! 1 White Sword, +1 LP, Armor relic, 4 cards shared.');
         } else if (questKey === 'lancelot' && q.phase === 'dragon') {
           for (let i = 0; i < 2; i++) await addSword('white', 'dragon');
@@ -9565,6 +9574,7 @@
           for (const kid of knightsOnQuest) {
             updates['games/' + currentRoom + '/players/' + kid + '/life'] = Math.max(0, (cachedPlayers[kid]?.life ?? 4) - 1);
           }
+          updates['games/' + currentRoom + '/meta/cinematic'] = { type: 'lancelotLose', id: Date.now() };
           await addLog('quest', 'Quest for Lancelot LOST! 1 Black Sword, -1 LP.');
         } else if (questKey === 'lancelot' && q.phase === 'dragon') {
           for (let i = 0; i < 2; i++) await addSword('black', 'dragon');
@@ -9729,6 +9739,7 @@
           questKey: 'holyGrail', result: 'victory', cards: q.cards || [],
           summary: '3 White Swords, +1 LP, 7 cards, Holy Grail relic to ' + grailDest,
         };
+        updates['games/' + currentRoom + '/meta/cinematic'] = { type: 'grailWin', id: Date.now() };
         await fbDb.ref().update(updates);
         await shareQuestSpoils(7, knightsOnQuest);
         await addLog('quest', 'Quest for the Holy Grail WON! 3 White Swords, +1 LP, 7 cards, Holy Grail relic to ' + grailDest);
