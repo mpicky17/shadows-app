@@ -1112,7 +1112,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v103';
+    const APP_VERSION = 'shadows-v104';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -5506,16 +5506,19 @@ You will be given a block of VERIFIED METRICS computed deterministically from th
       btn.disabled = true; btn.textContent = 'Analyzing… (10–30s)';
       showAnalysisPanel('Generating the analyst report on the host… this usually takes 10–30 seconds.');
       try {
-        // Fetch the log via .get() (forces a server read — bypasses the cold-cache
-        // shortcut of .once('value') that returned a partial snapshot when Analyze
-        // was clicked right after reopening/waking the host tab). Also run .once()
-        // purely as a diagnostic so we can see once-vs-get counts at the real moment.
-        const logRef = fbDb.ref('games/' + currentRoom + '/log').orderByChild('timestamp');
+        // Fetch the log via .get() on the PLAIN node (no orderByChild) — forces a
+        // server read AND needs no index. (The root cause of both the cold-cache
+        // partial reads and the "Index not defined" error was using
+        // orderByChild('timestamp') without ".indexOn":"timestamp" in the rules:
+        // .once() then sorts client-side from whatever subset is synced, and .get()
+        // rejects the unindexed server query outright.) We sort by timestamp in JS.
+        const logRef = fbDb.ref('games/' + currentRoom + '/log');
         const [getSnap, onceSnap] = await Promise.all([
           logRef.get(),
           logRef.once('value').catch(() => null),
         ]);
         const entries = []; getSnap.forEach(c => { entries.push(c.val()); });
+        entries.sort((a, b) => ((a && a.timestamp) || 0) - ((b && b.timestamp) || 0));
         let onceN = 0; if (onceSnap) onceSnap.forEach(() => { onceN++; });
         const getN = entries.length;
         console.log('[SOC][diag] analyze log fetch — once=' + onceN + ' get=' + getN);
