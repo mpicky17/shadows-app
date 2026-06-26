@@ -1091,7 +1091,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v98';
+    const APP_VERSION = 'shadows-v99';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -2363,6 +2363,16 @@
         const turnOrder = KNIGHT_ORDER.filter(k => validPlayerIds.includes(k));
         const firstKnight = turnOrder[0];
 
+        // A host with no knight IS a spectator host, whether or not "Spectator" was
+        // explicitly chosen. The runtime deck key is always '_host' for a knightless
+        // host (myKnight || '_host'), so the '_host' deck node must be written and all
+        // spectator code paths must engage — otherwise draws hang at "Resolving evil
+        // action" with permission_denied on /private/{room}/_host. Normalize + persist.
+        if (isHost && !myKnight) {
+          isSpectator = true;
+          saveSession();
+        }
+
         // Create & shuffle loyalty deck (store unused for mid-game joiners)
         let loyaltyDeck;
         let unusedLoyalties = [];
@@ -2467,8 +2477,11 @@
           updates[pp + kid] = pdata;
         }
 
-        // Spectator host: store decks under '_host' pseudo-key
-        if (isSpectator && isHost) {
+        // Spectator host: store decks under '_host' pseudo-key. Keyed on "host has no
+        // knight" (not the isSpectator flag) so it always matches hostDeckKey's
+        // `myKnight || '_host'` derivation — a knightless host that never toggled
+        // "Spectator" still gets its deck node written here.
+        if (isHost && !myKnight) {
           updates[pp + '_host'] = {
             uid: myUid,
             hostDecks: {
@@ -2629,6 +2642,10 @@
     function enterGameScreen() {
       if (inGameScreen) return;
       inGameScreen = true;
+      // A host with no knight is always a spectator host (deck key is '_host'). Normalize
+      // before the isSpectator-gated setup below so a reload — or a start where "Spectator"
+      // was never toggled — engages the spectator UI/listeners and skips null-knight reads.
+      if (isHost && !myKnight && !isSpectator) { isSpectator = true; saveSession(); }
       showScreen('game-screen');
       debugLog('setup', 'enterGameScreen', { status: roomData?.status, knight: myKnight, isHost, isSpectator });
 
@@ -3975,6 +3992,25 @@
       const { knightId, deckType, count } = request;
       console.log('[SOC] processDrawRequest', { requestId, knightId, deckType, count });
       const deckPath = 'private/' + currentRoom + '/' + hostDeckKey + '/hostDecks/';
+
+      // Spectator-host safety: if the '_host' deck node is unreadable or missing, this
+      // game was started with a knightless host before the node was written (the pre-fix
+      // bug). Fail loud instead of leaving the active player stuck at "Resolving evil
+      // action..." — a silent throw here never resolves the draw request.
+      if (hostDeckKey === '_host') {
+        try {
+          const probe = await fbDb.ref(deckPath + 'blackDraw').once('value');
+          if (!probe.exists()) {
+            debugLog('deckaudit', 'spectator-host deck node missing', { deckPath });
+            showToast('Host deck data is missing — this game cannot serve draws. Please start a new game with the host as Spectator.', 8000);
+            return;
+          }
+        } catch (e) {
+          debugLog('deckaudit', 'spectator-host deck read denied', { err: String(e), deckPath });
+          showToast('Host cannot read the deck (permission denied) — please start a new game.', 8000);
+          return;
+        }
+      }
 
       // Percival peek: read top black card without removing
       if (deckType === 'percivalPeek') {
