@@ -1124,7 +1124,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v110';
+    const APP_VERSION = 'shadows-v111';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -6474,8 +6474,9 @@ OUTPUT STYLE — read carefully:
       '4': [0.7831, 0.5614], '5': [0.8088, 0.7750],
     };
     function excPosFrac(p) { return EXC_POS[String(p ?? 0)] || EXC_POS['0']; }
-    // Total time for the token to fade out + jump + fade in (CSS 1.4s + 1440ms move delay + 1.4s).
-    const EXC_FADE_TOTAL_MS = 2900;
+    // Total time for the token to settle, fade out, jump, and fade in
+    // (450ms hold + 1450ms fade-out + 1.4s fade-in). Keeps the win/lose cinematic back until done.
+    const EXC_FADE_TOTAL_MS = 3400;
     // The quest-result overlay re-renders on every meta change; this guards the fade so it
     // animates once per result (later re-renders show the sword already at its final slot).
     let excResultAnimShownKey = null;
@@ -6491,12 +6492,20 @@ OUTPUT STYLE — read carefully:
       const t = container && container.querySelector('.exc-token');
       if (!t) return;
       const [fx, fy] = excPosFrac(newPos);
-      t.style.opacity = '0';
+      // Show the sword at its OLD slot and COMMIT that paint first. If we set opacity:0 in
+      // the same frame the board was inserted, the element is never painted visible, so the
+      // fade-OUT has no start value to transition from and is skipped — you'd only see the
+      // fade-IN. The brief hold also lets players register where the sword started.
+      t.style.opacity = '1';
+      void t.offsetWidth;                  // force reflow → commits the visible state
       setTimeout(() => {
-        t.style.left = (fx * 100).toFixed(2) + '%';
-        t.style.top = (fy * 100).toFixed(2) + '%';
-        requestAnimationFrame(() => { t.style.opacity = '1'; });
-      }, 1440);
+        t.style.opacity = '0';             // fade OUT at the old slot (CSS 1.4s)
+        setTimeout(() => {
+          t.style.left = (fx * 100).toFixed(2) + '%';
+          t.style.top = (fy * 100).toFixed(2) + '%';
+          requestAnimationFrame(() => { t.style.opacity = '1'; });  // fade IN at the new slot
+        }, 1450);
+      }, 450);
     }
 
     // Build the quest board visual (Excalibur river / Grail slots / combat rows /
