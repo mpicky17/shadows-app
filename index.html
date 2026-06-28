@@ -726,6 +726,18 @@
     .quest-update-popup.fade-out { animation: popupFadeOut 0.5s ease-out forwards; }
     @keyframes popupFadeOut { 0% { opacity: 1; } 100% { opacity: 0; } }
 
+    /* ── Excalibur painted board + animated sword token ─────────────── */
+    .exc-board { position: relative; width: 100%; max-width: 340px; margin: 0.25rem auto; }
+    .exc-board .exc-bg { width: 100%; display: block; border-radius: 8px; }
+    /* Token: anchored at horizontal-center / ~83% down (base sits on the slot).
+       Only opacity transitions — left/top jump while it's invisible, so the
+       sword fades out at the old slot and fades back in at the new one. */
+    .exc-token {
+      position: absolute; width: 25.8%; transform: translate(-50%, -83%);
+      transition: opacity 0.35s ease; pointer-events: none;
+      filter: drop-shadow(0 2px 3px rgba(0,0,0,0.55));
+    }
+
     /* ── Info / Quest-detail modals ─────────────────────────────────── */
     .info-modal {
       position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 210;
@@ -1112,7 +1124,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v106';
+    const APP_VERSION = 'shadows-v107';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -6380,8 +6392,14 @@ OUTPUT STYLE — read carefully:
       // Excalibur — position changed
       if (prev.excalibur?.position !== next.excalibur?.position && next.excalibur?.status === 'active') {
         const pos = next.excalibur.position || 0;
-        const dir = pos > (prev.excalibur?.position || 0) ? 'toward Knights' : 'toward Evil';
-        showQuestUpdatePopup('excalibur', next.excalibur, 'Excalibur moved ' + dir);
+        const fromPos = prev.excalibur?.position || 0;
+        const dir = pos > fromPos ? 'toward Knights' : 'toward Evil';
+        showQuestUpdatePopup('excalibur', next.excalibur, 'Excalibur moved ' + dir, fromPos);
+        // If the clickable detail overlay is open on Excalibur, slide the sword there too.
+        const detail = $('quest-detail-overlay');
+        if (questDetailKey === 'excalibur' && detail && !detail.classList.contains('hidden')) {
+          animateExcaliburToken($('quest-detail-board'), pos);
+        }
         return;
       }
       // Holy Grail — cards changed
@@ -6443,6 +6461,37 @@ OUTPUT STYLE — read carefully:
       for (let i = 0; i < grails.length && i < 7; i++) slots[i] = grails[i];
       for (let i = 0; i < despairs.length && (6 - i) >= 0; i++) slots[6 - i] = despairs[i];
       return slots;
+    }
+
+    // ── Excalibur painted board + sword token ──────────────────────────
+    // The 11 slot coordinates are fractions of the board image (verified by
+    // marking the art with magenta dots and auto-detecting their centroids),
+    // keyed by track position -5 (deep Evil) … 0 (whirlpool) … +5 (Knights).
+    const EXC_POS = {
+      '-5': [0.1589, 0.3159], '-4': [0.1341, 0.5398], '-3': [0.1391, 0.7511],
+      '-2': [0.2773, 0.8443], '-1': [0.4000, 0.7364], '0': [0.4950, 0.5466],
+      '1': [0.5778, 0.3375], '2': [0.7309, 0.2364], '3': [0.8485, 0.3693],
+      '4': [0.7831, 0.5614], '5': [0.8088, 0.7750],
+    };
+    function excPosFrac(p) { return EXC_POS[String(p ?? 0)] || EXC_POS['0']; }
+    function excaliburBoardHTML(position) {
+      const [fx, fy] = excPosFrac(position);
+      return '<div class="exc-board"><img class="exc-bg" src="assets/excalibur-board.webp" alt="Excalibur quest">' +
+        '<img class="exc-token" src="assets/excalibur-token.png" alt="Excalibur" ' +
+        'style="left:' + (fx * 100).toFixed(2) + '%;top:' + (fy * 100).toFixed(2) + '%;"></div>';
+    }
+    // Fade the sword out at its current slot, then move + fade it back in at the
+    // new slot (left/top don't transition, so it never visibly slides across).
+    function animateExcaliburToken(container, newPos) {
+      const t = container && container.querySelector('.exc-token');
+      if (!t) return;
+      const [fx, fy] = excPosFrac(newPos);
+      t.style.opacity = '0';
+      setTimeout(() => {
+        t.style.left = (fx * 100).toFixed(2) + '%';
+        t.style.top = (fy * 100).toFixed(2) + '%';
+        requestAnimationFrame(() => { t.style.opacity = '1'; });
+      }, 360);
     }
 
     // Build the quest board visual (Excalibur river / Grail slots / combat rows /
@@ -6521,11 +6570,22 @@ OUTPUT STYLE — read carefully:
       return html;
     }
 
-    function showQuestUpdatePopup(questKey, questData, desc) {
+    function showQuestUpdatePopup(questKey, questData, desc, fromPos) {
       const popup = $('quest-update-popup');
       $('quest-update-title').textContent = getLocationLabel(questKey);
 
-      $('quest-update-content').innerHTML = renderQuestBoardVisual(questKey, questData);
+      const content = $('quest-update-content');
+      let holdMs = 3000;
+      if (questKey === 'excalibur') {
+        // Paint the board with the sword at the OLD slot, then fade it across to
+        // the new slot so players clearly see which way Excalibur moved.
+        const newPos = questData.position || 0;
+        const startPos = (fromPos == null) ? newPos : fromPos;
+        content.innerHTML = excaliburBoardHTML(startPos);
+        if (startPos !== newPos) { animateExcaliburToken(content, newPos); holdMs = 3600; }
+      } else {
+        content.innerHTML = renderQuestBoardVisual(questKey, questData);
+      }
       $('quest-update-desc').textContent = desc;
 
       popup.classList.remove('hidden', 'fade-out');
@@ -6533,7 +6593,7 @@ OUTPUT STYLE — read carefully:
       questUpdatePopupTimer = setTimeout(() => {
         popup.classList.add('fade-out');
         setTimeout(() => popup.classList.add('hidden'), 500);
-      }, 3000);
+      }, holdMs);
     }
 
     // Persistent quest-detail overlay opened by tapping a quest chip.
@@ -6542,7 +6602,9 @@ OUTPUT STYLE — read carefully:
       if (!q) return;
       questDetailKey = questKey;
       $('quest-detail-title').textContent = getLocationLabel(questKey);
-      $('quest-detail-board').innerHTML = renderQuestBoardVisual(questKey, q);
+      $('quest-detail-board').innerHTML = (questKey === 'excalibur')
+        ? excaliburBoardHTML(q.position || 0)
+        : renderQuestBoardVisual(questKey, q);
       const phase = questKey === 'lancelot' ? (q.phase || 'lancelot') : null;
       $('quest-detail-pattern').textContent = getQuestPatternText(questKey, phase);
       $('quest-detail-status').textContent = getQuestStatusInfo(questKey);
