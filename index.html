@@ -1124,7 +1124,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v112';
+    const APP_VERSION = 'shadows-v113';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -2811,7 +2811,10 @@
         if (cinV) cinV.addEventListener('ended', endCinematic);
         if (skipBtn) skipBtn.addEventListener('click', endCinematic);
         if (soundBtn) soundBtn.addEventListener('click', () => {
+          // A real user gesture: stop the auto-advance watchdog and (re)start with sound.
+          clearTimeout(cinematicWatchdog);
           cinV.muted = false;
+          cinV.play().catch(() => {});
           soundBtn.classList.add('hidden');
         });
       }
@@ -9960,6 +9963,12 @@ OUTPUT STYLE — read carefully:
       // Excalibur win/lose: let the sword finish fading to its final slot (in the quest-result
       // overlay) before the sword-win/sword-lose clip takes over the screen.
       if (cin.type === 'excaliburWin' || cin.type === 'excaliburLose') {
+        // Warm the clip NOW so it's buffered by the time it plays after the fade — a delayed,
+        // cold ~2 MB clip otherwise can't begin before the watchdog auto-advances it.
+        try {
+          const v = $('cinematic-video'), src = CINEMATICS[cin.type];
+          if (v && !v.src.endsWith(src)) { v.src = src; v.load(); }
+        } catch (e) {}
         setTimeout(enqueue, EXC_FADE_TOTAL_MS);
       } else {
         enqueue();
@@ -9978,18 +9987,33 @@ OUTPUT STYLE — read carefully:
       if (!v.src.endsWith(src)) v.src = src;
       try { v.currentTime = 0; } catch (e) {}
       overlay.classList.remove('hidden');
-      // Watchdog: if playback can't actually start (autoplay blocked on a backgrounded tab —
-      // common when driving several players from one device, or a passive observer at game
-      // over), auto-advance so the client isn't trapped behind a black overlay.
+
+      // Watchdog: instead of giving up after one missed start, keep nudging MUTED playback
+      // (always autoplay-allowed) for a few seconds — covers a still-buffering clip or a
+      // delayed (post-fade) play that lost autoplay activation. Only auto-advance after
+      // several failed attempts, so a backgrounded/observer tab isn't trapped behind black.
       clearTimeout(cinematicWatchdog);
-      let started = false;
-      const onPlaying = () => { started = true; };
+      let started = false, attempts = 0;
+      const MAX_ATTEMPTS = 5;            // ~5 × 1.4s ≈ 7s before auto-advancing
+      const onPlaying = () => { started = true; clearTimeout(cinematicWatchdog); };
       v.addEventListener('playing', onPlaying, { once: true });
-      cinematicWatchdog = setTimeout(() => {
-        v.removeEventListener('playing', onPlaying);
-        if (!started) { debugLog('cinematic', 'playback never started — auto-advanced', { type: cin.type, src }); endCinematic(); }
-      }, 3000);
-      // Attempt playback with sound; fall back to muted + a tap-for-sound button if autoplay is blocked.
+      const nudge = () => {
+        if (started) return;
+        if (++attempts > MAX_ATTEMPTS) {
+          v.removeEventListener('playing', onPlaying);
+          debugLog('cinematic', 'playback never started — auto-advanced', { type: cin.type, src, attempts });
+          endCinematic();
+          return;
+        }
+        // Retry muted (allowed without a gesture) and surface the tap-for-sound button.
+        v.muted = true;
+        soundBtn.classList.remove('hidden');
+        v.play().catch(() => {});
+        cinematicWatchdog = setTimeout(nudge, 1400);
+      };
+      cinematicWatchdog = setTimeout(nudge, 1400);
+      // First attempt prefers SOUND (works when still within the autoplay window); the
+      // nudges above fall back to muted if that was blocked.
       v.muted = false;
       v.play().catch(() => {
         v.muted = true;
