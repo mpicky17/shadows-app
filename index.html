@@ -703,8 +703,11 @@
     .overlay-minimize-btn { position: absolute; top: 0.5rem; right: 0.75rem; background: var(--border); color: var(--text-dim); border: none; border-radius: 4px; padding: 0.25rem 0.5rem; font-size: 0.75rem; cursor: pointer; z-index: 10; }
     .overlay-minimized { position: fixed; right: 0.75rem; bottom: 0.75rem; z-index: 201; padding: 0.5rem 1rem; color: var(--gold); font-size: 1rem; cursor: pointer; white-space: nowrap; background: rgba(20,15,10,0.95); border: 2px solid var(--gold); border-radius: 24px; box-shadow: 0 2px 12px rgba(0,0,0,0.6); }
     .overlay-minimized.hidden { display: none; }
-    .cinematic-overlay { position: fixed; inset: 0; z-index: 320; background: #000; display: flex; align-items: center; justify-content: center; }
+    .cinematic-overlay { position: fixed; inset: 0; z-index: 320; background: #000; display: flex; align-items: center; justify-content: center; transition: opacity 0.3s ease; }
     .cinematic-overlay.hidden { display: none; }
+    /* Pre-roll: the clip plays SILENTLY behind a transparent overlay during the Excalibur
+       fade (so it starts inside the autoplay window and keeps sound), then we reveal it. */
+    .cinematic-overlay.prerolling { opacity: 0; pointer-events: none; }
     #cinematic-video { width: 100%; height: 100%; object-fit: contain; }
     #btn-cinematic-skip { position: absolute; top: 1rem; right: 1rem; z-index: 2; }
     #btn-cinematic-sound { position: absolute; bottom: 1.25rem; left: 50%; transform: translateX(-50%); z-index: 2; }
@@ -1124,7 +1127,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v113';
+    const APP_VERSION = 'shadows-v114';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -9951,6 +9954,8 @@ OUTPUT STYLE — read carefully:
       $('combat-minimized').classList.add('hidden');
     }
 
+    let excPrerollId = null;   // id of the Excalibur clip currently pre-rolling silently
+
     function onCinematicChanged() {
       const cin = roomData?.cinematic;
       if (!cin || cin.id === lastCinematicId) return;
@@ -9960,19 +9965,41 @@ OUTPUT STYLE — read carefully:
       // quest-win clip and the game-over clip are written moments apart (KQYZCJ: Dragon win
       // → camelot-lose). Queueing lets the quest clip finish before the end-game clip plays.
       const enqueue = () => { cinematicQueue.push(cin); if (!cinematicPlaying) playNextCinematic(); };
-      // Excalibur win/lose: let the sword finish fading to its final slot (in the quest-result
-      // overlay) before the sword-win/sword-lose clip takes over the screen.
-      if (cin.type === 'excaliburWin' || cin.type === 'excaliburLose') {
-        // Warm the clip NOW so it's buffered by the time it plays after the fade — a delayed,
-        // cold ~2 MB clip otherwise can't begin before the watchdog auto-advances it.
-        try {
-          const v = $('cinematic-video'), src = CINEMATICS[cin.type];
-          if (v && !v.src.endsWith(src)) { v.src = src; v.load(); }
-        } catch (e) {}
-        setTimeout(enqueue, EXC_FADE_TOTAL_MS);
+      // Excalibur win/lose: start the clip NOW (inside the autoplay window, so the acting
+      // player keeps sound) but SILENT and behind a transparent overlay, so the sword fade
+      // shows first; then reveal + restart it. Falls back to the normal queued path if
+      // another clip is already on screen.
+      if ((cin.type === 'excaliburWin' || cin.type === 'excaliburLose') && !cinematicPlaying) {
+        startExcaliburCinematicPreroll(cin);
       } else {
         enqueue();
       }
+    }
+
+    // Shared retry-watchdog: keep nudging MUTED playback (always autoplay-allowed) for a few
+    // seconds before auto-advancing, so a buffering/throttled clip isn't dropped behind black.
+    function armCinematicWatchdog(cin) {
+      const v = $('cinematic-video');
+      const soundBtn = $('btn-cinematic-sound');
+      clearTimeout(cinematicWatchdog);
+      let started = false, attempts = 0;
+      const isPlaying = () => !v.paused && !v.ended && v.readyState >= 3 && v.currentTime > 0;
+      const onPlaying = () => { started = true; clearTimeout(cinematicWatchdog); };
+      v.addEventListener('playing', onPlaying, { once: true });
+      const nudge = () => {
+        if (started || isPlaying()) return;
+        if (++attempts > 5) {
+          v.removeEventListener('playing', onPlaying);
+          debugLog('cinematic', 'playback never started — auto-advanced', { type: cin.type, attempts });
+          endCinematic();
+          return;
+        }
+        v.muted = true;
+        soundBtn.classList.remove('hidden');
+        v.play().catch(() => {});
+        cinematicWatchdog = setTimeout(nudge, 1400);
+      };
+      cinematicWatchdog = setTimeout(nudge, 1400);
     }
 
     function playNextCinematic() {
@@ -9980,40 +10007,16 @@ OUTPUT STYLE — read carefully:
       if (!cin) { cinematicPlaying = false; return; }
       cinematicPlaying = true;
       const src = CINEMATICS[cin.type];
-      const overlay = $('cinematic-overlay');
       const v = $('cinematic-video');
       const soundBtn = $('btn-cinematic-sound');
       soundBtn.classList.add('hidden');
       if (!v.src.endsWith(src)) v.src = src;
+      v.loop = false; v.volume = 1;
       try { v.currentTime = 0; } catch (e) {}
-      overlay.classList.remove('hidden');
-
-      // Watchdog: instead of giving up after one missed start, keep nudging MUTED playback
-      // (always autoplay-allowed) for a few seconds — covers a still-buffering clip or a
-      // delayed (post-fade) play that lost autoplay activation. Only auto-advance after
-      // several failed attempts, so a backgrounded/observer tab isn't trapped behind black.
-      clearTimeout(cinematicWatchdog);
-      let started = false, attempts = 0;
-      const MAX_ATTEMPTS = 5;            // ~5 × 1.4s ≈ 7s before auto-advancing
-      const onPlaying = () => { started = true; clearTimeout(cinematicWatchdog); };
-      v.addEventListener('playing', onPlaying, { once: true });
-      const nudge = () => {
-        if (started) return;
-        if (++attempts > MAX_ATTEMPTS) {
-          v.removeEventListener('playing', onPlaying);
-          debugLog('cinematic', 'playback never started — auto-advanced', { type: cin.type, src, attempts });
-          endCinematic();
-          return;
-        }
-        // Retry muted (allowed without a gesture) and surface the tap-for-sound button.
-        v.muted = true;
-        soundBtn.classList.remove('hidden');
-        v.play().catch(() => {});
-        cinematicWatchdog = setTimeout(nudge, 1400);
-      };
-      cinematicWatchdog = setTimeout(nudge, 1400);
-      // First attempt prefers SOUND (works when still within the autoplay window); the
-      // nudges above fall back to muted if that was blocked.
+      $('cinematic-overlay').classList.remove('hidden', 'prerolling');
+      armCinematicWatchdog(cin);
+      // First attempt prefers SOUND (works within the autoplay window / with engagement);
+      // the watchdog falls back to muted if that was blocked.
       v.muted = false;
       v.play().catch(() => {
         v.muted = true;
@@ -10022,15 +10025,60 @@ OUTPUT STYLE — read carefully:
       });
     }
 
+    // Excalibur: play the clip SILENTLY behind the transparent overlay during the fade (this
+    // grabs the autoplay-with-sound permission while we still have it), then reveal + restart.
+    function startExcaliburCinematicPreroll(cin) {
+      cinematicPlaying = true;
+      excPrerollId = cin.id;
+      const src = CINEMATICS[cin.type];
+      const v = $('cinematic-video');
+      const overlay = $('cinematic-overlay');
+      $('btn-cinematic-sound').classList.add('hidden');
+      if (!v.src.endsWith(src)) v.src = src;
+      v.loop = true;           // loop in case the fade outlasts the clip; turned off at reveal
+      v.volume = 0;            // silent during the fade
+      try { v.currentTime = 0; } catch (e) {}
+      overlay.classList.remove('hidden');
+      overlay.classList.add('prerolling');   // transparent + click-through: the fade shows beneath
+      // Play with SOUND so the element is "blessed" for audio (succeeds for the acting player,
+      // who still holds activation); other clients fall back to a silent muted preroll.
+      v.muted = false;
+      v.play().catch(() => { v.muted = true; v.play().catch(() => {}); });
+      setTimeout(() => revealExcaliburCinematic(cin), EXC_FADE_TOTAL_MS);
+    }
+
+    function revealExcaliburCinematic(cin) {
+      if (excPrerollId !== cin.id) return;   // superseded or already ended
+      const v = $('cinematic-video');
+      const soundBtn = $('btn-cinematic-sound');
+      $('cinematic-overlay').classList.remove('prerolling');   // bring the clip to the front
+      v.loop = false;
+      v.volume = 1;
+      try { v.currentTime = 0; } catch (e) {}                  // play it from the start
+      if (v.muted) {
+        // Non-acting client fell back to a muted preroll — try sound; if blocked, offer the tap.
+        v.muted = false;
+        v.play().then(() => soundBtn.classList.add('hidden')).catch(() => {
+          v.muted = true; soundBtn.classList.remove('hidden'); v.play().catch(() => {});
+        });
+      } else {
+        v.play().catch(() => {});   // acting client: already blessed → plays with sound
+      }
+      armCinematicWatchdog(cin);
+    }
+
     // Advance the queue: called on video 'ended', Skip, or the watchdog. Plays the next
     // queued clip, or closes the overlay when the queue is empty.
     function endCinematic() {
       clearTimeout(cinematicWatchdog);
+      excPrerollId = null;
       const v = $('cinematic-video');
       v.pause();
+      v.loop = false; v.volume = 1;
+      const overlay = $('cinematic-overlay');
+      overlay.classList.remove('prerolling');
       if (cinematicQueue.length > 0) { playNextCinematic(); return; }
       cinematicPlaying = false;
-      const overlay = $('cinematic-overlay');
       overlay.classList.add('hidden');
       $('btn-cinematic-sound').classList.add('hidden');
       // Only the turn player clears the shared flag; other clients just stop locally
