@@ -734,7 +734,7 @@
        sword fades out at the old slot and fades back in at the new one. */
     .exc-token {
       position: absolute; width: 25.8%; transform: translate(-50%, -83%);
-      transition: opacity 0.7s ease; pointer-events: none;
+      transition: opacity 1.4s ease; pointer-events: none;
       filter: drop-shadow(0 2px 3px rgba(0,0,0,0.55));
     }
 
@@ -1124,7 +1124,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v108';
+    const APP_VERSION = 'shadows-v109';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -6491,7 +6491,7 @@ OUTPUT STYLE — read carefully:
         t.style.left = (fx * 100).toFixed(2) + '%';
         t.style.top = (fy * 100).toFixed(2) + '%';
         requestAnimationFrame(() => { t.style.opacity = '1'; });
-      }, 720);
+      }, 1440);
     }
 
     // Build the quest board visual (Excalibur river / Grail slots / combat rows /
@@ -6582,7 +6582,7 @@ OUTPUT STYLE — read carefully:
         const newPos = questData.position || 0;
         const startPos = (fromPos == null) ? newPos : fromPos;
         content.innerHTML = excaliburBoardHTML(startPos);
-        if (startPos !== newPos) { animateExcaliburToken(content, newPos); holdMs = 4600; }
+        if (startPos !== newPos) { animateExcaliburToken(content, newPos); holdMs = 6400; }
       } else {
         content.innerHTML = renderQuestBoardVisual(questKey, questData);
       }
