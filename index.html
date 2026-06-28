@@ -1124,7 +1124,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v111';
+    const APP_VERSION = 'shadows-v112';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -6477,9 +6477,10 @@ OUTPUT STYLE — read carefully:
     // Total time for the token to settle, fade out, jump, and fade in
     // (450ms hold + 1450ms fade-out + 1.4s fade-in). Keeps the win/lose cinematic back until done.
     const EXC_FADE_TOTAL_MS = 3400;
-    // The quest-result overlay re-renders on every meta change; this guards the fade so it
-    // animates once per result (later re-renders show the sword already at its final slot).
-    let excResultAnimShownKey = null;
+    // The quest-result overlay re-renders on every meta change; only rebuild its content
+    // (and run the one-time Excalibur fade) when the result itself changes — otherwise a
+    // re-render would replace the animating token and kill the fade.
+    let lastQuestResultSig = null;
     function excaliburBoardHTML(position) {
       const [fx, fy] = excPosFrac(position);
       return '<div class="exc-board"><img class="exc-bg" src="assets/excalibur-board.webp" alt="Excalibur quest">' +
@@ -10033,7 +10034,7 @@ OUTPUT STYLE — read carefully:
       const result = roomData?.questResult;
       const overlay = $('combat-overlay');
       if (!result) {
-        excResultAnimShownKey = null;   // arm the Excalibur fade for the next result
+        lastQuestResultSig = null;   // arm the next result to render + animate fresh
         if (!roomData?.combatResolution) { overlay.classList.add('hidden'); $('combat-minimized').classList.add('hidden'); }
         return;
       }
@@ -10046,8 +10047,14 @@ OUTPUT STYLE — read carefully:
       const questLabel = getLocationLabel(data.questKey);
       $('combat-title').textContent = questLabel + ' — Quest Result';
 
+      // Build/refresh the result CONTENT only when the result actually changes. The overlay
+      // re-renders on every meta tick (quest spoils, heroism, etc. all write meta during the
+      // resolution); rebuilding mid-fade would replace the animating sword and kill it.
+      const sig = [data.questKey, data.result, data.fromPosition, data.position, data.summary || ''].join('|');
+      if (sig !== lastQuestResultSig) {
+      lastQuestResultSig = sig;
       let html = '';
-      let excAnimTo = null, excAnimKey = null;   // set in the Excalibur branch, fired after innerHTML
+      let excAnimTo = null;
       if (data.questKey === 'holyGrail') {
         html += '<p style="color:var(--text-dim);font-size:1rem;">Holy Grail Quest Board</p><div class="combat-cards">';
         const slots = buildGrailSlotLayout(data.cards || []);
@@ -10067,13 +10074,9 @@ OUTPUT STYLE — read carefully:
         const bc = (data.cards || []).filter(c => c.type !== 'grail').length;
         html += '<p style="color:var(--gold);font-size:1.125rem;font-weight:700;margin:0.5rem 0;">' + gc + ' Grail / ' + bc + ' Despair</p>';
       } else if (data.questKey === 'excalibur') {
-        // Painted board. On the first render of this result, place the sword at its PRIOR
-        // slot and fade it to the final slot (below); on later re-renders show it already
-        // at the final slot so it doesn't snap back and re-animate.
-        const animKey = 'exc:' + data.fromPosition + '>' + data.position;
-        const firstShow = data.fromPosition != null && data.fromPosition !== data.position && animKey !== excResultAnimShownKey;
-        html += excaliburBoardHTML(firstShow ? data.fromPosition : (data.position || 0));
-        if (firstShow) { excAnimTo = data.position; excAnimKey = animKey; }
+        // Painted board: place the sword at its PRIOR slot; it fades to the final slot below.
+        html += excaliburBoardHTML(data.fromPosition != null ? data.fromPosition : (data.position || 0));
+        if (data.fromPosition != null && data.fromPosition !== data.position) excAnimTo = data.position;
       } else if (data.questKey === 'saxonWar' || data.questKey === 'pictWar') {
         const warName = data.questKey === 'saxonWar' ? 'Saxon' : 'Pict';
         html += '<p style="color:var(--text-dim);font-size:1rem;">' + warName + ' War</p>';
@@ -10102,11 +10105,9 @@ OUTPUT STYLE — read carefully:
       }
       $('combat-content').innerHTML = html;
 
-      // Excalibur: fade the sword from its prior slot to the final win/lose slot (once).
-      // The win/lose cinematic is held back (in onCinematicChanged) until this finishes.
-      if (excAnimKey) {
-        excResultAnimShownKey = excAnimKey;
-        animateExcaliburToken($('combat-content'), excAnimTo);
+      // Excalibur: fade the sword from its prior slot to the final win/lose slot (runs once;
+      // the win/lose cinematic is held back in onCinematicChanged until this finishes).
+      if (excAnimTo != null) animateExcaliburToken($('combat-content'), excAnimTo);
       }
 
       const actionsEl = $('combat-actions');
