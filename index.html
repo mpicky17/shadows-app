@@ -1124,7 +1124,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v109';
+    const APP_VERSION = 'shadows-v110';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -6474,6 +6474,11 @@ OUTPUT STYLE — read carefully:
       '4': [0.7831, 0.5614], '5': [0.8088, 0.7750],
     };
     function excPosFrac(p) { return EXC_POS[String(p ?? 0)] || EXC_POS['0']; }
+    // Total time for the token to fade out + jump + fade in (CSS 1.4s + 1440ms move delay + 1.4s).
+    const EXC_FADE_TOTAL_MS = 2900;
+    // The quest-result overlay re-renders on every meta change; this guards the fade so it
+    // animates once per result (later re-renders show the sword already at its final slot).
+    let excResultAnimShownKey = null;
     function excaliburBoardHTML(position) {
       const [fx, fy] = excPosFrac(position);
       return '<div class="exc-board"><img class="exc-bg" src="assets/excalibur-board.webp" alt="Excalibur quest">' +
@@ -6731,7 +6736,7 @@ OUTPUT STYLE — read carefully:
         }
         updates['games/' + currentRoom + '/quests/excalibur/knightsPresent'] = [];
         updates['games/' + currentRoom + '/meta/questResult'] = {
-          questKey: 'excalibur', result: 'defeat', position: newPos, fromEvil: true,
+          questKey: 'excalibur', result: 'defeat', position: newPos, fromPosition: (quest.position || 0), fromEvil: true,
           summary: '2 Black Swords, -1 LP. Excalibur removed from game.',
         };
         updates['games/' + currentRoom + '/meta/cinematic'] = { type: 'excaliburLose', id: Date.now() };
@@ -9941,8 +9946,14 @@ OUTPUT STYLE — read carefully:
       // Enqueue rather than overwrite: when a quest win immediately ends the game, the
       // quest-win clip and the game-over clip are written moments apart (KQYZCJ: Dragon win
       // → camelot-lose). Queueing lets the quest clip finish before the end-game clip plays.
-      cinematicQueue.push(cin);
-      if (!cinematicPlaying) playNextCinematic();
+      const enqueue = () => { cinematicQueue.push(cin); if (!cinematicPlaying) playNextCinematic(); };
+      // Excalibur win/lose: let the sword finish fading to its final slot (in the quest-result
+      // overlay) before the sword-win/sword-lose clip takes over the screen.
+      if (cin.type === 'excaliburWin' || cin.type === 'excaliburLose') {
+        setTimeout(enqueue, EXC_FADE_TOTAL_MS);
+      } else {
+        enqueue();
+      }
     }
 
     function playNextCinematic() {
@@ -10013,6 +10024,7 @@ OUTPUT STYLE — read carefully:
       const result = roomData?.questResult;
       const overlay = $('combat-overlay');
       if (!result) {
+        excResultAnimShownKey = null;   // arm the Excalibur fade for the next result
         if (!roomData?.combatResolution) { overlay.classList.add('hidden'); $('combat-minimized').classList.add('hidden'); }
         return;
       }
@@ -10026,6 +10038,7 @@ OUTPUT STYLE — read carefully:
       $('combat-title').textContent = questLabel + ' — Quest Result';
 
       let html = '';
+      let excAnimTo = null, excAnimKey = null;   // set in the Excalibur branch, fired after innerHTML
       if (data.questKey === 'holyGrail') {
         html += '<p style="color:var(--text-dim);font-size:1rem;">Holy Grail Quest Board</p><div class="combat-cards">';
         const slots = buildGrailSlotLayout(data.cards || []);
@@ -10045,17 +10058,13 @@ OUTPUT STYLE — read carefully:
         const bc = (data.cards || []).filter(c => c.type !== 'grail').length;
         html += '<p style="color:var(--gold);font-size:1.125rem;font-weight:700;margin:0.5rem 0;">' + gc + ' Grail / ' + bc + ' Despair</p>';
       } else if (data.questKey === 'excalibur') {
-        html += '<p style="color:var(--text-dim);font-size:1rem;">Excalibur River Position</p>';
-        html += '<div style="display:flex;gap:4px;justify-content:center;margin:0.75rem 0;">';
-        for (let i = -5; i <= 5; i++) {
-          const pos = data.position || 0;
-          const isExc = i === pos;
-          const bg = isExc ? 'var(--gold)' : (i < 0 ? 'rgba(139,26,26,0.3)' : (i > 0 ? 'rgba(46,125,50,0.3)' : 'rgba(255,255,255,0.15)'));
-          const col = isExc ? 'var(--bg-dark)' : 'var(--text-dim)';
-          html += '<div style="width:26px;height:26px;border-radius:4px;display:flex;align-items:center;justify-content:center;' +
-            'background:' + bg + ';font-size:0.6875rem;font-weight:700;color:' + col + ';">' + (isExc ? '\u2694' : '') + '</div>';
-        }
-        html += '</div>';
+        // Painted board. On the first render of this result, place the sword at its PRIOR
+        // slot and fade it to the final slot (below); on later re-renders show it already
+        // at the final slot so it doesn't snap back and re-animate.
+        const animKey = 'exc:' + data.fromPosition + '>' + data.position;
+        const firstShow = data.fromPosition != null && data.fromPosition !== data.position && animKey !== excResultAnimShownKey;
+        html += excaliburBoardHTML(firstShow ? data.fromPosition : (data.position || 0));
+        if (firstShow) { excAnimTo = data.position; excAnimKey = animKey; }
       } else if (data.questKey === 'saxonWar' || data.questKey === 'pictWar') {
         const warName = data.questKey === 'saxonWar' ? 'Saxon' : 'Pict';
         html += '<p style="color:var(--text-dim);font-size:1rem;">' + warName + ' War</p>';
@@ -10083,6 +10092,13 @@ OUTPUT STYLE — read carefully:
         html += '<p style="color:var(--red-bright);font-size:0.875rem;">+1 additional Black Sword (Mist of Avalon)</p>';
       }
       $('combat-content').innerHTML = html;
+
+      // Excalibur: fade the sword from its prior slot to the final win/lose slot (once).
+      // The win/lose cinematic is held back (in onCinematicChanged) until this finishes.
+      if (excAnimKey) {
+        excResultAnimShownKey = excAnimKey;
+        animateExcaliburToken($('combat-content'), excAnimTo);
+      }
 
       const actionsEl = $('combat-actions');
       if (isMyTurn() || (data.fromEvil && isHost)) {
@@ -10463,7 +10479,7 @@ OUTPUT STYLE — read carefully:
         updates['games/' + currentRoom + '/quests/excalibur/status'] = 'won';
         updates['games/' + currentRoom + '/quests/excalibur/knightsPresent'] = [];
         updates['games/' + currentRoom + '/meta/questResult'] = {
-          questKey: 'excalibur', result: 'victory', position: q.position || 0,
+          questKey: 'excalibur', result: 'victory', position: 5, fromPosition: 4,
           summary: '2 White Swords, +1 LP each, 7 cards, Excalibur relic to ' + getKnightDisplayName(myKnight),
         };
         updates['games/' + currentRoom + '/meta/cinematic'] = { type: 'excaliburWin', id: Date.now() };
