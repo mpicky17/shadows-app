@@ -1127,7 +1127,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v114';
+    const APP_VERSION = 'shadows-v115';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -10053,17 +10053,29 @@ OUTPUT STYLE — read carefully:
       const soundBtn = $('btn-cinematic-sound');
       $('cinematic-overlay').classList.remove('prerolling');   // bring the clip to the front
       v.loop = false;
+      // Seek back to the start while SILENT, then raise audio only once the seek lands —
+      // otherwise the clip is briefly audible at its ~3.4s pre-roll position before restarting.
+      const wasMutedPreroll = v.muted;   // non-acting clients pre-rolled muted
+      v.muted = true;
       v.volume = 1;
-      try { v.currentTime = 0; } catch (e) {}                  // play it from the start
-      if (v.muted) {
-        // Non-acting client fell back to a muted preroll — try sound; if blocked, offer the tap.
+      try { v.currentTime = 0; } catch (e) {}                  // restart from the beginning
+      let audioOn = false;
+      const enableAudio = () => {
+        if (audioOn) return; audioOn = true;
+        v.removeEventListener('seeked', enableAudio);
         v.muted = false;
-        v.play().then(() => soundBtn.classList.add('hidden')).catch(() => {
-          v.muted = true; soundBtn.classList.remove('hidden'); v.play().catch(() => {});
-        });
-      } else {
-        v.play().catch(() => {});   // acting client: already blessed → plays with sound
-      }
+        if (!wasMutedPreroll) {
+          v.play().catch(() => {});                  // acting client: blessed → sound, no tap
+        } else {
+          // Non-acting client: try sound; if blocked, fall back to muted + tap-for-sound.
+          v.play().then(() => soundBtn.classList.add('hidden')).catch(() => {
+            v.muted = true; soundBtn.classList.remove('hidden'); v.play().catch(() => {});
+          });
+        }
+      };
+      v.addEventListener('seeked', enableAudio, { once: true });
+      setTimeout(enableAudio, 250);        // fallback if 'seeked' doesn't fire promptly
+      v.play().catch(() => {});            // keep it playing (muted) through the seek
       armCinematicWatchdog(cin);
     }
 
