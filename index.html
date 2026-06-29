@@ -741,6 +741,22 @@
       filter: drop-shadow(0 2px 3px rgba(0,0,0,0.55));
     }
 
+    /* ── Saxon War painted board: warrior tokens + fight cards ───────── */
+    .saxon-board { position: relative; width: 100%; max-width: 360px; margin: 0.25rem auto; }
+    .saxon-board .saxon-bg { width: 100%; display: block; border-radius: 8px; }
+    /* Fight card: rotated, centred on its slot; later cards sit on top (z-index). */
+    .saxon-fight-card {
+      position: absolute; width: 22.46%; transform: translate(-50%, -50%) rotate(34deg);
+      pointer-events: none; transition: opacity 0.7s ease; border-radius: 4px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+    }
+    /* Warrior: feet anchored on the dot; drawn above the cards. */
+    .saxon-token {
+      position: absolute; width: 13.2%; transform: translate(-50%, -100%); z-index: 20;
+      pointer-events: none; transition: opacity 0.7s ease;
+      filter: drop-shadow(0 1px 2px rgba(0,0,0,0.55));
+    }
+
     /* ── Info / Quest-detail modals ─────────────────────────────────── */
     .info-modal {
       position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 210;
@@ -1127,7 +1143,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v115';
+    const APP_VERSION = 'shadows-v116';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -6446,7 +6462,21 @@ OUTPUT STYLE — read carefully:
       const prevSW = prev.saxonWar?.warriors || 0;
       const nextSW = next.saxonWar?.warriors || 0;
       if ((prevSF !== nextSF || prevSW !== nextSW) && next.saxonWar?.status === 'active') {
-        showQuestUpdatePopup('saxonWar', next.saxonWar, nextSW + '/4 Warriors, ' + nextSF + '/5 Fight cards');
+        showQuestUpdatePopup('saxonWar', next.saxonWar, nextSW + '/4 Warriors, ' + nextSF + '/5 Fight cards',
+          { warriorsFrom: prevSW, fightFrom: prevSF });
+        // If the clickable detail overlay is open on Saxon War, update it live with the same fade.
+        const detail = $('quest-detail-overlay');
+        if (questDetailKey === 'saxonWar' && detail && !detail.classList.contains('hidden')) {
+          const board = $('quest-detail-board');
+          if (nextSW < prevSW) {
+            board.innerHTML = saxonBoardHTML({ ...next.saxonWar, warriors: prevSW });
+            animateSaxonChange(board, '.saxon-token', prevSW - 1, 'out');
+          } else {
+            board.innerHTML = saxonBoardHTML(next.saxonWar);
+            if (nextSW > prevSW) animateSaxonChange(board, '.saxon-token', nextSW - 1, 'in');
+            else if (nextSF > prevSF) animateSaxonChange(board, '.saxon-fight-card', nextSF - 1, 'in');
+          }
+        }
         return;
       }
       // Pict War
@@ -6513,6 +6543,42 @@ OUTPUT STYLE — read carefully:
           requestAnimationFrame(() => { t.style.opacity = '1'; });  // fade IN at the new slot
         }, 1450);
       }, 450);
+    }
+
+    // ── Saxon War painted board: 4 warrior dots + 5 fight-card slots ────
+    // Coords are fractions of the board image: warriors from the magenta dots
+    // (feet on the dot); fight cards along a tuned down-right diagonal, each
+    // rotated 34° with the newest on top (only the top card's number shows).
+    const SAXON_POS = [ [0.0811, 0.6105], [0.1504, 0.7854], [0.3301, 0.7833], [0.4395, 0.9463] ];
+    const FIGHT_POS = [ [0.2393, 0.2897], [0.3076, 0.3541], [0.3760, 0.4185],
+                        [0.4443, 0.4828], [0.5127, 0.5472], [0.5811, 0.6116] ]; // 6th = Mordred extra
+    const SAXON_FADE_MS = 700;
+    function saxonBoardHTML(q) {
+      let html = '<div class="saxon-board"><img class="saxon-bg" src="assets/saxon-board.webp" alt="Saxon War">';
+      const fc = q?.fightCards || [];
+      for (let i = 0; i < fc.length; i++) {
+        const p = FIGHT_POS[i] || FIGHT_POS[FIGHT_POS.length - 1];
+        const val = Math.min(5, Math.max(1, (fc[i] && fc[i].value) || (i + 1)));
+        html += '<img class="saxon-fight-card" src="assets/saxon-fight-' + val + '.webp" ' +
+          'style="left:' + (p[0] * 100).toFixed(2) + '%;top:' + (p[1] * 100).toFixed(2) + '%;z-index:' + (1 + i) + ';">';
+      }
+      const w = q?.warriors || 0;
+      for (let i = 0; i < w; i++) {
+        const p = SAXON_POS[i] || SAXON_POS[SAXON_POS.length - 1];
+        html += '<img class="saxon-token" src="assets/saxon-token.webp" ' +
+          'style="left:' + (p[0] * 100).toFixed(2) + '%;top:' + (p[1] * 100).toFixed(2) + '%;">';
+      }
+      return html + '</div>';
+    }
+    // Fade a single token/card in (added) or out (Merlin-removed). Commits the
+    // start opacity first so the transition actually runs (same gotcha as Excalibur).
+    function animateSaxonChange(container, selector, idx, dir) {
+      const els = container && container.querySelectorAll(selector);
+      const el = els && els[idx];
+      if (!el) return;
+      el.style.opacity = dir === 'in' ? '0' : '1';
+      void el.offsetWidth;
+      requestAnimationFrame(() => { el.style.opacity = dir === 'in' ? '1' : '0'; });
     }
 
     // Build the quest board visual (Excalibur river / Grail slots / combat rows /
@@ -6591,7 +6657,7 @@ OUTPUT STYLE — read carefully:
       return html;
     }
 
-    function showQuestUpdatePopup(questKey, questData, desc, fromPos) {
+    function showQuestUpdatePopup(questKey, questData, desc, extra) {
       const popup = $('quest-update-popup');
       $('quest-update-title').textContent = getLocationLabel(questKey);
 
@@ -6599,11 +6665,24 @@ OUTPUT STYLE — read carefully:
       let holdMs = 3000;
       if (questKey === 'excalibur') {
         // Paint the board with the sword at the OLD slot, then fade it across to
-        // the new slot so players clearly see which way Excalibur moved.
+        // the new slot so players clearly see which way Excalibur moved. (extra = fromPos)
         const newPos = questData.position || 0;
-        const startPos = (fromPos == null) ? newPos : fromPos;
+        const startPos = (extra == null) ? newPos : extra;
         content.innerHTML = excaliburBoardHTML(startPos);
         if (startPos !== newPos) { animateExcaliburToken(content, newPos); holdMs = 6400; }
+      } else if (questKey === 'saxonWar') {
+        // Painted board; fade the added token/card IN, or the Merlin-removed warrior OUT.
+        const fromW = (extra && extra.warriorsFrom != null) ? extra.warriorsFrom : (questData.warriors || 0);
+        const fromF = (extra && extra.fightFrom != null) ? extra.fightFrom : (questData.fightCards || []).length;
+        const toW = questData.warriors || 0, toF = (questData.fightCards || []).length;
+        if (toW < fromW) {
+          content.innerHTML = saxonBoardHTML({ ...questData, warriors: fromW });  // show the warrior, then fade it out
+          animateSaxonChange(content, '.saxon-token', fromW - 1, 'out');
+        } else {
+          content.innerHTML = saxonBoardHTML(questData);
+          if (toW > fromW) animateSaxonChange(content, '.saxon-token', toW - 1, 'in');
+          else if (toF > fromF) animateSaxonChange(content, '.saxon-fight-card', toF - 1, 'in');
+        }
       } else {
         content.innerHTML = renderQuestBoardVisual(questKey, questData);
       }
@@ -6623,8 +6702,9 @@ OUTPUT STYLE — read carefully:
       if (!q) return;
       questDetailKey = questKey;
       $('quest-detail-title').textContent = getLocationLabel(questKey);
-      $('quest-detail-board').innerHTML = (questKey === 'excalibur')
-        ? excaliburBoardHTML(q.position || 0)
+      $('quest-detail-board').innerHTML =
+        questKey === 'excalibur' ? excaliburBoardHTML(q.position || 0)
+        : questKey === 'saxonWar' ? saxonBoardHTML(q)
         : renderQuestBoardVisual(questKey, q);
       const phase = questKey === 'lancelot' ? (q.phase || 'lancelot') : null;
       $('quest-detail-pattern').textContent = getQuestPatternText(questKey, phase);
@@ -9971,6 +10051,10 @@ OUTPUT STYLE — read carefully:
       // another clip is already on screen.
       if ((cin.type === 'excaliburWin' || cin.type === 'excaliburLose') && !cinematicPlaying) {
         startExcaliburCinematicPreroll(cin);
+      } else if (cin.type === 'camelotLose' && !cinematicPlaying) {
+        // A war loss (e.g. Saxon 4th warrior) can place the 12th siege engine and end the
+        // game. Hold the game-over clip briefly so the final token/card fade plays first.
+        setTimeout(enqueue, SAXON_FADE_MS + 300);
       } else {
         enqueue();
       }
@@ -10138,7 +10222,7 @@ OUTPUT STYLE — read carefully:
       if (sig !== lastQuestResultSig) {
       lastQuestResultSig = sig;
       let html = '';
-      let excAnimTo = null;
+      let excAnimTo = null, saxonAnim = null;
       if (data.questKey === 'holyGrail') {
         html += '<p style="color:var(--text-dim);font-size:1rem;">Holy Grail Quest Board</p><div class="combat-cards">';
         const slots = buildGrailSlotLayout(data.cards || []);
@@ -10161,9 +10245,17 @@ OUTPUT STYLE — read carefully:
         // Painted board: place the sword at its PRIOR slot; it fades to the final slot below.
         html += excaliburBoardHTML(data.fromPosition != null ? data.fromPosition : (data.position || 0));
         if (data.fromPosition != null && data.fromPosition !== data.position) excAnimTo = data.position;
-      } else if (data.questKey === 'saxonWar' || data.questKey === 'pictWar') {
-        const warName = data.questKey === 'saxonWar' ? 'Saxon' : 'Pict';
-        html += '<p style="color:var(--text-dim);font-size:1rem;">' + warName + ' War</p>';
+      } else if (data.questKey === 'saxonWar') {
+        // Painted board at the final state; fade the last piece (winning card / 4th warrior) in.
+        if (data.result === 'victory') {
+          html += saxonBoardHTML({ fightCards: data.fightCards || [], warriors: 0 });
+          saxonAnim = { sel: '.saxon-fight-card', idx: (data.fightCards || []).length - 1 };
+        } else {
+          html += saxonBoardHTML({ fightCards: [], warriors: data.warriors || 4 });
+          saxonAnim = { sel: '.saxon-token', idx: (data.warriors || 4) - 1 };
+        }
+      } else if (data.questKey === 'pictWar') {
+        html += '<p style="color:var(--text-dim);font-size:1rem;">Pict War</p>';
         if (data.result === 'victory' && data.fightCards) {
           html += '<div class="combat-cards">';
           for (const card of data.fightCards) {
@@ -10192,6 +10284,8 @@ OUTPUT STYLE — read carefully:
       // Excalibur: fade the sword from its prior slot to the final win/lose slot (runs once;
       // the win/lose cinematic is held back in onCinematicChanged until this finishes).
       if (excAnimTo != null) animateExcaliburToken($('combat-content'), excAnimTo);
+      // Saxon War: fade the final warrior/card in.
+      if (saxonAnim && saxonAnim.idx >= 0) animateSaxonChange($('combat-content'), saxonAnim.sel, saxonAnim.idx, 'in');
       }
 
       const actionsEl = $('combat-actions');
