@@ -1143,7 +1143,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v116';
+    const APP_VERSION = 'shadows-v117';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -3751,12 +3751,16 @@
           return phase + ' — ' + wc.length + '/' + wMax + ' W' + (wv ? ' [' + wv + ']' : '') +
             ', ' + bc.length + '/' + bMax + ' B' + (bv ? ' [' + bv + ']' : '');
         }},
-        { key: 'saxonWar', name: 'Saxon War', info: q =>
-          (q.warriors || 0) + '/4 warriors, ' + (q.fightCards || []).length + '/5 fight'
-        },
-        { key: 'pictWar', name: 'Pict War', info: q =>
-          (q.warriors || 0) + '/4 warriors, ' + (q.fightCards || []).length + '/5 fight'
-        },
+        { key: 'saxonWar', name: 'Saxon War', info: q => {
+          const mordred = roomData?.persistentEffects?.mordred === 'saxonWar';
+          return (q.warriors || 0) + '/4 warriors, ' + (q.fightCards || []).length + '/' + (mordred ? 6 : 5) + ' fight' +
+            (mordred ? ' <span style="color:var(--red-bright);">[Mordred +Fight 5]</span>' : '');
+        }},
+        { key: 'pictWar', name: 'Pict War', info: q => {
+          const mordred = roomData?.persistentEffects?.mordred === 'pictWar';
+          return (q.warriors || 0) + '/4 warriors, ' + (q.fightCards || []).length + '/' + (mordred ? 6 : 5) + ' fight' +
+            (mordred ? ' <span style="color:var(--red-bright);">[Mordred +Fight 5]</span>' : '');
+        }},
       ];
 
       // Global Vivien indicator — Merlin cards are blocked until a quest is won. Clears
@@ -6570,15 +6574,25 @@ OUTPUT STYLE — read carefully:
       }
       return html + '</div>';
     }
-    // Fade a single token/card in (added) or out (Merlin-removed). Commits the
-    // start opacity first so the transition actually runs (same gotcha as Excalibur).
+    // Fade a single token/card in (added) or out (Merlin-removed). A CSS opacity
+    // transition only animates if the browser paints the invisible start state on one
+    // frame and the end state on a LATER frame. A single rAF on a freshly-inserted (and
+    // possibly not-yet-decoded) <img> paints nothing at opacity 0, so the piece just
+    // appears. Fix: paint one opacity:0 frame first (double rAF), and if the image hasn't
+    // loaded yet defer the flip to its `load` event. The caller un-hides the popup BEFORE
+    // this runs so the start frame is painted on a visible board. (Excalibur avoids the
+    // same gotcha differently — it reuses an already-loaded token paced by setTimeouts.)
     function animateSaxonChange(container, selector, idx, dir) {
       const els = container && container.querySelectorAll(selector);
       const el = els && els[idx];
       if (!el) return;
+      const end = dir === 'in' ? '1' : '0';
       el.style.opacity = dir === 'in' ? '0' : '1';
       void el.offsetWidth;
-      requestAnimationFrame(() => { el.style.opacity = dir === 'in' ? '1' : '0'; });
+      const run = () => requestAnimationFrame(() =>
+        requestAnimationFrame(() => { el.style.opacity = end; }));
+      if (el.tagName === 'IMG' && !el.complete) el.addEventListener('load', run, { once: true });
+      else run();
     }
 
     // Build the quest board visual (Excalibur river / Grail slots / combat rows /
@@ -6661,6 +6675,11 @@ OUTPUT STYLE — read carefully:
       const popup = $('quest-update-popup');
       $('quest-update-title').textContent = getLocationLabel(questKey);
 
+      // Un-hide BEFORE building/animating the board so a fresh piece's opacity:0 start
+      // frame is painted on a visible popup — otherwise the fade has no start state to
+      // animate from and the piece appears already present (see animateSaxonChange).
+      popup.classList.remove('hidden', 'fade-out');
+
       const content = $('quest-update-content');
       let holdMs = 3000;
       if (questKey === 'excalibur') {
@@ -6688,7 +6707,6 @@ OUTPUT STYLE — read carefully:
       }
       $('quest-update-desc').textContent = desc;
 
-      popup.classList.remove('hidden', 'fade-out');
       if (questUpdatePopupTimer) clearTimeout(questUpdatePopupTimer);
       questUpdatePopupTimer = setTimeout(() => {
         popup.classList.add('fade-out');
@@ -7287,8 +7305,11 @@ OUTPUT STYLE — read carefully:
         fbDb.ref(interactionResponsePath())
           .set({ done: true, merlinsOffered: 0 });
         return;
-      } else if (!myDone && merlinCount === 0) {
-        // No Merlins — auto-pass
+      } else if (!myDone && merlinCount === 0 && myOffered === 0) {
+        // No Merlins and nothing offered — auto-pass. (Must check myOffered: a player who
+        // offered their LAST Merlin has merlinCount 0 but still has offeredCards on the table —
+        // auto-passing here would overwrite the response and drop offeredCards, losing the card
+        // on a failed vote. They fall through to the button branch to confirm or undo instead.)
         if (!overlayVisible) html += '</div>';
         area.innerHTML = html;
         fbDb.ref(interactionResponsePath())
@@ -9721,7 +9742,11 @@ OUTPUT STYLE — read carefully:
         const wMax = q.phase === 'dragon' ? 9 : 5;
         return (q.whiteCards || []).length + '/' + wMax + ' W, ' + (q.blackCards || []).length + '/5 B' + kStr;
       }
-      if (qk === 'saxonWar' || qk === 'pictWar') return (q.warriors || 0) + '/4 warriors, ' + (q.fightCards || []).length + '/5 fight' + kStr;
+      if (qk === 'saxonWar' || qk === 'pictWar') {
+        const mordred = roomData?.persistentEffects?.mordred === qk;
+        return (q.warriors || 0) + '/4 warriors, ' + (q.fightCards || []).length + '/' + (mordred ? 6 : 5) + ' fight' + kStr +
+          (mordred ? ' · Mordred: extra Fight 5 to win' : '');
+      }
       return kStr;
     }
 
