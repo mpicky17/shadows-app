@@ -738,7 +738,7 @@
 
     /* ── Excalibur painted board + animated sword token ─────────────── */
     .exc-board { position: relative; width: 100%; max-width: 340px; margin: 0.25rem auto; }
-    .exc-board .exc-bg { width: 100%; display: block; border-radius: 8px; }
+    .exc-board .exc-bg { width: 100%; height: auto; display: block; border-radius: 8px; }
     /* Token: anchored at horizontal-center / ~83% down (base sits on the slot).
        Only opacity transitions — left/top jump while it's invisible, so the
        sword fades out at the old slot and fades back in at the new one. */
@@ -750,7 +750,7 @@
 
     /* ── Saxon War painted board: warrior tokens + fight cards ───────── */
     .saxon-board { position: relative; width: 100%; max-width: 360px; margin: 0.25rem auto; }
-    .saxon-board .saxon-bg { width: 100%; display: block; border-radius: 8px; }
+    .saxon-board .saxon-bg { width: 100%; height: auto; display: block; border-radius: 8px; }
     /* Fight card: rotated, centred on its slot; later cards sit on top (z-index). */
     .saxon-fight-card {
       position: absolute; width: 22.46%; transform: translate(-50%, -50%) rotate(34deg);
@@ -766,7 +766,7 @@
 
     /* ── Pict War painted board: warrior figures + numbered fight cards ──── */
     .pict-board { position: relative; width: 100%; max-width: 360px; margin: 0.25rem auto; container-type: inline-size; }
-    .pict-board .pict-bg { width: 100%; display: block; border-radius: 8px; }
+    .pict-board .pict-bg { width: 100%; height: auto; display: block; border-radius: 8px; }
     /* Fight card: rotated wrapper centred on its slot; number overlaid in the "FIGHT __" header. */
     .pict-fight-card {
       position: absolute; width: 26%; transform: translate(-50%, -50%) rotate(54deg);
@@ -1171,7 +1171,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v122';
+    const APP_VERSION = 'shadows-v123';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -6565,7 +6565,7 @@ OUTPUT STYLE — read carefully:
     let lastQuestResultSig = null;
     function excaliburBoardHTML(position) {
       const [fx, fy] = excPosFrac(position);
-      return '<div class="exc-board"><img class="exc-bg" src="assets/excalibur-board.webp" alt="Excalibur quest">' +
+      return '<div class="exc-board"><img class="exc-bg" src="assets/excalibur-board.webp" width="1208" height="880" alt="Excalibur quest">' +
         '<img class="exc-token" src="assets/excalibur-token.png" alt="Excalibur" ' +
         'style="left:' + (fx * 100).toFixed(2) + '%;top:' + (fy * 100).toFixed(2) + '%;"></div>';
     }
@@ -6601,7 +6601,7 @@ OUTPUT STYLE — read carefully:
     const SAXON_FADE_MS = 1400;
     const MORGAN2_CARD_DELAY_MS = 2800; // pause between forced Morgan 2 cards so each quest anim shows
     function saxonBoardHTML(q) {
-      let html = '<div class="saxon-board"><img class="saxon-bg" src="assets/saxon-board.webp" alt="Saxon War">';
+      let html = '<div class="saxon-board"><img class="saxon-bg" src="assets/saxon-board.webp" width="1024" height="932" alt="Saxon War">';
       const fc = q?.fightCards || [];
       for (let i = 0; i < fc.length; i++) {
         const p = FIGHT_POS[i] || FIGHT_POS[FIGHT_POS.length - 1];
@@ -6654,7 +6654,7 @@ OUTPUT STYLE — read carefully:
     const PICT_FIGHT_POS = [ [0.2990, 0.1835], [0.3558, 0.2551], [0.4125, 0.3283],
                              [0.4721, 0.4041], [0.5413, 0.4886], [0.6105, 0.5731] ]; // 6th = Mordred extra
     function pictBoardHTML(q) {
-      let html = '<div class="pict-board"><img class="pict-bg" src="assets/pict-board.jpg" alt="Pict War">';
+      let html = '<div class="pict-board"><img class="pict-bg" src="assets/pict-board.jpg" width="760" height="848" alt="Pict War">';
       const fc = q?.fightCards || [];
       for (let i = 0; i < fc.length; i++) {
         const p = PICT_FIGHT_POS[i] || PICT_FIGHT_POS[PICT_FIGHT_POS.length - 1];
@@ -9928,7 +9928,10 @@ OUTPUT STYLE — read carefully:
     // ═══════════════════════════════════════════════════════════════════
 
     async function performDrawWhiteCards() {
-      document.querySelectorAll('.btn-heroic').forEach(b => b.disabled = true);
+      // Debounce the in-game heroic action buttons — but NOT the results-screen buttons
+      // (Return to Lobby / Analyze are also .btn-heroic). A global selector here left those
+      // stuck disabled/grayed on the end screen for anyone who drew cards during the game.
+      document.querySelectorAll('.btn-heroic').forEach(b => { if (!b.closest('#results-overlay')) b.disabled = true; });
       const handLimit = getHandLimit();
       if (myHand.length >= handLimit) { showToast('Hand is full!'); return; }
 
