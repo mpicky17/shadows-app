@@ -765,18 +765,22 @@
     }
 
     /* ── Pict War painted board: warrior figures + numbered fight cards ──── */
-    .pict-board { position: relative; width: 100%; max-width: 360px; margin: 0.25rem auto; container-type: inline-size; }
+    /* NB: container-type lives on .pict-fight-card (position:absolute), NOT on .pict-board.
+       Putting it on the board applied size containment, so the board reported zero width to the
+       auto-width quest-update popup and collapsed to the popup min-width (~175px vs 360px). The
+       card is out of flow, so its containment can't shrink the popup. */
+    .pict-board { position: relative; width: 100%; max-width: 360px; margin: 0.25rem auto; }
     .pict-board .pict-bg { width: 100%; height: auto; display: block; border-radius: 8px; }
     /* Fight card: rotated wrapper centred on its slot; number overlaid in the "FIGHT __" header. */
     .pict-fight-card {
       position: absolute; width: 26%; transform: translate(-50%, -50%) rotate(54deg);
-      pointer-events: none; transition: opacity 1.4s ease;
+      pointer-events: none; transition: opacity 1.4s ease; container-type: inline-size;
     }
     .pict-fight-card img { width: 100%; display: block; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.4); }
     .pict-fight-num {
       position: absolute; left: 74%; top: 11%; transform: translate(-50%, -50%);
       font-family: Georgia, 'Times New Roman', serif; font-weight: 700; color: #2a2118;
-      font-size: 3.25cqw; text-shadow: 0 1px 0 rgba(255,255,255,0.45); pointer-events: none;
+      font-size: 12.5cqw; text-shadow: 0 1px 0 rgba(255,255,255,0.45); pointer-events: none;
     }
     /* Warrior figure: feet anchored on the medallion; drawn above the cards. */
     .pict-token {
@@ -1171,7 +1175,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v123';
+    const APP_VERSION = 'shadows-v124';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
