@@ -1143,7 +1143,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v118';
+    const APP_VERSION = 'shadows-v119';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -6557,6 +6557,7 @@ OUTPUT STYLE — read carefully:
     const FIGHT_POS = [ [0.2393, 0.2897], [0.3076, 0.3541], [0.3760, 0.4185],
                         [0.4443, 0.4828], [0.5127, 0.5472], [0.5811, 0.6116] ]; // 6th = Mordred extra
     const SAXON_FADE_MS = 1400;
+    const MORGAN2_CARD_DELAY_MS = 2800; // pause between forced Morgan 2 cards so each quest anim shows
     function saxonBoardHTML(q) {
       let html = '<div class="saxon-board"><img class="saxon-bg" src="assets/saxon-board.webp" alt="Saxon War">';
       const fc = q?.fightCards || [];
@@ -8854,6 +8855,9 @@ OUTPUT STYLE — read carefully:
         await fbDb.ref('games/' + currentRoom + '/meta/morgan2Remaining').set(m2 - 1);
         const cardNum = 4 - m2;
         await addLog('evil', 'Morgan 2: Drawing black card ' + cardNum + ' of 3...');
+        // Let the previous card's quest animation linger before the next reveal covers it.
+        // No pause before card 1 — nothing has animated yet (Morgan 2 itself just set up the cascade).
+        if (cardNum > 1) await new Promise(r => setTimeout(r, MORGAN2_CARD_DELAY_MS));
         await triggerMorgan2Draw();
         return;
       }
