@@ -1164,7 +1164,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v120';
+    const APP_VERSION = 'shadows-v121';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -6630,7 +6630,11 @@ OUTPUT STYLE — read carefully:
       // frame, so the piece snaps in with no fade. A short delay guarantees several painted
       // 0-frames first — the same mechanism the Excalibur token fade uses reliably.
       const run = () => setTimeout(() => { el.style.opacity = end; }, 60);
-      if (el.tagName === 'IMG' && !el.complete) el.addEventListener('load', run, { once: true });
+      // For an <img>, wait until the bitmap is actually DECODED (not just `load`) before the
+      // flip. On iOS Safari a loaded-but-not-yet-decoded img never paints its opacity:0 start
+      // frame, so the fade is skipped — this is why token (img) fades were invisible while card
+      // (div) fades worked. decode() resolves paint-ready for both fresh and already-shown imgs.
+      if (el.tagName === 'IMG' && el.decode) el.decode().then(run).catch(run);
       else run();
     }
 
@@ -6638,8 +6642,10 @@ OUTPUT STYLE — read carefully:
     // Coords are fractions of the board image. Fight cards use the shared
     // Fight-card-template.png with the number overlaid (Saxon bakes numbered cards).
     const PICT_POS = [ [0.6394, 0.1413], [0.7115, 0.2628], [0.8894, 0.2594], [0.8462, 0.4042] ];
-    const PICT_FIGHT_POS = [ [0.2990, 0.2068], [0.3558, 0.2784], [0.4125, 0.3516],
-                             [0.4721, 0.4274], [0.5413, 0.5119], [0.6105, 0.5964] ]; // 6th = Mordred extra
+    // Shifted up ~10% of the card's short side (~0.0233 of board height) off the baked slots
+    // so a freshly-played card visibly sits proud of the board art instead of blending in.
+    const PICT_FIGHT_POS = [ [0.2990, 0.1835], [0.3558, 0.2551], [0.4125, 0.3283],
+                             [0.4721, 0.4041], [0.5413, 0.4886], [0.6105, 0.5731] ]; // 6th = Mordred extra
     function pictBoardHTML(q) {
       let html = '<div class="pict-board"><img class="pict-bg" src="assets/pict-board.jpg" alt="Pict War">';
       const fc = q?.fightCards || [];
