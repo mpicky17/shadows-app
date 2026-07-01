@@ -757,6 +757,27 @@
       filter: drop-shadow(0 1px 2px rgba(0,0,0,0.55));
     }
 
+    /* ── Pict War painted board: warrior figures + numbered fight cards ──── */
+    .pict-board { position: relative; width: 100%; max-width: 360px; margin: 0.25rem auto; container-type: inline-size; }
+    .pict-board .pict-bg { width: 100%; display: block; border-radius: 8px; }
+    /* Fight card: rotated wrapper centred on its slot; number overlaid in the "FIGHT __" header. */
+    .pict-fight-card {
+      position: absolute; width: 26%; transform: translate(-50%, -50%) rotate(54deg);
+      pointer-events: none; transition: opacity 1.4s ease;
+    }
+    .pict-fight-card img { width: 100%; display: block; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.4); }
+    .pict-fight-num {
+      position: absolute; left: 74%; top: 11%; transform: translate(-50%, -50%);
+      font-family: Georgia, 'Times New Roman', serif; font-weight: 700; color: #2a2118;
+      font-size: 3.25cqw; text-shadow: 0 1px 0 rgba(255,255,255,0.45); pointer-events: none;
+    }
+    /* Warrior figure: feet anchored on the medallion; drawn above the cards. */
+    .pict-token {
+      position: absolute; width: 9%; transform: translate(-50%, -100%); z-index: 20;
+      pointer-events: none; transition: opacity 1.4s ease;
+      filter: drop-shadow(0 1px 2px rgba(0,0,0,0.55));
+    }
+
     /* ── Info / Quest-detail modals ─────────────────────────────────── */
     .info-modal {
       position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 210;
@@ -1143,7 +1164,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v119';
+    const APP_VERSION = 'shadows-v120';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -6489,7 +6510,21 @@ OUTPUT STYLE — read carefully:
       const prevPW = prev.pictWar?.warriors || 0;
       const nextPW = next.pictWar?.warriors || 0;
       if ((prevPF !== nextPF || prevPW !== nextPW) && next.pictWar?.status === 'active') {
-        showQuestUpdatePopup('pictWar', next.pictWar, nextPW + '/4 Warriors, ' + nextPF + '/5 Fight cards');
+        showQuestUpdatePopup('pictWar', next.pictWar, nextPW + '/4 Warriors, ' + nextPF + '/5 Fight cards',
+          { warriorsFrom: prevPW, fightFrom: prevPF });
+        // If the clickable detail overlay is open on Pict War, update it live with the same fade.
+        const detail = $('quest-detail-overlay');
+        if (questDetailKey === 'pictWar' && detail && !detail.classList.contains('hidden')) {
+          const board = $('quest-detail-board');
+          if (nextPW < prevPW) {
+            board.innerHTML = pictBoardHTML({ ...next.pictWar, warriors: prevPW });
+            animateSaxonChange(board, '.pict-token', prevPW - 1, 'out');
+          } else {
+            board.innerHTML = pictBoardHTML(next.pictWar);
+            if (nextPW > prevPW) animateSaxonChange(board, '.pict-token', nextPW - 1, 'in');
+            else if (nextPF > prevPF) animateSaxonChange(board, '.pict-fight-card', nextPF - 1, 'in');
+          }
+        }
         return;
       }
     }
@@ -6599,6 +6634,30 @@ OUTPUT STYLE — read carefully:
       else run();
     }
 
+    // ── Pict War painted board (mirrors Saxon; positions tuned via pict-preview) ──
+    // Coords are fractions of the board image. Fight cards use the shared
+    // Fight-card-template.png with the number overlaid (Saxon bakes numbered cards).
+    const PICT_POS = [ [0.6394, 0.1413], [0.7115, 0.2628], [0.8894, 0.2594], [0.8462, 0.4042] ];
+    const PICT_FIGHT_POS = [ [0.2990, 0.2068], [0.3558, 0.2784], [0.4125, 0.3516],
+                             [0.4721, 0.4274], [0.5413, 0.5119], [0.6105, 0.5964] ]; // 6th = Mordred extra
+    function pictBoardHTML(q) {
+      let html = '<div class="pict-board"><img class="pict-bg" src="assets/pict-board.jpg" alt="Pict War">';
+      const fc = q?.fightCards || [];
+      for (let i = 0; i < fc.length; i++) {
+        const p = PICT_FIGHT_POS[i] || PICT_FIGHT_POS[PICT_FIGHT_POS.length - 1];
+        const val = Math.min(5, Math.max(1, (fc[i] && fc[i].value) || (i + 1)));
+        html += '<div class="pict-fight-card" style="left:' + (p[0] * 100).toFixed(2) + '%;top:' + (p[1] * 100).toFixed(2) + '%;z-index:' + (1 + i) + ';">' +
+          '<img src="assets/fight-card-template.jpg" alt=""><span class="pict-fight-num">' + val + '</span></div>';
+      }
+      const w = q?.warriors || 0;
+      for (let i = 0; i < w; i++) {
+        const p = PICT_POS[i] || PICT_POS[PICT_POS.length - 1];
+        html += '<img class="pict-token" src="assets/pict-token.png" ' +
+          'style="left:' + (p[0] * 100).toFixed(2) + '%;top:' + (p[1] * 100).toFixed(2) + '%;">';
+      }
+      return html + '</div>';
+    }
+
     // Build the quest board visual (Excalibur river / Grail slots / combat rows /
     // war fight cards). Shared by the transient popup and the clickable detail overlay.
     function renderQuestBoardVisual(questKey, questData) {
@@ -6706,6 +6765,19 @@ OUTPUT STYLE — read carefully:
           if (toW > fromW) animateSaxonChange(content, '.saxon-token', toW - 1, 'in');
           else if (toF > fromF) animateSaxonChange(content, '.saxon-fight-card', toF - 1, 'in');
         }
+      } else if (questKey === 'pictWar') {
+        // Painted board; fade the added figure/card IN, or the Merlin-removed warrior OUT.
+        const fromW = (extra && extra.warriorsFrom != null) ? extra.warriorsFrom : (questData.warriors || 0);
+        const fromF = (extra && extra.fightFrom != null) ? extra.fightFrom : (questData.fightCards || []).length;
+        const toW = questData.warriors || 0, toF = (questData.fightCards || []).length;
+        if (toW < fromW) {
+          content.innerHTML = pictBoardHTML({ ...questData, warriors: fromW });
+          animateSaxonChange(content, '.pict-token', fromW - 1, 'out');
+        } else {
+          content.innerHTML = pictBoardHTML(questData);
+          if (toW > fromW) animateSaxonChange(content, '.pict-token', toW - 1, 'in');
+          else if (toF > fromF) animateSaxonChange(content, '.pict-fight-card', toF - 1, 'in');
+        }
       } else {
         content.innerHTML = renderQuestBoardVisual(questKey, questData);
       }
@@ -6727,6 +6799,7 @@ OUTPUT STYLE — read carefully:
       $('quest-detail-board').innerHTML =
         questKey === 'excalibur' ? excaliburBoardHTML(q.position || 0)
         : questKey === 'saxonWar' ? saxonBoardHTML(q)
+        : questKey === 'pictWar' ? pictBoardHTML(q)
         : renderQuestBoardVisual(questKey, q);
       const phase = questKey === 'lancelot' ? (q.phase || 'lancelot') : null;
       $('quest-detail-pattern').textContent = getQuestPatternText(questKey, phase);
@@ -10287,16 +10360,13 @@ OUTPUT STYLE — read carefully:
           saxonAnim = { sel: '.saxon-token', idx: (data.warriors || 4) - 1 };
         }
       } else if (data.questKey === 'pictWar') {
-        html += '<p style="color:var(--text-dim);font-size:1rem;">Pict War</p>';
-        if (data.result === 'victory' && data.fightCards) {
-          html += '<div class="combat-cards">';
-          for (const card of data.fightCards) {
-            html += '<div class="combat-card white-side"><div class="cc-val">' + card.value + '</div>' +
-              '<div style="font-size:0.625rem;">Fight</div></div>';
-          }
-          html += '</div>';
+        // Painted board at the final state; fade the last piece (winning card / 4th warrior) in.
+        if (data.result === 'victory') {
+          html += pictBoardHTML({ fightCards: data.fightCards || [], warriors: data.warriors || 0 });
+          saxonAnim = { sel: '.pict-fight-card', idx: (data.fightCards || []).length - 1 };
         } else {
-          html += '<p style="color:var(--red-bright);font-size:1.5rem;font-weight:700;margin:0.5rem 0;">' + (data.warriors || 4) + '/4 Warriors</p>';
+          html += pictBoardHTML({ fightCards: [], warriors: data.warriors || 4 });
+          saxonAnim = { sel: '.pict-token', idx: (data.warriors || 4) - 1 };
         }
       }
 
