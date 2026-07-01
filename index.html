@@ -718,11 +718,18 @@
       100% { opacity: 1; transform: scale(1); }
     }
     .quest-chip.card-played { animation: cardPlayFlash 0.4s ease-out; }
+    /* Centre the popup in BOTH keyframes: a plain transform animation (like overlayFadeIn)
+       replaces the base transform for its duration, dropping the translate(-50%,-50%)
+       centering and making the box snap up-left when the animation ends. */
+    @keyframes questPopupIn {
+      from { opacity: 0; transform: translate(-50%, -50%) translateY(20px); }
+      to   { opacity: 1; transform: translate(-50%, -50%); }
+    }
     .quest-update-popup {
       position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
       background: rgba(20, 15, 10, 0.95); border: 2px solid var(--gold); border-radius: 12px;
       padding: 1rem 1.5rem; z-index: 180; text-align: center;
-      min-width: 220px; max-width: 90vw; animation: overlayFadeIn 0.3s ease-out;
+      min-width: 220px; max-width: 90vw; animation: questPopupIn 0.3s ease-out;
       pointer-events: none;
     }
     .quest-update-popup.hidden { display: none; }
@@ -1164,7 +1171,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v121';
+    const APP_VERSION = 'shadows-v122';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
