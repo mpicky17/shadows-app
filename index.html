@@ -1185,7 +1185,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v127';
+    const APP_VERSION = 'shadows-v128';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -6711,7 +6711,7 @@ OUTPUT STYLE — read carefully:
       [0.6303, 0.3816], [0.7520, 0.4711], [0.8816, 0.5500],
     ];
     const GRAIL_SRC = { grail: 'grail-card.jpg', despair: 'grail-despair.jpg', desolation: 'grail-desolation.jpg' };
-    const GRAIL_WIN_CINEMATIC_DELAY_MS = 1600; // hold after the 7th Grail lands (fade ~1.4s) before the win clip
+    const GRAIL_CINEMATIC_DELAY_MS = 1600; // preroll: show the final Grail card's ~1.4s fade before revealing the win/loss clip
     function grailBoardHTML(q) {
       let html = '<div class="grail-board"><img class="grail-bg" src="assets/grail-board.jpg" width="2048" height="512" alt="Holy Grail quest">';
       const slots = buildGrailSlotLayout(q?.cards || []);
@@ -10236,7 +10236,7 @@ OUTPUT STYLE — read carefully:
       $('combat-minimized').classList.add('hidden');
     }
 
-    let excPrerollId = null;   // id of the Excalibur clip currently pre-rolling silently
+    let prerollId = null;   // id of the clip currently pre-rolling silently (Excalibur / Grail)
 
     function onCinematicChanged() {
       const cin = roomData?.cinematic;
@@ -10247,12 +10247,14 @@ OUTPUT STYLE — read carefully:
       // quest-win clip and the game-over clip are written moments apart (KQYZCJ: Dragon win
       // → camelot-lose). Queueing lets the quest clip finish before the end-game clip plays.
       const enqueue = () => { cinematicQueue.push(cin); if (!cinematicPlaying) playNextCinematic(); };
-      // Excalibur win/lose: start the clip NOW (inside the autoplay window, so the acting
-      // player keeps sound) but SILENT and behind a transparent overlay, so the sword fade
-      // shows first; then reveal + restart it. Falls back to the normal queued path if
-      // another clip is already on screen.
+      // Preroll (Excalibur + Grail win/lose): start the clip NOW (inside the autoplay window, so the
+      // acting player keeps sound) but SILENT behind a transparent overlay, so the quest's card/token
+      // fade shows first; then reveal + restart it. Falls back to the normal queued path if another
+      // clip is already on screen.
       if ((cin.type === 'excaliburWin' || cin.type === 'excaliburLose') && !cinematicPlaying) {
-        startExcaliburCinematicPreroll(cin);
+        startCinematicPreroll(cin, EXC_FADE_TOTAL_MS);
+      } else if ((cin.type === 'grailWin' || cin.type === 'grailLose') && !cinematicPlaying) {
+        startCinematicPreroll(cin, GRAIL_CINEMATIC_DELAY_MS);
       } else if (cin.type === 'camelotLose' && !cinematicPlaying) {
         // A war loss (e.g. Saxon 4th warrior) can place the 12th siege engine and end the
         // game. Hold the game-over clip briefly so the final token/card fade plays first.
@@ -10311,11 +10313,12 @@ OUTPUT STYLE — read carefully:
       });
     }
 
-    // Excalibur: play the clip SILENTLY behind the transparent overlay during the fade (this
-    // grabs the autoplay-with-sound permission while we still have it), then reveal + restart.
-    function startExcaliburCinematicPreroll(cin) {
+    // Play the clip SILENTLY behind the transparent overlay during the quest's fade (this grabs the
+    // autoplay-with-sound permission while we still have it), then after delayMs reveal + restart.
+    // Shared by Excalibur (sword slide) and the Grail win/loss (final card fade).
+    function startCinematicPreroll(cin, delayMs) {
       cinematicPlaying = true;
-      excPrerollId = cin.id;
+      prerollId = cin.id;
       const src = CINEMATICS[cin.type];
       const v = $('cinematic-video');
       const overlay = $('cinematic-overlay');
@@ -10330,11 +10333,11 @@ OUTPUT STYLE — read carefully:
       // who still holds activation); other clients fall back to a silent muted preroll.
       v.muted = false;
       v.play().catch(() => { v.muted = true; v.play().catch(() => {}); });
-      setTimeout(() => revealExcaliburCinematic(cin), EXC_FADE_TOTAL_MS);
+      setTimeout(() => revealCinematicFromPreroll(cin), delayMs);
     }
 
-    function revealExcaliburCinematic(cin) {
-      if (excPrerollId !== cin.id) return;   // superseded or already ended
+    function revealCinematicFromPreroll(cin) {
+      if (prerollId !== cin.id) return;   // superseded or already ended
       const v = $('cinematic-video');
       const soundBtn = $('btn-cinematic-sound');
       $('cinematic-overlay').classList.remove('prerolling');   // bring the clip to the front
@@ -10369,7 +10372,7 @@ OUTPUT STYLE — read carefully:
     // queued clip, or closes the overlay when the queue is empty.
     function endCinematic() {
       clearTimeout(cinematicWatchdog);
-      excPrerollId = null;
+      prerollId = null;
       const v = $('cinematic-video');
       v.pause();
       v.loop = false; v.volume = 1;
@@ -10893,14 +10896,13 @@ OUTPUT STYLE — read carefully:
           questKey: 'holyGrail', result: 'victory', cards: q.cards || [],
           summary: '3 White Swords, +1 LP, 7 cards, Holy Grail relic to ' + grailDest,
         };
+        // Fire the cinematic immediately (in this batch) so the acting player keeps the autoplay
+        // sound window; onCinematicChanged pre-rolls it silently behind a transparent overlay so the
+        // final Grail card's fade-in shows first, then reveals + restarts it (like Excalibur).
+        updates['games/' + currentRoom + '/meta/cinematic'] = { type: 'grailWin', id: Date.now() };
         await fbDb.ref().update(updates);
         await shareQuestSpoils(7, knightsOnQuest);
         await addLog('quest', 'Quest for the Holy Grail WON! 3 White Swords, +1 LP, 7 cards, Holy Grail relic to ' + grailDest);
-        // Hold before the win cinematic so the final Grail card's ~1.4s fade-in on the result panel
-        // is actually seen — previously the cinematic was in the same batch as questResult and
-        // played instantly, cutting off the card-lay animation.
-        await new Promise(r => setTimeout(r, GRAIL_WIN_CINEMATIC_DELAY_MS));
-        await fbDb.ref('games/' + currentRoom + '/meta/cinematic').set({ type: 'grailWin', id: Date.now() });
 
       } else if (questKey === 'saxonWar' || questKey === 'pictWar') {
         const warName = questKey === 'saxonWar' ? 'Saxon War' : 'Pict War';
