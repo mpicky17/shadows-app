@@ -1175,7 +1175,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v124';
+    const APP_VERSION = 'shadows-v125';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1272,6 +1272,10 @@
       lancelotLose:    'armor-lose.mp4',
       grailWin:        'grail-win.mp4',
       grailLose:       'grail-lose.mp4',
+      saxonWin:        'saxon-win.mp4',
+      saxonLose:       'saxon-lose.mp4',
+      pictWin:         'pict-win.mp4',
+      pictLose:        'pict-lose.mp4',
       camelotLose:     'camelot-lose.mp4',
     };
     let lastCinematicId = null;  // dedupe cinematic playback across re-renders/reconnects
@@ -7094,6 +7098,7 @@ OUTPUT STYLE — read carefully:
           questKey, result: 'defeat', warriors: newWarriors, fromEvil: true,
           summary: '1 Black Sword + 2 Siege Engines, -1 LP. ' + warName + ' War resets.',
         };
+        updates['games/' + currentRoom + '/meta/cinematic'] = { type: questKey === 'saxonWar' ? 'saxonLose' : 'pictLose', id: Date.now() };
 
         await fbDb.ref().update(updates);
         await addLog('quest', label + ' War LOST! 4th warrior placed. 1 Black Sword + 2 Siege Engines. Quest resets.');
@@ -10846,6 +10851,7 @@ OUTPUT STYLE — read carefully:
           questKey, result: 'victory', fightCards: q.fightCards || [], warriors: q.warriors || 0,
           summary: '1 White Sword, +1 LP each, 4 cards drawn.',
         };
+        updates['games/' + currentRoom + '/meta/cinematic'] = { type: questKey === 'saxonWar' ? 'saxonWin' : 'pictWin', id: Date.now() };
         updates['games/' + currentRoom + '/quests/' + questKey] = { status: 'active', warriors: 0, fightCards: [], knightsPresent: [] };
         await fbDb.ref().update(updates);
         await shareQuestSpoils(4, knightsOnQuest);
