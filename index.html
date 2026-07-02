@@ -789,6 +789,16 @@
       filter: drop-shadow(0 1px 2px rgba(0,0,0,0.55));
     }
 
+    /* ── Holy Grail painted board: 7 card slots (grail / despair / desolation) ──── */
+    .grail-board { position: relative; width: 100%; max-width: 360px; margin: 0.25rem auto; }
+    .grail-board .grail-bg { width: 100%; height: auto; display: block; border-radius: 8px; }
+    /* Card overlay: centred on its slot; the src differs by type (grail/despair/desolation). */
+    .grail-card-img {
+      position: absolute; width: 11%; transform: translate(-50%, -50%);
+      pointer-events: none; transition: opacity 1.4s ease; border-radius: 4px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+    }
+
     /* ── Info / Quest-detail modals ─────────────────────────────────── */
     .info-modal {
       position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 210;
@@ -1175,7 +1185,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v125';
+    const APP_VERSION = 'shadows-v126';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -6465,13 +6475,26 @@ OUTPUT STYLE — read carefully:
         return;
       }
       // Holy Grail — cards changed
-      const prevGrailLen = (prev.holyGrail?.cards || []).length;
-      const nextGrailLen = (next.holyGrail?.cards || []).length;
-      if (prevGrailLen !== nextGrailLen && next.holyGrail?.status === 'active') {
+      const grailCh = next.holyGrail?.status === 'active'
+        ? grailChangedSlot(prev.holyGrail?.cards, next.holyGrail?.cards) : null;
+      if (grailCh) {
         const gc = (next.holyGrail.cards || []).filter(c => c?.type === 'grail').length;
         const bc = (next.holyGrail.cards || []).filter(c => c?.type !== 'grail').length;
-        const desc = nextGrailLen > prevGrailLen ? 'Card placed' : 'Card removed';
-        showQuestUpdatePopup('holyGrail', next.holyGrail, desc + ' \u2014 ' + gc + ' Grail / ' + bc + ' Despair');
+        const desc = grailCh.dir === 'in' ? 'Card placed' : 'Card removed';
+        showQuestUpdatePopup('holyGrail', next.holyGrail, desc + ' \u2014 ' + gc + ' Grail / ' + bc + ' Despair', { grail: grailCh });
+        // If the clickable detail overlay is open on Holy Grail, update it live with the same fade.
+        const detail = $('quest-detail-overlay');
+        if (questDetailKey === 'holyGrail' && detail && !detail.classList.contains('hidden')) {
+          const board = $('quest-detail-board');
+          const sel = '.grail-card-img[data-slot="' + grailCh.slot + '"]';
+          if (grailCh.dir === 'out') {
+            board.innerHTML = grailBoardHTML({ cards: prev.holyGrail?.cards || [] });  // show the card, then fade it out
+            animateSaxonChange(board, sel, 0, 'out');
+          } else {
+            board.innerHTML = grailBoardHTML(next.holyGrail);
+            animateSaxonChange(board, sel, 0, 'in');
+          }
+        }
         return;
       }
       // Black Knight — cards changed
@@ -6679,6 +6702,42 @@ OUTPUT STYLE — read carefully:
       return html + '</div>';
     }
 
+    // ── Holy Grail painted board (mirrors Saxon/Pict; slots tuned via grail-preview) ──
+    // Coords are fractions of the 2048×512 board. buildGrailSlotLayout puts grails from the
+    // left (slot 0), despair/desolation from the right (slot 6). Each filled slot overlays the
+    // card image for its type; empty slots show the baked board art.
+    const GRAIL_POS = [
+      [0.1303, 0.5974], [0.2625, 0.4342], [0.3901, 0.3684], [0.5072, 0.3447],
+      [0.6303, 0.3816], [0.7520, 0.4711], [0.8816, 0.5500],
+    ];
+    const GRAIL_SRC = { grail: 'grail-card.jpg', despair: 'grail-despair.jpg', desolation: 'grail-desolation.jpg' };
+    function grailBoardHTML(q) {
+      let html = '<div class="grail-board"><img class="grail-bg" src="assets/grail-board.jpg" width="2048" height="512" alt="Holy Grail quest">';
+      const slots = buildGrailSlotLayout(q?.cards || []);
+      for (let i = 0; i < 7; i++) {
+        const c = slots[i];
+        if (!c) continue;
+        const p = GRAIL_POS[i];
+        const src = GRAIL_SRC[c.type] || GRAIL_SRC.despair;
+        html += '<img class="grail-card-img" data-slot="' + i + '" src="assets/' + src + '" ' +
+          'style="left:' + (p[0] * 100).toFixed(2) + '%;top:' + (p[1] * 100).toFixed(2) + '%;">';
+      }
+      return html + '</div>';
+    }
+    // Diff two grail slot layouts (by card id) to find the single changed slot + direction, so the
+    // painted board can fade just that card in (placed) or out (removed) — grails/despairs grow from
+    // opposite ends, so we can't just fade the "last" piece like the wars do.
+    function grailChangedSlot(prevCards, nextCards) {
+      const ps = buildGrailSlotLayout(prevCards || []);
+      const ns = buildGrailSlotLayout(nextCards || []);
+      for (let i = 0; i < 7; i++) {
+        if ((ps[i]?.id) !== (ns[i]?.id)) {
+          return { slot: i, dir: ns[i] ? 'in' : 'out', prevSlots: ps, nextSlots: ns };
+        }
+      }
+      return null;
+    }
+
     // Build the quest board visual (Excalibur river / Grail slots / combat rows /
     // war fight cards). Shared by the transient popup and the clickable detail overlay.
     function renderQuestBoardVisual(questKey, questData) {
@@ -6799,6 +6858,17 @@ OUTPUT STYLE — read carefully:
           if (toW > fromW) animateSaxonChange(content, '.pict-token', toW - 1, 'in');
           else if (toF > fromF) animateSaxonChange(content, '.pict-fight-card', toF - 1, 'in');
         }
+      } else if (questKey === 'holyGrail') {
+        // Painted board; fade the changed slot's card IN (placed) or OUT (removed). extra.grail
+        // carries the changed slot + direction from grailChangedSlot.
+        const ch = extra && extra.grail;
+        if (ch && ch.dir === 'out') {
+          content.innerHTML = grailBoardHTML({ cards: ch.prevSlots.filter(Boolean) });  // show the card, then fade it out
+          animateSaxonChange(content, '.grail-card-img[data-slot="' + ch.slot + '"]', 0, 'out');
+        } else {
+          content.innerHTML = grailBoardHTML(questData);
+          if (ch) animateSaxonChange(content, '.grail-card-img[data-slot="' + ch.slot + '"]', 0, 'in');
+        }
       } else {
         content.innerHTML = renderQuestBoardVisual(questKey, questData);
       }
@@ -6821,6 +6891,7 @@ OUTPUT STYLE — read carefully:
         questKey === 'excalibur' ? excaliburBoardHTML(q.position || 0)
         : questKey === 'saxonWar' ? saxonBoardHTML(q)
         : questKey === 'pictWar' ? pictBoardHTML(q)
+        : questKey === 'holyGrail' ? grailBoardHTML(q)
         : renderQuestBoardVisual(questKey, q);
       const phase = questKey === 'lancelot' ? (q.phase || 'lancelot') : null;
       $('quest-detail-pattern').textContent = getQuestPatternText(questKey, phase);
@@ -10354,20 +10425,10 @@ OUTPUT STYLE — read carefully:
       let html = '';
       let excAnimTo = null, saxonAnim = null;
       if (data.questKey === 'holyGrail') {
-        html += '<p style="color:var(--text-dim);font-size:1rem;">Holy Grail Quest Board</p><div class="combat-cards">';
-        const slots = buildGrailSlotLayout(data.cards || []);
-        for (let i = 0; i < 7; i++) {
-          const card = slots[i];
-          if (!card) {
-            html += '<div class="combat-card" style="opacity:0.2;border:1px dashed var(--text-dim);"><div class="cc-val">-</div></div>';
-          } else {
-            const isGrail = card.type === 'grail';
-            html += '<div class="combat-card ' + (isGrail ? 'white-side' : 'black-side') + '">' +
-              '<div class="cc-val">' + (isGrail ? 'G' : 'D') + '</div>' +
-              '<div style="font-size:0.625rem;">' + (isGrail ? 'Grail' : (card.type === 'desolation' ? 'Desolation' : 'Despair')) + '</div></div>';
-          }
-        }
-        html += '</div>';
+        // Painted board at the final state; fade the completing card in (winning 7th Grail sits in
+        // slot 6, the final Black in slot 0).
+        html += grailBoardHTML({ cards: data.cards || [] });
+        saxonAnim = { sel: '.grail-card-img[data-slot="' + (data.result === 'victory' ? 6 : 0) + '"]', idx: 0 };
         const gc = (data.cards || []).filter(c => c.type === 'grail').length;
         const bc = (data.cards || []).filter(c => c.type !== 'grail').length;
         html += '<p style="color:var(--gold);font-size:1.125rem;font-weight:700;margin:0.5rem 0;">' + gc + ' Grail / ' + bc + ' Despair</p>';

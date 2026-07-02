@@ -2,7 +2,7 @@
 // Cache-first for assets, network-first for HTML.
 // Bump CACHE_NAME (and APP_VERSION in index.html) to invalidate cache on updates.
 
-const CACHE_NAME = 'shadows-v125';
+const CACHE_NAME = 'shadows-v126';
 
 const ASSETS_TO_CACHE = [
   './',
@@ -38,6 +38,10 @@ const ASSETS_TO_CACHE = [
   './assets/pict-board.jpg',
   './assets/pict-token.png',
   './assets/fight-card-template.jpg',
+  './assets/grail-board.jpg',
+  './assets/grail-card.jpg',
+  './assets/grail-despair.jpg',
+  './assets/grail-desolation.jpg',
 ];
 
 // ── Install: pre-cache all assets ────────────────────────────────────────────
