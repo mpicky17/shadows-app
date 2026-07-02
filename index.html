@@ -1185,7 +1185,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v126';
+    const APP_VERSION = 'shadows-v127';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -6711,6 +6711,7 @@ OUTPUT STYLE — read carefully:
       [0.6303, 0.3816], [0.7520, 0.4711], [0.8816, 0.5500],
     ];
     const GRAIL_SRC = { grail: 'grail-card.jpg', despair: 'grail-despair.jpg', desolation: 'grail-desolation.jpg' };
+    const GRAIL_WIN_CINEMATIC_DELAY_MS = 1600; // hold after the 7th Grail lands (fade ~1.4s) before the win clip
     function grailBoardHTML(q) {
       let html = '<div class="grail-board"><img class="grail-bg" src="assets/grail-board.jpg" width="2048" height="512" alt="Holy Grail quest">';
       const slots = buildGrailSlotLayout(q?.cards || []);
@@ -10892,10 +10893,14 @@ OUTPUT STYLE — read carefully:
           questKey: 'holyGrail', result: 'victory', cards: q.cards || [],
           summary: '3 White Swords, +1 LP, 7 cards, Holy Grail relic to ' + grailDest,
         };
-        updates['games/' + currentRoom + '/meta/cinematic'] = { type: 'grailWin', id: Date.now() };
         await fbDb.ref().update(updates);
         await shareQuestSpoils(7, knightsOnQuest);
         await addLog('quest', 'Quest for the Holy Grail WON! 3 White Swords, +1 LP, 7 cards, Holy Grail relic to ' + grailDest);
+        // Hold before the win cinematic so the final Grail card's ~1.4s fade-in on the result panel
+        // is actually seen — previously the cinematic was in the same batch as questResult and
+        // played instantly, cutting off the card-lay animation.
+        await new Promise(r => setTimeout(r, GRAIL_WIN_CINEMATIC_DELAY_MS));
+        await fbDb.ref('games/' + currentRoom + '/meta/cinematic').set({ type: 'grailWin', id: Date.now() });
 
       } else if (questKey === 'saxonWar' || questKey === 'pictWar') {
         const warName = questKey === 'saxonWar' ? 'Saxon War' : 'Pict War';
