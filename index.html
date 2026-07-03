@@ -1034,6 +1034,11 @@
         <div class="toggle" id="toggle-grail-self-save" role="button" tabindex="0"></div>
         <div style="font-size:0.75rem;color:var(--text-dim);width:100%;margin-top:0.25rem;">If on, a knight who dies playing the winning Holy Grail card keeps the Grail and may drink it to save themselves. If off, that Grail is lost and they die.</div>
       </div>
+      <div class="setting-row">
+        <label>Desolation can't be Merlin-cancelled once on Grail</label>
+        <div class="toggle" id="toggle-desolation-merlin" role="button" tabindex="0"></div>
+        <div style="font-size:0.75rem;color:var(--text-dim);width:100%;margin-top:0.25rem;">If on, a Desolation placed on the Holy Grail can't be removed by a Merlin heroic play — only a Grail card can cancel it (build Grails up and play one on the full board). Merlin can still remove Despairs, and 3 Merlins can still cancel a Desolation when it's first drawn.</div>
+      </div>
       <div class="setting-row" id="setting-analysis-key" style="flex-wrap:wrap;">
         <label style="width:100%;margin-bottom:0.4rem;">AI Game Analysis — Anthropic API key (host only)</label>
         <input class="input" id="analysis-api-key" type="password" placeholder="sk-ant-... (Developer Platform key)" autocomplete="off" spellcheck="false" style="width:100%;">
@@ -1242,7 +1247,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v130';
+    const APP_VERSION = 'shadows-v131';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1348,6 +1353,7 @@
     let lastCinematicId = null;  // dedupe cinematic playback across re-renders/reconnects
     let cinematicQueue = [];     // local queue so a quest-win clip finishes before a game-over clip
     let cinematicPlaying = false;
+    let resultsDeferred = false; // game ended while a cinematic is still playing — show results after
     let cinematicWatchdog = null;
     let combatStageTimer = null; // drives the combat reveal animation (Change 2)
     let resolvingDeaths = false; // re-entry guard for off-turn death resolution (Change 5)
@@ -1833,6 +1839,7 @@
         includeTraitor: true,
         traitorAmongUs: false,
         grailSelfSave: false,
+        desolationBlocksMerlin: false,
       });
 
       promptForName('create');
@@ -2326,6 +2333,7 @@
         }
         // Grail self-save toggle (Change 5)
         $('toggle-grail-self-save').classList.toggle('on', !!roomData.grailSelfSave);
+        $('toggle-desolation-merlin').classList.toggle('on', !!roomData.desolationBlocksMerlin);
         // Host-only "Export ALL players' logs" button (Change 6)
         $('btn-export-all-debug').style.display = isHost ? '' : 'none';
 
@@ -2799,6 +2807,14 @@
       fbDb.ref('games/' + currentRoom + '/meta/grailSelfSave').set(newVal);
     });
 
+    // Desolation-blocks-Merlin toggle — host-only lobby setting (optional variant rule)
+    $('toggle-desolation-merlin').addEventListener('click', () => {
+      if (!isHost || !currentRoom) return;
+      const toggle = $('toggle-desolation-merlin');
+      const newVal = !toggle.classList.contains('on');
+      fbDb.ref('games/' + currentRoom + '/meta/desolationBlocksMerlin').set(newVal);
+    });
+
     // Detailed debug log controls (Change 6) — per-device. The toggle is DISPLAY-only;
     // collection in debugLog() runs unconditionally. Preference persists across reloads.
     $('toggle-debug-log').addEventListener('click', () => {
@@ -3137,7 +3153,7 @@
         renderBoard();
         // On an ended game (reconnect/join to view results), meta won't tick again — refresh
         // the results stats once the board data arrives so sword/siege counts aren't 0.
-        if (roomData?.status === 'ended') renderResultsScreen();
+        if (roomData?.status === 'ended') maybeShowResults();
       });
     }
 
@@ -3957,7 +3973,7 @@
         $('turn-info').textContent = 'Setup — Card Sharing' + (isSpectator ? ' (Spectating)' : '');
       } else if (roomData.status === 'ended') {
         $('turn-info').textContent = 'Game Over — ' + (roomData.winner === 'loyal' ? 'Loyal Knights Win!' : 'Evil Wins!');
-        renderResultsScreen();
+        maybeShowResults();
       }
 
       // Render board summary
@@ -6279,7 +6295,7 @@ OUTPUT STYLE — read carefully:
           'Morgan 3': 'Add 2 Siege Engines to Camelot',
           'Morgan 4': 'Each Knight loses 1 Life Point',
           'Morgan 5': 'You lose 2 Life Points OR discard 3 White cards',
-          'Desolation': 'Place on the Holy Grail quest (or Siege Engine if quest complete). Special — only Merlins can cancel.',
+          'Desolation': 'Place on the Holy Grail quest (or Siege Engine if quest complete). Special — 3 Merlins can cancel it when drawn.' + (roomData?.desolationBlocksMerlin ? ' Once placed, only a Grail card can cancel it (not a Merlin heroic play).' : ''),
           'Dark Forest': 'No Grail cards may be played until a quest is won. If Holy Grail inactive, add siege engine.',
           'Guinevere': 'All knights return to Camelot. Solo quest white cards removed. Turn ends immediately.',
           'Mist of Avalon': 'PERMANENT: Each quest lost adds 1 extra Black Sword',
@@ -9155,6 +9171,22 @@ OUTPUT STYLE — read carefully:
       showToast(msg);
     }
 
+    // Gate the end-game summary behind the win/loss + Camelot-loss cinematics so the outcome
+    // never paints before (or over) the animations. Called wherever status flips to 'ended', and
+    // again from endCinematic() when the queue drains.
+    function maybeShowResults() {
+      if (roomData?.status !== 'ended') return;
+      // Defer while a clip is playing/queued locally, OR while one is still pending in meta (not yet
+      // cleared). The meta check also covers the camelotLose window, where the clip is scheduled via
+      // a delayed setTimeout so cinematicPlaying isn't set yet, and the status+cinematic can land in
+      // the same tick. endCinematic clears meta/cinematic when the queue drains, and that meta tick
+      // re-runs this → the summary appears only after every animation has finished.
+      const pendingCinematic = !!(roomData?.cinematic && CINEMATICS[roomData.cinematic.type]);
+      if (cinematicPlaying || cinematicQueue.length > 0 || pendingCinematic) { resultsDeferred = true; return; }
+      resultsDeferred = false;
+      renderResultsScreen();
+    }
+
     function renderResultsScreen() {
       const overlay = $('results-overlay');
       const winner = roomData.winner;
@@ -10509,6 +10541,11 @@ OUTPUT STYLE — read carefully:
         startCinematicPreroll(cin, EXC_FADE_TOTAL_MS);
       } else if ((cin.type === 'grailWin' || cin.type === 'grailLose') && !cinematicPlaying) {
         startCinematicPreroll(cin, GRAIL_CINEMATIC_DELAY_MS);
+      } else if (['saxonWin', 'saxonLose', 'pictWin', 'pictLose'].includes(cin.type) && !cinematicPlaying) {
+        // War win/loss: preroll so the final fight-card / 4th-warrior fade (~1.46s) shows before the
+        // clip reveals (like Grail). The clip is written in the same batch as questResult, so the
+        // acting player keeps the autoplay-with-sound window; the preroll grabs audio during the fade.
+        startCinematicPreroll(cin, SAXON_FADE_MS + 300);
       } else if (cin.type === 'camelotLose' && !cinematicPlaying) {
         // A war loss (e.g. Saxon 4th warrior) can place the 12th siege engine and end the
         // game. Hold the game-over clip briefly so the final token/card fade plays first.
@@ -10641,6 +10678,8 @@ OUTPUT STYLE — read carefully:
       if (isMyTurn() && currentRoom) {
         fbDb.ref('games/' + currentRoom + '/meta/cinematic').set(null);
       }
+      // If the game ended during the cinematic(s), the summary was deferred — show it now.
+      if (resultsDeferred) maybeShowResults();
     }
 
     function onCombatResolutionChanged() {
@@ -11810,7 +11849,12 @@ OUTPUT STYLE — read carefully:
       renderHand();
 
       const name = card.name;
-      await addLog('info', getKnightDisplayName(myKnight) + ' played ' + name + (isGalahadFree ? ' (Galahad free play)' : ''));
+      // Fate is logged only once the player resolves it, so a hidden Traitor deciding whether to
+      // pretend Loyal or reveal produces the SAME log/timing as a Loyal player (no early tell). The
+      // loyal + pretend-loyal branches both emit the identical "(Loyal) — all knights draw 1" line.
+      if (name !== 'Fate') {
+        await addLog('info', getKnightDisplayName(myKnight) + ' played ' + name + (isGalahadFree ? ' (Galahad free play)' : ''));
+      }
 
       if (name === 'Piety') {
         // Show choice: gain 3 LP or each other gains 1
@@ -12015,8 +12059,11 @@ OUTPUT STYLE — read carefully:
       if (q.lancelot?.status === 'active' && (q.lancelot.blackCards || []).length > 0) targets.push('lancelot');
       if (q.excalibur?.status === 'active' && (q.excalibur.position || 0) < 0) targets.push('excalibur');
       if (q.holyGrail?.status === 'active') {
-        const despair = (q.holyGrail.cards || []).filter(c => c.type === 'despair' || c.type === 'desolation');
-        if (despair.length > 0) targets.push('holyGrail');
+        // With the Desolation-blocks-Merlin variant on, only Despairs are Merlin-removable, so don't
+        // offer the Grail as a target when its black cards are all Desolations.
+        const removable = (q.holyGrail.cards || []).filter(c =>
+          c.type === 'despair' || (c.type === 'desolation' && !roomData?.desolationBlocksMerlin));
+        if (removable.length > 0) targets.push('holyGrail');
       }
       return targets;
     }
@@ -12043,15 +12090,22 @@ OUTPUT STYLE — read carefully:
         updates['games/' + currentRoom + '/quests/excalibur/position'] = (q.position || 0) + 1;
         await addLog('info', getKnightDisplayName(myKnight) + ' used Merlin to move Excalibur toward knights');
       } else if (questKey === 'holyGrail') {
-        // GRAY AREA (intentional, per user 2026-06-07): this removes a placed Despair OR
-        // Desolation. The Book of Quests says a placed Desolation behaves "like a regular
-        // Despair" (supports removing it here). A supplemental FAQ suggests its Special
-        // nature persists once placed (removable only by a Grail card). Keeping it removable
-        // for now — flip the condition to `=== 'despair'` only if the FAQ ruling is adopted.
+        // GRAY AREA (intentional, per user 2026-06-07): by default this removes a placed Despair OR
+        // Desolation (the Book of Quests says a placed Desolation behaves "like a regular Despair").
+        // The `desolationBlocksMerlin` lobby variant adopts the supplemental-FAQ ruling instead:
+        // a placed Desolation is Special and Merlin can't remove it — only a Grail card can. When on,
+        // Merlin removes the last DESPAIR only; if none, it's refused (Merlin stays in hand).
+        const blockDesolation = !!roomData?.desolationBlocksMerlin;
         const cards = [...(q.cards || [])];
+        let removedIdx = -1;
         for (let i = cards.length - 1; i >= 0; i--) {
-          if (cards[i].type === 'despair' || cards[i].type === 'desolation') { cards.splice(i, 1); break; }
+          if (cards[i].type === 'despair' || (cards[i].type === 'desolation' && !blockDesolation)) { removedIdx = i; break; }
         }
+        if (removedIdx < 0) {
+          showToast('Desolation can only be cancelled by a Grail card, not Merlin.');
+          return;   // abort without consuming the Merlin or clearing heroic state
+        }
+        cards.splice(removedIdx, 1);
         updates['games/' + currentRoom + '/quests/holyGrail/cards'] = cards;
         await addLog('info', getKnightDisplayName(myKnight) + ' used Merlin to remove last Despair from Holy Grail');
       } else {
