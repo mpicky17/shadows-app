@@ -856,6 +856,35 @@
       font-size: 11cqw; text-shadow: 0 1px 3px #000, 0 0 4px #000; pointer-events: none;
     }
 
+    /* ── Black Knight (Tournament) painted board: 4 numbered fight cards (2 pairs) + 4 black cards ── */
+    /* Same structure as the Lancelot board; face-up black value is shown in BOTH the top-left and
+       top-right corners. */
+    .blackknight-board { position: relative; width: 100%; max-width: 360px; margin: 0.25rem auto; }
+    .blackknight-board .blackknight-bg { width: 100%; height: auto; display: block; border-radius: 8px; }
+    .blackknight-fight-card {
+      position: absolute; width: 22%; transform: translate(-50%, -50%);
+      pointer-events: none; transition: opacity 1.4s ease; container-type: inline-size;
+    }
+    .blackknight-fight-card img { width: 100%; display: block; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.45); }
+    .blackknight-fight-num {
+      position: absolute; left: 74%; top: 11%; transform: translate(-50%, -50%);
+      font-family: Georgia, 'Times New Roman', serif; font-weight: 700; color: #2a2118;
+      font-size: 12.5cqw; text-shadow: 0 1px 0 rgba(255,255,255,0.45); pointer-events: none;
+    }
+    /* Black card: same art face-up or face-down; face-up overlays the drawn value in BOTH top gems. */
+    .blackknight-card-img {
+      position: absolute; width: 22%; transform: translate(-50%, -50%);
+      pointer-events: none; transition: opacity 1.4s ease; container-type: inline-size;
+    }
+    .blackknight-card-img img { width: 100%; display: block; border-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,0.5); }
+    .blackknight-card-num {
+      position: absolute; top: 10%; transform: translate(-50%, -50%);
+      font-family: Georgia, 'Times New Roman', serif; font-weight: 700; color: #f2e2b0;
+      font-size: 11cqw; text-shadow: 0 1px 3px #000, 0 0 4px #000; pointer-events: none;
+    }
+    .blackknight-card-num.left  { left: 15%; }
+    .blackknight-card-num.right { left: 85%; }
+
     /* ── Info / Quest-detail modals ─────────────────────────────────── */
     .info-modal {
       position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 210;
@@ -1247,7 +1276,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v132';
+    const APP_VERSION = 'shadows-v133';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -6577,7 +6606,17 @@ OUTPUT STYLE — read carefully:
       const nextBKB = (next.blackKnight?.blackCards || []).length;
       if ((prevBKW !== nextBKW || prevBKB !== nextBKB) && next.blackKnight?.status === 'active') {
         if (nextBKW === 0 && nextBKB === 0) return; // Quest reset — suppress popup
-        showQuestUpdatePopup('blackKnight', next.blackKnight, nextBKW + '/4 White, ' + nextBKB + '/4 Black');
+        const desc = nextBKW + '/4 White, ' + nextBKB + '/4 Black';
+        const wCh = dragonChangedBlackSlot(prev.blackKnight?.whiteCards, next.blackKnight?.whiteCards);
+        const bCh = wCh ? null : dragonChangedBlackSlot(prev.blackKnight?.blackCards, next.blackKnight?.blackCards);
+        const bkExtra = { bkWhite: wCh, bkBlack: bCh,
+                          prevWhite: prev.blackKnight?.whiteCards || [], prevBlack: prev.blackKnight?.blackCards || [] };
+        showQuestUpdatePopup('blackKnight', next.blackKnight, desc, bkExtra);
+        // If the clickable detail overlay is open on this quest, update it live with the same fade.
+        const bkDetail = $('quest-detail-overlay');
+        if (questDetailKey === 'blackKnight' && bkDetail && !bkDetail.classList.contains('hidden')) {
+          applyBlackKnightBoardChange($('quest-detail-board'), next.blackKnight, bkExtra);
+        }
         return;
       }
       // Lancelot/Dragon — cards changed
@@ -7001,6 +7040,64 @@ OUTPUT STYLE — read carefully:
       }
     }
 
+    // ── Black Knight (Tournament) painted board ─────────────────────────────────
+    // 4 Fight (white) cards (two pairs, placed in board/play order) across the bottom + 4 black
+    // combat cards fanned across the top. Coords are fractions of the board image, tuned via
+    // black-knight-preview. Each entry is [x, y, rot-deg]. Black Knight cards are single-value.
+    const BLACKKNIGHT_FIGHT_POS = [ // two pairs: L(0-1)  R(2-3)
+      [0.2144, 0.4257, 47], [0.2780, 0.4200, 47],
+      [0.5106, 0.7143, 47], [0.5689, 0.7229, 47],
+    ];
+    const BLACKKNIGHT_BLACK_POS = [
+      [0.6038, 0.1896, 60], [0.6576, 0.2679, 51],
+      [0.7371, 0.3217, 41], [0.8023, 0.4157, 33],
+    ];
+    // opts identical to lancelotBoardHTML: { blackCards } source override, { hideValues } (all backs),
+    // { revealAll } (all shown); otherwise each card's own faceDown flag is respected. Face-up value
+    // is shown in BOTH the top-left and top-right gems.
+    function blackKnightBoardHTML(q, opts) {
+      opts = opts || {};
+      let html = '<div class="blackknight-board"><img class="blackknight-bg" src="assets/black-knight-board.png" width="1008" height="1064" alt="Black Knight quest">';
+      const white = q?.whiteCards || [];
+      for (let i = 0; i < white.length && i < 4; i++) {
+        const c = white[i];
+        if (!c) continue;
+        const p = BLACKKNIGHT_FIGHT_POS[i];
+        html += '<div class="blackknight-fight-card" data-slot="' + i + '" style="left:' + (p[0] * 100).toFixed(2) + '%;top:' + (p[1] * 100).toFixed(2) +
+          '%;transform:translate(-50%,-50%) rotate(' + p[2] + 'deg);z-index:' + (1 + i) + ';">' +
+          '<img src="assets/fight-card-template.jpg" alt=""><span class="blackknight-fight-num">' + c.value + '</span></div>';
+      }
+      const black = opts.blackCards || q?.blackCards || [];
+      for (let i = 0; i < black.length && i < 4; i++) {
+        const c = black[i]; if (!c) continue;
+        const p = BLACKKNIGHT_BLACK_POS[i];
+        const hidden = opts.hideValues || (!opts.revealAll && c.faceDown);
+        const val = c.value;
+        html += '<div class="blackknight-card-img" data-slot="' + i + '" style="left:' + (p[0] * 100).toFixed(2) + '%;top:' + (p[1] * 100).toFixed(2) +
+          '%;transform:translate(-50%,-50%) rotate(' + p[2] + 'deg);z-index:' + (11 + i) + ';">' +
+          '<img src="assets/black-knight-card.jpg" alt="">' +
+          (hidden ? '' : '<span class="blackknight-card-num left">' + val + '</span><span class="blackknight-card-num right">' + val + '</span>') + '</div>';
+      }
+      return html + '</div>';
+    }
+    // Render the Black Knight board into `container`, fading the changed white/black slot in or out.
+    // extra = { bkWhite, bkBlack, prevWhite, prevBlack } (from detectQuestChange). Both white and
+    // black are placed in index order, so both diffs reuse the value-agnostic dragonChangedBlackSlot.
+    function applyBlackKnightBoardChange(container, nextQ, extra) {
+      const wCh = extra?.bkWhite, bCh = extra?.bkBlack;
+      if (wCh && wCh.dir === 'out') {
+        container.innerHTML = blackKnightBoardHTML({ ...nextQ, whiteCards: extra.prevWhite || [] });
+        animateSaxonChange(container, '.blackknight-fight-card[data-slot="' + wCh.slot + '"]', 0, 'out');
+      } else if (bCh && bCh.dir === 'out') {
+        container.innerHTML = blackKnightBoardHTML({ ...nextQ, blackCards: extra.prevBlack || [] });
+        animateSaxonChange(container, '.blackknight-card-img[data-slot="' + bCh.slot + '"]', 0, 'out');
+      } else {
+        container.innerHTML = blackKnightBoardHTML(nextQ);
+        if (wCh) animateSaxonChange(container, '.blackknight-fight-card[data-slot="' + wCh.slot + '"]', 0, 'in');
+        else if (bCh) animateSaxonChange(container, '.blackknight-card-img[data-slot="' + bCh.slot + '"]', 0, 'in');
+      }
+    }
+
     // Build the quest board visual (Excalibur river / Grail slots / combat rows /
     // war fight cards). Shared by the transient popup and the clickable detail overlay.
     function renderQuestBoardVisual(questKey, questData) {
@@ -7138,6 +7235,9 @@ OUTPUT STYLE — read carefully:
       } else if (questKey === 'lancelot') {
         // Painted Lancelot board; fade the changed fight/armor card IN (played) or OUT (removed).
         applyLancelotBoardChange(content, questData, extra);
+      } else if (questKey === 'blackKnight') {
+        // Painted Black Knight board; fade the changed fight/black card IN (played) or OUT (removed).
+        applyBlackKnightBoardChange(content, questData, extra);
       } else {
         content.innerHTML = renderQuestBoardVisual(questKey, questData);
       }
@@ -7163,6 +7263,7 @@ OUTPUT STYLE — read carefully:
         : questKey === 'holyGrail' ? grailBoardHTML(q)
         : (questKey === 'lancelot' && q.phase === 'dragon') ? dragonBoardHTML(q)
         : (questKey === 'lancelot') ? lancelotBoardHTML(q)
+        : questKey === 'blackKnight' ? blackKnightBoardHTML(q)
         : renderQuestBoardVisual(questKey, q);
       const phase = questKey === 'lancelot' ? (q.phase || 'lancelot') : null;
       $('quest-detail-pattern').textContent = getQuestPatternText(questKey, phase);
@@ -10834,10 +10935,11 @@ OUTPUT STYLE — read carefully:
       // of the text card rows; every other combat quest keeps the text rows.
       const isDragon = res.questKey === 'lancelot' && cachedQuests?.lancelot?.phase === 'dragon';
       const isLancelot = res.questKey === 'lancelot' && !isDragon;
-      const isPainted = isDragon || isLancelot;
+      const isBlackKnight = res.questKey === 'blackKnight';
+      const isPainted = isDragon || isLancelot || isBlackKnight;
       // Render the correct painted board for this phase; `bc` = the black-card source for the stage.
       const paintedBoard = (bc, extraOpts) =>
-        (isDragon ? dragonBoardHTML : lancelotBoardHTML)(
+        (isBlackKnight ? blackKnightBoardHTML : isDragon ? dragonBoardHTML : lancelotBoardHTML)(
           { whiteCards: res.whiteCards, blackCards: bc, phase: cachedQuests?.lancelot?.phase },
           Object.assign({ blackCards: bc }, extraOpts));
       const whiteTotalHtml = '<p style="color:var(--gold);font-size:1.25rem;font-weight:700;">' +
