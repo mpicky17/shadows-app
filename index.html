@@ -1247,7 +1247,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v131';
+    const APP_VERSION = 'shadows-v132';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -5486,7 +5486,7 @@ OUTPUT STYLE — read carefully:
         if ((mm = m(msg, /Special Black card applied: (.+)$/))) G.specialBlack.push(mm[1]);
         if (/was cancelled by Merlin!/.test(msg)) G.merlinCancels++;
         if (/Despair placed on Holy Grail/.test(msg)) G.despairOnGrail++;
-        if (/removed a Despair card from the Holy Grail/.test(msg) || /Merlin to remove last Despair/.test(msg)) G.despairRemoved++;
+        if (/removed a (?:Despair|Desolation) card from the Holy Grail/.test(msg) || /Merlin to remove a (?:Despair|Desolation) from Holy Grail/.test(msg)) G.despairRemoved++;
         if (/Excalibur moves toward Evil/.test(msg)) G.excaliburMovesEvil++;
         if (/Mist of Avalon active/.test(msg)) G.mistActive = true;
         if (/Heroism adds 1 extra/.test(msg)) G.heroismExtra++;
@@ -9182,8 +9182,13 @@ OUTPUT STYLE — read carefully:
       // the same tick. endCinematic clears meta/cinematic when the queue drains, and that meta tick
       // re-runs this → the summary appears only after every animation has finished.
       const pendingCinematic = !!(roomData?.cinematic && CINEMATICS[roomData.cinematic.type]);
-      if (cinematicPlaying || cinematicQueue.length > 0 || pendingCinematic) { resultsDeferred = true; return; }
+      if (cinematicPlaying || cinematicQueue.length > 0 || pendingCinematic) {
+        resultsDeferred = true;
+        debugLog('cinematic', 'results deferred', { cinematicPlaying, queueLen: cinematicQueue.length, pending: roomData?.cinematic?.type || null });
+        return;
+      }
       resultsDeferred = false;
+      debugLog('cinematic', 'results shown', { winner: roomData?.winner, endReason: roomData?.endReason });
       renderResultsScreen();
     }
 
@@ -10435,13 +10440,14 @@ OUTPUT STYLE — read carefully:
             await resolveQuestVictory('holyGrail');
           }
         } else {
-          // All 7 slots filled — remove closest despair
+          // All 7 slots filled — a Grail card cancels the closest black card (Despair OR Desolation).
           const despairIdx = cards.findIndex(c => c?.type !== 'grail');
           if (despairIdx >= 0) {
+            const removedType = cards[despairIdx].type;
             const newCards = cards.filter((_, i) => i !== despairIdx);
             updates['games/' + currentRoom + '/quests/holyGrail/cards'] = newCards;
             await fbDb.ref().update(updates);
-            await addLog('quest', getKnightDisplayName(myKnight) + ' removed a Despair card from the Holy Grail');
+            await addLog('quest', getKnightDisplayName(myKnight) + ' removed a ' + (removedType === 'desolation' ? 'Desolation' : 'Despair') + ' card from the Holy Grail');
             renderHand();
           }
         }
@@ -10529,6 +10535,7 @@ OUTPUT STYLE — read carefully:
       if (!cin || cin.id === lastCinematicId) return;
       lastCinematicId = cin.id;
       if (!CINEMATICS[cin.type]) return;
+      debugLog('cinematic', 'received', { type: cin.type, id: cin.id, cinematicPlaying, queueLen: cinematicQueue.length });
       // Enqueue rather than overwrite: when a quest win immediately ends the game, the
       // quest-win clip and the game-over clip are written moments apart (KQYZCJ: Dragon win
       // → camelot-lose). Queueing lets the quest clip finish before the end-game clip plays.
@@ -10549,6 +10556,7 @@ OUTPUT STYLE — read carefully:
       } else if (cin.type === 'camelotLose' && !cinematicPlaying) {
         // A war loss (e.g. Saxon 4th warrior) can place the 12th siege engine and end the
         // game. Hold the game-over clip briefly so the final token/card fade plays first.
+        debugLog('cinematic', 'camelotLose delayed enqueue', { delayMs: SAXON_FADE_MS + 300 });
         setTimeout(enqueue, SAXON_FADE_MS + 300);
       } else {
         enqueue();
@@ -10585,6 +10593,7 @@ OUTPUT STYLE — read carefully:
       const cin = cinematicQueue.shift();
       if (!cin) { cinematicPlaying = false; return; }
       cinematicPlaying = true;
+      debugLog('cinematic', 'play', { type: cin.type, queueLen: cinematicQueue.length });
       const src = CINEMATICS[cin.type];
       const v = $('cinematic-video');
       const soundBtn = $('btn-cinematic-sound');
@@ -10610,6 +10619,7 @@ OUTPUT STYLE — read carefully:
     function startCinematicPreroll(cin, delayMs) {
       cinematicPlaying = true;
       prerollId = cin.id;
+      debugLog('cinematic', 'preroll start', { type: cin.type, delayMs });
       const src = CINEMATICS[cin.type];
       const v = $('cinematic-video');
       const overlay = $('cinematic-overlay');
@@ -10629,6 +10639,7 @@ OUTPUT STYLE — read carefully:
 
     function revealCinematicFromPreroll(cin) {
       if (prerollId !== cin.id) return;   // superseded or already ended
+      debugLog('cinematic', 'preroll reveal', { type: cin.type });
       const v = $('cinematic-video');
       const soundBtn = $('btn-cinematic-sound');
       $('cinematic-overlay').classList.remove('prerolling');   // bring the clip to the front
@@ -10663,6 +10674,7 @@ OUTPUT STYLE — read carefully:
     // queued clip, or closes the overlay when the queue is empty.
     function endCinematic() {
       clearTimeout(cinematicWatchdog);
+      debugLog('cinematic', 'ended', { queueLen: cinematicQueue.length, resultsDeferred });
       prerollId = null;
       const v = $('cinematic-video');
       v.pause();
@@ -12105,9 +12117,10 @@ OUTPUT STYLE — read carefully:
           showToast('Desolation can only be cancelled by a Grail card, not Merlin.');
           return;   // abort without consuming the Merlin or clearing heroic state
         }
+        const removedType = cards[removedIdx].type;
         cards.splice(removedIdx, 1);
         updates['games/' + currentRoom + '/quests/holyGrail/cards'] = cards;
-        await addLog('info', getKnightDisplayName(myKnight) + ' used Merlin to remove last Despair from Holy Grail');
+        await addLog('info', getKnightDisplayName(myKnight) + ' used Merlin to remove a ' + (removedType === 'desolation' ? 'Desolation' : 'Despair') + ' from Holy Grail');
       } else {
         const blackCards = [...(q.blackCards || [])];
         blackCards.pop();
