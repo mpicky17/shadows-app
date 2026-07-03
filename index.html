@@ -829,6 +829,33 @@
       font-size: 11cqw; text-shadow: 0 1px 3px #000, 0 0 4px #000; pointer-events: none;
     }
 
+    /* ── Lancelot quest painted board: 5 numbered fight cards (full house A=3 / B=2) + 5 armor cards ──── */
+    /* Same structure as the Dragon board; face-up armor value sits in the top-LEFT gem. */
+    .lancelot-board { position: relative; width: 100%; max-width: 360px; margin: 0.25rem auto; }
+    .lancelot-board .lancelot-bg { width: 100%; height: auto; display: block; border-radius: 8px; }
+    .lancelot-fight-card {
+      position: absolute; width: 21.5%; transform: translate(-50%, -50%);
+      pointer-events: none; transition: opacity 1.4s ease; container-type: inline-size;
+    }
+    .lancelot-fight-card img { width: 100%; display: block; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.45); }
+    .lancelot-fight-num {
+      position: absolute; left: 74%; top: 11%; transform: translate(-50%, -50%);
+      font-family: Georgia, 'Times New Roman', serif; font-weight: 700; color: #2a2118;
+      font-size: 12.5cqw; text-shadow: 0 1px 0 rgba(255,255,255,0.45); pointer-events: none;
+    }
+    /* Armor (black) card: same art face-up or face-down; face-up overlays the lancelot value in
+       the top-LEFT gem. */
+    .lancelot-card-img {
+      position: absolute; width: 21.5%; transform: translate(-50%, -50%);
+      pointer-events: none; transition: opacity 1.4s ease; container-type: inline-size;
+    }
+    .lancelot-card-img img { width: 100%; display: block; border-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,0.5); }
+    .lancelot-card-num {
+      position: absolute; left: 15%; top: 10%; transform: translate(-50%, -50%);
+      font-family: Georgia, 'Times New Roman', serif; font-weight: 700; color: #f2e2b0;
+      font-size: 11cqw; text-shadow: 0 1px 3px #000, 0 0 4px #000; pointer-events: none;
+    }
+
     /* ── Info / Quest-detail modals ─────────────────────────────────── */
     .info-modal {
       position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 210;
@@ -1215,7 +1242,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v129';
+    const APP_VERSION = 'shadows-v130';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -6554,12 +6581,18 @@ OUTPUT STYLE — read carefully:
           const bCh = wCh ? null : dragonChangedBlackSlot(prev.lancelot?.blackCards, next.lancelot?.blackCards);
           lExtra = { dragonWhite: wCh, dragonBlack: bCh,
                      prevWhite: prev.lancelot?.whiteCards || [], prevBlack: prev.lancelot?.blackCards || [] };
+        } else {
+          const wCh = lancelotChangedWhiteSlot(prev.lancelot?.whiteCards, next.lancelot?.whiteCards);
+          const bCh = wCh ? null : dragonChangedBlackSlot(prev.lancelot?.blackCards, next.lancelot?.blackCards);
+          lExtra = { lancelotWhite: wCh, lancelotBlack: bCh,
+                     prevWhite: prev.lancelot?.whiteCards || [], prevBlack: prev.lancelot?.blackCards || [] };
         }
         showQuestUpdatePopup('lancelot', next.lancelot, desc, lExtra);
-        // If the clickable detail overlay is open on the Dragon quest, update it live with the same fade.
+        // If the clickable detail overlay is open on this quest, update it live with the same fade.
         const lDetail = $('quest-detail-overlay');
-        if (isDragon && questDetailKey === 'lancelot' && lDetail && !lDetail.classList.contains('hidden')) {
-          applyDragonBoardChange($('quest-detail-board'), next.lancelot, lExtra);
+        if (questDetailKey === 'lancelot' && lDetail && !lDetail.classList.contains('hidden')) {
+          if (isDragon) applyDragonBoardChange($('quest-detail-board'), next.lancelot, lExtra);
+          else applyLancelotBoardChange($('quest-detail-board'), next.lancelot, lExtra);
         }
         return;
       }
@@ -6869,6 +6902,89 @@ OUTPUT STYLE — read carefully:
       }
     }
 
+    // ── Lancelot quest painted board (lancelot quest in phase!=='dragon') ────────
+    // 5 Fight (white) cards as the full house: group A (three-of-a-kind, slots 0-2, bottom-left) +
+    // group B (pair, slots 3-4, bottom-right). 5 armor (black) cards fanned across the top. Coords
+    // are fractions of the board image, tuned via lancelot-preview. Each entry is [x, y, rot-deg].
+    const LANCELOT_FIGHT_POS = [ // A(0-2)=triple  B(3-4)=pair
+      [0.1750, 0.7643, -1], [0.2174, 0.7781, 0], [0.2477, 0.7429, -1],
+      [0.7311, 0.7390, 0],  [0.7742, 0.7459, 0],
+    ];
+    const LANCELOT_BLACK_POS = [
+      [0.2758, 0.3420, -10], [0.3856, 0.3290, -5], [0.4970, 0.3244, 0],
+      [0.6098, 0.3213, 6],   [0.7136, 0.3451, 9],
+    ];
+    // Group white fight cards by value into the full house. Groups ordered by size DESC (tie →
+    // first appearance) so the 3-of-a-kind fills group A (slots 0-2) and the pair fills group B
+    // (slots 3-4): slot = groupRank*3 + posInGroup. Size-desc avoids the overflow a first-appearance
+    // order would cause if the pair's value were played before the triple's.
+    function buildLancelotWhiteLayout(whiteCards) {
+      const groups = [], byVal = {};
+      for (const c of (whiteCards || [])) {
+        const v = c.value;
+        if (byVal[v] == null) { byVal[v] = groups.length; groups.push({ order: groups.length, cards: [] }); }
+        groups[byVal[v]].cards.push(c);
+      }
+      groups.sort((a, b) => (b.cards.length - a.cards.length) || (a.order - b.order));
+      const slots = new Array(5).fill(null);
+      groups.forEach((g, rank) => g.cards.forEach((c, pi) => {
+        const s = rank * 3 + pi;
+        if (s < 5) slots[s] = c;
+      }));
+      return slots;
+    }
+    // opts identical to dragonBoardHTML: { blackCards } source override, { hideValues } (all backs),
+    // { revealAll } (all shown); otherwise each card's own faceDown flag is respected. Face-up value
+    // is the lancelotValue, shown in the top-LEFT gem.
+    function lancelotBoardHTML(q, opts) {
+      opts = opts || {};
+      let html = '<div class="lancelot-board"><img class="lancelot-bg" src="assets/lancelot-board.jpg" width="820" height="811" alt="Lancelot quest">';
+      const white = buildLancelotWhiteLayout(q?.whiteCards || []);
+      for (let i = 0; i < 5; i++) {
+        const c = white[i];
+        if (!c) continue;
+        const p = LANCELOT_FIGHT_POS[i];
+        html += '<div class="lancelot-fight-card" data-slot="' + i + '" style="left:' + (p[0] * 100).toFixed(2) + '%;top:' + (p[1] * 100).toFixed(2) +
+          '%;transform:translate(-50%,-50%) rotate(' + p[2] + 'deg);z-index:' + (1 + i) + ';">' +
+          '<img src="assets/fight-card-template.jpg" alt=""><span class="lancelot-fight-num">' + c.value + '</span></div>';
+      }
+      const black = opts.blackCards || q?.blackCards || [];
+      for (let i = 0; i < black.length && i < 5; i++) {
+        const c = black[i]; if (!c) continue;
+        const p = LANCELOT_BLACK_POS[i];
+        const hidden = opts.hideValues || (!opts.revealAll && c.faceDown);
+        const val = (c.lancelotValue != null) ? c.lancelotValue : c.value;
+        html += '<div class="lancelot-card-img" data-slot="' + i + '" style="left:' + (p[0] * 100).toFixed(2) + '%;top:' + (p[1] * 100).toFixed(2) +
+          '%;transform:translate(-50%,-50%) rotate(' + p[2] + 'deg);z-index:' + (11 + i) + ';">' +
+          '<img src="assets/lancelot-card.jpg" alt="">' +
+          (hidden ? '' : '<span class="lancelot-card-num">' + val + '</span>') + '</div>';
+      }
+      return html + '</div>';
+    }
+    // Diff two grouped white layouts (by id) → the single changed A/B slot + direction.
+    function lancelotChangedWhiteSlot(prevW, nextW) {
+      const ps = buildLancelotWhiteLayout(prevW || []), ns = buildLancelotWhiteLayout(nextW || []);
+      for (let i = 0; i < 5; i++) if ((ps[i]?.id) !== (ns[i]?.id)) return { slot: i, dir: ns[i] ? 'in' : 'out' };
+      return null;
+    }
+    // Render the Lancelot board into `container`, fading the changed white/black slot in or out.
+    // extra = { lancelotWhite, lancelotBlack, prevWhite, prevBlack } (from detectQuestChange).
+    // (Black diffing reuses the value-agnostic dragonChangedBlackSlot.)
+    function applyLancelotBoardChange(container, nextQ, extra) {
+      const wCh = extra?.lancelotWhite, bCh = extra?.lancelotBlack;
+      if (wCh && wCh.dir === 'out') {
+        container.innerHTML = lancelotBoardHTML({ ...nextQ, whiteCards: extra.prevWhite || [] });
+        animateSaxonChange(container, '.lancelot-fight-card[data-slot="' + wCh.slot + '"]', 0, 'out');
+      } else if (bCh && bCh.dir === 'out') {
+        container.innerHTML = lancelotBoardHTML({ ...nextQ, blackCards: extra.prevBlack || [] });
+        animateSaxonChange(container, '.lancelot-card-img[data-slot="' + bCh.slot + '"]', 0, 'out');
+      } else {
+        container.innerHTML = lancelotBoardHTML(nextQ);
+        if (wCh) animateSaxonChange(container, '.lancelot-fight-card[data-slot="' + wCh.slot + '"]', 0, 'in');
+        else if (bCh) animateSaxonChange(container, '.lancelot-card-img[data-slot="' + bCh.slot + '"]', 0, 'in');
+      }
+    }
+
     // Build the quest board visual (Excalibur river / Grail slots / combat rows /
     // war fight cards). Shared by the transient popup and the clickable detail overlay.
     function renderQuestBoardVisual(questKey, questData) {
@@ -7003,6 +7119,9 @@ OUTPUT STYLE — read carefully:
       } else if (questKey === 'lancelot' && questData.phase === 'dragon') {
         // Painted Dragon board; fade the changed fight/dragon card IN (played) or OUT (removed).
         applyDragonBoardChange(content, questData, extra);
+      } else if (questKey === 'lancelot') {
+        // Painted Lancelot board; fade the changed fight/armor card IN (played) or OUT (removed).
+        applyLancelotBoardChange(content, questData, extra);
       } else {
         content.innerHTML = renderQuestBoardVisual(questKey, questData);
       }
@@ -7027,6 +7146,7 @@ OUTPUT STYLE — read carefully:
         : questKey === 'pictWar' ? pictBoardHTML(q)
         : questKey === 'holyGrail' ? grailBoardHTML(q)
         : (questKey === 'lancelot' && q.phase === 'dragon') ? dragonBoardHTML(q)
+        : (questKey === 'lancelot') ? lancelotBoardHTML(q)
         : renderQuestBoardVisual(questKey, q);
       const phase = questKey === 'lancelot' ? (q.phase || 'lancelot') : null;
       $('quest-detail-pattern').textContent = getQuestPatternText(questKey, phase);
@@ -10659,13 +10779,20 @@ OUTPUT STYLE — read carefully:
         ? '<p style="color:var(--gold);font-size:0.875rem;font-weight:600;margin-bottom:0.5rem;">' + patternText + '</p>'
         : '';
 
-      // Dragon phase uses the painted board (white + stage-aware black cards) instead of the
-      // text card rows; every other combat quest keeps the text rows.
+      // The Lancelot/Dragon phases use the painted board (white + stage-aware black cards) instead
+      // of the text card rows; every other combat quest keeps the text rows.
       const isDragon = res.questKey === 'lancelot' && cachedQuests?.lancelot?.phase === 'dragon';
+      const isLancelot = res.questKey === 'lancelot' && !isDragon;
+      const isPainted = isDragon || isLancelot;
+      // Render the correct painted board for this phase; `bc` = the black-card source for the stage.
+      const paintedBoard = (bc, extraOpts) =>
+        (isDragon ? dragonBoardHTML : lancelotBoardHTML)(
+          { whiteCards: res.whiteCards, blackCards: bc, phase: cachedQuests?.lancelot?.phase },
+          Object.assign({ blackCards: bc }, extraOpts));
       const whiteTotalHtml = '<p style="color:var(--gold);font-size:1.25rem;font-weight:700;">' +
-        (isDragon ? 'White Total: ' : 'Total: ') + res.whiteSum + (res.excaliburBonus ? ' (incl. Excalibur +1)' : '') + '</p>';
+        (isPainted ? 'White Total: ' : 'Total: ') + res.whiteSum + (res.excaliburBonus ? ' (incl. Excalibur +1)' : '') + '</p>';
 
-      if (!isDragon) {
+      if (!isPainted) {
         // White cards — always shown as they stand.
         html += '<p style="color:var(--text-dim);font-size:1rem;">White Cards (Knights)</p>' +
           '<div class="combat-cards">';
@@ -10678,9 +10805,8 @@ OUTPUT STYLE — read carefully:
       if (stage === 'preReveal') {
         // Black cards "as they stand" — board order, face-down hidden as "?".
         $('combat-title').textContent = questLabel + ' — Before Reveal';
-        if (isDragon) {
-          html += dragonBoardHTML({ whiteCards: res.whiteCards, blackCards: res.preRevealBlackCards, phase: 'dragon' },
-            { blackCards: res.preRevealBlackCards }) + whiteTotalHtml;
+        if (isPainted) {
+          html += paintedBoard(res.preRevealBlackCards, {}) + whiteTotalHtml;
         } else {
           html += '<p style="color:var(--text-dim);font-size:1rem;margin-top:0.5rem;">Black Cards (as they stand)</p>' +
             '<div class="combat-cards">';
@@ -10699,9 +10825,8 @@ OUTPUT STYLE — read carefully:
 
       if (stage === 'shuffling') {
         $('combat-title').textContent = questLabel + ' — Shuffling';
-        if (isDragon) {
-          html += dragonBoardHTML({ whiteCards: res.whiteCards, blackCards: res.preRevealBlackCards, phase: 'dragon' },
-            { blackCards: res.preRevealBlackCards, hideValues: true }) + whiteTotalHtml;
+        if (isPainted) {
+          html += paintedBoard(res.preRevealBlackCards, { hideValues: true }) + whiteTotalHtml;
         }
         html += '<div class="combat-shuffle-banner">🔀 Shuffling before reveal</div>';
         $('combat-content').innerHTML = html;
@@ -10713,10 +10838,9 @@ OUTPUT STYLE — read carefully:
 
       // ── Revealed stage ──
       $('combat-title').textContent = questLabel + ' — Combat Resolution';
-      if (isDragon) {
+      if (isPainted) {
         // Painted board with the shuffled black cards revealed (values shown).
-        html += dragonBoardHTML({ whiteCards: res.whiteCards, blackCards: res.blackCards, phase: 'dragon' },
-          { blackCards: res.blackCards, revealAll: true }) + whiteTotalHtml +
+        html += paintedBoard(res.blackCards, { revealAll: true }) + whiteTotalHtml +
           '<p style="color:var(--red-bright);font-size:1.25rem;font-weight:700;">Black Total: ' + res.blackSum + '</p>';
       } else {
         html += '<p style="color:var(--text-dim);font-size:1rem;margin-top:0.5rem;">Black Cards (Evil)</p>' +
