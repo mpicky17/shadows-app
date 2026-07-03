@@ -1,3 +1,9 @@
+# Secrets — never commit
+anthropic_key_for_shadows.txt
+*.key
+*_key_*.txt
+*apikey*
+
 # Source reference materials (not part of the app)
 *.pdf
 *.jpg
