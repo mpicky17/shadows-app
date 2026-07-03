@@ -885,6 +885,27 @@
     .blackknight-card-num.left  { left: 15%; }
     .blackknight-card-num.right { left: 85%; }
 
+    /* ── Camelot swords change overlay: up to 15 sword tokens on the realistic sword board ────── */
+    .swords-board { position: relative; width: 100%; max-width: 420px; margin: 0.25rem auto; }
+    .swords-board .swords-bg { width: 100%; height: auto; display: block; border-radius: 8px; }
+    .swords-token {
+      position: absolute; width: 6%; transform: translate(-50%, -50%);
+      pointer-events: none; transition: opacity 1.4s ease;
+    }
+    .swords-token img { width: 100%; display: block; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.6)); }
+    /* Full-screen dim behind the swords overlay; the inner panel reuses the quest-update-popup look. */
+    .swords-overlay {
+      position: fixed; inset: 0; z-index: 185; display: flex; align-items: center; justify-content: center;
+      background: rgba(8, 6, 3, 0.72); animation: overlayFadeIn 0.35s ease-out; pointer-events: none;
+    }
+    .swords-overlay.hidden { display: none; }
+    .swords-overlay.fade-out { animation: popupFadeOut 0.5s ease-out forwards; }
+    .swords-overlay-panel {
+      background: rgba(20, 15, 10, 0.96); border: 2px solid var(--gold); border-radius: 12px;
+      padding: 1rem 1.25rem; text-align: center; max-width: 92vw;
+    }
+    .swords-overlay-title { font-weight: 700; font-size: 1.05rem; color: var(--gold); margin-bottom: 0.5rem; }
+
     /* ── Info / Quest-detail modals ─────────────────────────────────── */
     .info-modal {
       position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 210;
@@ -1208,6 +1229,12 @@
       <div id="quest-update-content"></div>
       <div id="quest-update-desc" style="color:var(--text-dim);font-size:0.875rem;margin-top:0.5rem;"></div>
     </div>
+    <div id="swords-overlay" class="swords-overlay hidden">
+      <div class="swords-overlay-panel">
+        <div id="swords-overlay-title" class="swords-overlay-title"></div>
+        <div id="swords-overlay-board"></div>
+      </div>
+    </div>
     <div class="info-modal hidden" id="quest-detail-overlay">
       <div class="info-panel">
         <div class="info-header">
@@ -1276,7 +1303,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v133';
+    const APP_VERSION = 'shadows-v134';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1384,6 +1411,10 @@
     let cinematicPlaying = false;
     let resultsDeferred = false; // game ended while a cinematic is still playing — show results after
     let cinematicWatchdog = null;
+    let lastSwordOverlayId = null;   // dedupe the swords-change overlay across re-renders/reconnects
+    let swordOverlayActive = false;  // the swords overlay is currently on-screen (results wait for it)
+    let swordOverlayDeferred = false;// swords overlay pending behind a still-playing cinematic
+    let swordOverlayTimer = null;
     let combatStageTimer = null; // drives the combat reveal animation (Change 2)
     let resolvingDeaths = false; // re-entry guard for off-turn death resolution (Change 5)
     // Percival's Lancelot's-Armor decline flow (client-local UI stage; only the acting player interacts)
@@ -2396,6 +2427,7 @@
           onCombatResolutionChanged();
           onQuestResultChanged();
           onCinematicChanged();
+          onSwordOverlayChanged();
         }
     }
 
@@ -7098,6 +7130,31 @@ OUTPUT STYLE — read carefully:
       }
     }
 
+    // ── Camelot swords change overlay ───────────────────────────────────────────
+    // 15 sword slots on the realistic Round-Table board (12 marked + 3 overflow). Coords are fractions
+    // of the board image, tuned via camelot-swords-preview. Each entry is [x, y, rot-deg]. Swords fill
+    // in array order (slot i = swords[i]); each is white or black from the live board/swords list.
+    const CAMELOT_SWORDS_POS = [
+      [0.3000, 0.2000, 0], [0.4200, 0.1700, 0], [0.5400, 0.1700, 0], [0.6600, 0.2000, 0],
+      [0.7400, 0.3000, 0], [0.7800, 0.4200, 0], [0.7800, 0.5400, 0], [0.7400, 0.6600, 0],
+      [0.6600, 0.7400, 0], [0.5400, 0.7800, 0], [0.4200, 0.7800, 0], [0.3000, 0.7400, 0],
+      [0.2400, 0.6200, 0], [0.2200, 0.4800, 0], [0.2400, 0.3400, 0],
+    ];
+    // Render the swords board from an array of { color:'white'|'black' } (up to 15).
+    function camelotSwordsBoardHTML(swords) {
+      let html = '<div class="swords-board"><img class="swords-bg" src="assets/camelot-swords-board.png" width="1056" height="1008" alt="Round Table swords">';
+      const list = swords || [];
+      for (let i = 0; i < list.length && i < 15; i++) {
+        const s = list[i]; if (!s) continue;
+        const p = CAMELOT_SWORDS_POS[i];
+        const src = (s.color === 'black') ? 'assets/black-sword-realistic.png' : 'assets/white-sword-realistic.png';
+        html += '<img class="swords-token" data-slot="' + i + '" src="' + src + '" alt="" style="left:' +
+          (p[0] * 100).toFixed(2) + '%;top:' + (p[1] * 100).toFixed(2) +
+          '%;transform:translate(-50%,-50%) rotate(' + p[2] + 'deg);z-index:' + (1 + i) + ';">';
+      }
+      return html + '</div>';
+    }
+
     // Build the quest board visual (Excalibur river / Grail slots / combat rows /
     // war fight cards). Shared by the transient popup and the clickable detail overlay.
     function renderQuestBoardVisual(questKey, questData) {
@@ -7377,6 +7434,7 @@ OUTPUT STYLE — read carefully:
       if (newPos <= -5) {
         // Quest lost
         updates['games/' + currentRoom + '/quests/excalibur/status'] = 'lost';
+        const prevSwords = (cachedBoard?.swords || []).map(s => ({ color: s.color || 'white' }));
         const swords = cachedBoard?.swords || [];
         swords.push({ color: 'black', source: 'excalibur' });
         swords.push({ color: 'black', source: 'excalibur' });
@@ -7399,6 +7457,8 @@ OUTPUT STYLE — read carefully:
         await fbDb.ref().update(updates);
         await addLog('quest', 'Excalibur quest LOST! 2 Black Swords, -1 LP. Excalibur removed from game.');
         await applyHeroismSword('excalibur', 'black');
+        const swOv = writeSwordOverlay(prevSwords, 'questLoss');
+        if (swOv) await fbDb.ref('games/' + currentRoom + '/meta/swordOverlay').set(swOv);
         if (await checkGameEnd()) return;
         // advanceToHeroicPhase called when quest result overlay dismissed
       } else {
@@ -7447,6 +7507,7 @@ OUTPUT STYLE — read carefully:
       if (blackCount >= 7 && grailCount === 0) {
         // Quest lost
         updates['games/' + currentRoom + '/quests/holyGrail/status'] = 'lost';
+        const prevSwords = (cachedBoard?.swords || []).map(s => ({ color: s.color || 'white' }));
         const swords = cachedBoard?.swords || [];
         for (let i = 0; i < 3; i++) swords.push({ color: 'black', source: 'holyGrail' });
         await pushMistSword(swords);
@@ -7467,6 +7528,8 @@ OUTPUT STYLE — read carefully:
         await fbDb.ref().update(updates);
         await addLog('quest', 'Holy Grail quest LOST! 3 Black Swords, -1 LP. Holy Grail removed from game.');
         await applyHeroismSword('holyGrail', 'black');
+        const swOv = writeSwordOverlay(prevSwords, 'questLoss');
+        if (swOv) await fbDb.ref('games/' + currentRoom + '/meta/swordOverlay').set(swOv);
         if (await checkGameEnd()) return;
         // advanceToHeroicPhase called when quest result overlay dismissed
       } else {
@@ -7506,6 +7569,7 @@ OUTPUT STYLE — read carefully:
       if (newWarriors >= 4) {
         // Quest lost immediately
         updates['games/' + currentRoom + '/quests/' + questKey + '/status'] = 'lost';
+        const prevSwords = (cachedBoard?.swords || []).map(s => ({ color: s.color || 'white' }));
         const swords = cachedBoard?.swords || [];
         swords.push({ color: 'black', source: questKey });
         await pushMistSword(swords);
@@ -7546,6 +7610,8 @@ OUTPUT STYLE — read carefully:
         await fbDb.ref().update(updates);
         await addLog('quest', label + ' War LOST! 4th warrior placed. 1 Black Sword + 2 Siege Engines. Quest resets.');
         await applyHeroismSword(questKey, 'black');
+        const swOv = writeSwordOverlay(prevSwords, 'questLoss');
+        if (swOv) await fbDb.ref('games/' + currentRoom + '/meta/swordOverlay').set(swOv);
         if (await checkGameEnd()) return;
         // advanceToHeroicPhase called when quest result overlay dismissed
       } else {
@@ -7699,6 +7765,7 @@ OUTPUT STYLE — read carefully:
             const grailCount = cards.filter(c => c.type === 'grail').length;
             if (blackCount >= 7 && grailCount === 0) {
               updates['games/' + currentRoom + '/quests/holyGrail/status'] = 'lost';
+              const prevSwords = (cachedBoard?.swords || []).map(s => ({ color: s.color || 'white' }));
               const swords = cachedBoard?.swords || [];
               for (let i = 0; i < 3; i++) swords.push({ color: 'black', source: 'holyGrail' });
               await pushMistSword(swords);
@@ -7716,6 +7783,8 @@ OUTPUT STYLE — read carefully:
               await fbDb.ref().update(updates);
               await addLog('quest', 'Holy Grail quest LOST! 3 Black Swords added.');
               await applyHeroismSword('holyGrail', 'black');
+              const swOv = writeSwordOverlay(prevSwords, 'questLoss');
+              if (swOv) await fbDb.ref('games/' + currentRoom + '/meta/swordOverlay').set(swOv);
               if (await checkGameEnd()) return;
               // advanceToHeroicPhase called when quest result overlay dismissed
             } else {
@@ -7737,6 +7806,7 @@ OUTPUT STYLE — read carefully:
 
         if (blackCount >= 7 && grailCount === 0) {
           updates['games/' + currentRoom + '/quests/holyGrail/status'] = 'lost';
+          const prevSwords = (cachedBoard?.swords || []).map(s => ({ color: s.color || 'white' }));
           const swords = cachedBoard?.swords || [];
           for (let i = 0; i < 3; i++) swords.push({ color: 'black', source: 'holyGrail' });
           await pushMistSword(swords);
@@ -7754,6 +7824,8 @@ OUTPUT STYLE — read carefully:
           await fbDb.ref().update(updates);
           await addLog('quest', 'Holy Grail quest LOST! 3 Black Swords added.');
           await applyHeroismSword('holyGrail', 'black');
+          const swOv = writeSwordOverlay(prevSwords, 'questLoss');
+          if (swOv) await fbDb.ref('games/' + currentRoom + '/meta/swordOverlay').set(swOv);
           if (await checkGameEnd()) return;
           // advanceToHeroicPhase called when quest result overlay dismissed
         } else {
@@ -8654,6 +8726,7 @@ OUTPUT STYLE — read carefully:
 
       // Check if 4th warrior causes quest loss
       if (newWarriors >= 4) {
+        const prevSwords = (cachedBoard?.swords || []).map(s => ({ color: s.color || 'white' }));
         const swords = cachedBoard?.swords || [];
         swords.push({ color: 'black', source: questKey });
         await pushMistSword(swords);
@@ -8675,6 +8748,8 @@ OUTPUT STYLE — read carefully:
         await fbDb.ref().update(lossUpdates);
         await addLog('quest', warName + ' LOST! 4th warrior placed. 1 Black Sword + 2 Siege Engines.');
         await applyHeroismSword(questKey, 'black');
+        const swOv = writeSwordOverlay(prevSwords, 'questLoss');
+        if (swOv) await fbDb.ref('games/' + currentRoom + '/meta/swordOverlay').set(swOv);
       }
 
       if (await checkGameEnd()) return;
@@ -9238,6 +9313,7 @@ OUTPUT STYLE — read carefully:
     async function finalizeSwordCountEnd() {
       const swordsSnap = await fbDb.ref('games/' + currentRoom + '/board/swords').once('value');
       const swords = swordsSnap.val() || [];
+      const prevSwords = swords.map(s => ({ color: s.color || 'white' }));
 
       for (const kid of (roomData?.turnOrder || [])) {
         const p = cachedPlayers[kid];
@@ -9263,6 +9339,11 @@ OUTPUT STYLE — read carefully:
       await writeAllLoyalties();
       const swordCountMeta = { status: 'ended', winner, endReason: 'swordCount' };
       if (winner === 'evil') swordCountMeta.cinematic = { type: 'camelotLose', id: Date.now() };
+      // Swords-change overlay for the traitor-reveal flip (only if a sword actually flipped); shown
+      // after any camelotLose cinematic and before the results screen (maybeShowResults waits on it).
+      if (prevSwords.some((s, i) => s.color !== swords[i]?.color)) {
+        swordCountMeta.swordOverlay = { id: Date.now(), prev: prevSwords, swords: swords.map(s => ({ color: s.color || 'white' })), reason: 'endgame' };
+      }
       await fbDb.ref('games/' + currentRoom + '/meta').update(swordCountMeta);
       const msg = winner === 'loyal'
         ? 'GAME OVER: Loyal Knights prevail! (' + whiteSwords + ' White vs ' + blackSwords + ' Black)'
@@ -9283,9 +9364,13 @@ OUTPUT STYLE — read carefully:
       // the same tick. endCinematic clears meta/cinematic when the queue drains, and that meta tick
       // re-runs this → the summary appears only after every animation has finished.
       const pendingCinematic = !!(roomData?.cinematic && CINEMATICS[roomData.cinematic.type]);
-      if (cinematicPlaying || cinematicQueue.length > 0 || pendingCinematic) {
+      // Also wait for the swords-change overlay: while it's on-screen, or still pending (written to
+      // meta but not yet shown — e.g. deferred behind a cinematic), the endgame flip must play first.
+      const pendingSwordOverlay = swordOverlayActive ||
+        !!(roomData?.swordOverlay && roomData.swordOverlay.id !== lastSwordOverlayId);
+      if (cinematicPlaying || cinematicQueue.length > 0 || pendingCinematic || pendingSwordOverlay) {
         resultsDeferred = true;
-        debugLog('cinematic', 'results deferred', { cinematicPlaying, queueLen: cinematicQueue.length, pending: roomData?.cinematic?.type || null });
+        debugLog('cinematic', 'results deferred', { cinematicPlaying, queueLen: cinematicQueue.length, pending: roomData?.cinematic?.type || null, swordOverlay: pendingSwordOverlay });
         return;
       }
       resultsDeferred = false;
@@ -10005,6 +10090,7 @@ OUTPUT STYLE — read carefully:
     }
 
     async function resolveAccuseResult(targetKnight, loyalty) {
+      const prevSwords = (cachedBoard?.swords || []).map(s => ({ color: s.color || 'white' }));
       if (loyalty === 'traitor') {
         await addSword('white', 'accusation');
         await revealAsTraitor(targetKnight, 'accused');
@@ -10022,6 +10108,9 @@ OUTPUT STYLE — read carefully:
         }
       }
       await fbDb.ref('games/' + currentRoom + '/meta/accuseResult').set(null);
+      // Swords-change overlay (accusation added a White Sword, or flipped one White→Black)
+      const swOv = writeSwordOverlay(prevSwords, 'accusation');
+      if (swOv) await fbDb.ref('games/' + currentRoom + '/meta/swordOverlay').set(swOv);
       if (await checkGameEnd()) return;
       await completeHeroicAction('accuse');
     }
@@ -10791,8 +10880,65 @@ OUTPUT STYLE — read carefully:
       if (isMyTurn() && currentRoom) {
         fbDb.ref('games/' + currentRoom + '/meta/cinematic').set(null);
       }
+      // A swords-change overlay that was waiting for the cinematic to finish plays now (before results).
+      if (swordOverlayDeferred) { swordOverlayDeferred = false; onSwordOverlayChanged(); }
       // If the game ended during the cinematic(s), the summary was deferred — show it now.
-      if (resultsDeferred) maybeShowResults();
+      else if (resultsDeferred) maybeShowResults();
+    }
+
+    // ── Swords-change overlay (synced via meta/swordOverlay) ─────────────────────
+    // Written by the acting player/host at each sword-changing resolution (writeSwordOverlay); every
+    // client shows it AFTER any win/loss cinematic drains (the deferral mirrors maybeShowResults).
+    const SWORD_OVERLAY_REASON_TEXT = {
+      questWin: 'Swords won!', questLoss: 'Swords lost...',
+      accusation: 'The accusation settles...', endgame: 'The Traitor is revealed!',
+    };
+    function writeSwordOverlay(prevSwords, reason) {
+      if (!currentRoom) return null;
+      const prev = (prevSwords || []).map(s => ({ color: s.color || 'white' }));
+      const next = (cachedBoard?.swords || []).map(s => ({ color: s.color || 'white' }));
+      // Nothing actually changed (e.g. Loyal accused with no White Sword to flip) → no overlay.
+      const changed = next.length !== prev.length || next.some((s, i) => s.color !== prev[i]?.color);
+      if (!changed) return null;
+      return { id: Date.now(), prev, swords: next, reason: reason || 'questWin' };
+    }
+    function onSwordOverlayChanged() {
+      const node = roomData?.swordOverlay;
+      const overlay = $('swords-overlay');
+      if (!node) { overlay.classList.add('hidden'); return; }
+      if (node.id === lastSwordOverlayId) return;
+      // "After the video": while a cinematic is playing/queued/pending, defer until endCinematic re-fires us.
+      const pendingCinematic = !!(roomData?.cinematic && CINEMATICS[roomData.cinematic.type]);
+      if (cinematicPlaying || cinematicQueue.length > 0 || pendingCinematic) { swordOverlayDeferred = true; return; }
+      lastSwordOverlayId = node.id;
+      showSwordOverlay(node);
+    }
+    function showSwordOverlay(node) {
+      const overlay = $('swords-overlay');
+      const board = $('swords-overlay-board');
+      $('swords-overlay-title').textContent = SWORD_OVERLAY_REASON_TEXT[node.reason] || 'The swords change';
+      // Un-hide BEFORE building so the fade-in start frame (opacity:0) paints on a visible overlay.
+      overlay.classList.remove('hidden', 'fade-out');
+      board.innerHTML = camelotSwordsBoardHTML(node.swords || []);
+      swordOverlayActive = true;
+      // Fade in every slot that changed vs prev (new sword, or a white→black flip).
+      const prev = node.prev || [], next = node.swords || [];
+      for (let i = 0; i < next.length && i < 15; i++) {
+        if (i >= prev.length || (prev[i]?.color !== next[i]?.color)) {
+          animateSaxonChange(board, '.swords-token[data-slot="' + i + '"]', 0, 'in');
+        }
+      }
+      if (swordOverlayTimer) clearTimeout(swordOverlayTimer);
+      swordOverlayTimer = setTimeout(() => {
+        overlay.classList.add('fade-out');
+        setTimeout(() => {
+          overlay.classList.add('hidden');
+          swordOverlayActive = false;
+          // Only the acting player clears the shared node; id-dedupe stops replay for everyone else.
+          if (isMyTurn() && currentRoom) fbDb.ref('games/' + currentRoom + '/meta/swordOverlay').set(null);
+          if (resultsDeferred) maybeShowResults(); // end-game chain: overlay done → results
+        }, 500);
+      }, 3500);
     }
 
     function onCombatResolutionChanged() {
@@ -11109,6 +11255,7 @@ OUTPUT STYLE — read carefully:
       }
       const updates = {};
       const knightsOnQuest = q.knightsPresent || [];
+      const prevSwords = (cachedBoard?.swords || []).map(s => ({ color: s.color || 'white' }));
 
       if (winner === 'white') {
         // Victory
@@ -11210,6 +11357,10 @@ OUTPUT STYLE — read carefully:
       // Heroism extra sword
       await applyHeroismSword(questKey, winner === 'white' ? 'white' : 'black');
 
+      // Swords-change overlay (shows after the win/loss cinematic drains)
+      const swOv = writeSwordOverlay(prevSwords, winner === 'white' ? 'questWin' : 'questLoss');
+      if (swOv) updates['games/' + currentRoom + '/meta/swordOverlay'] = swOv;
+
       // Clear combat resolution
       const wasFromEvil = roomData?.combatResolution?.fromEvil;
       updates['games/' + currentRoom + '/meta/combatResolution'] = null;
@@ -11280,6 +11431,7 @@ OUTPUT STYLE — read carefully:
       if (!q) return;
       const knightsOnQuest = q.knightsPresent || [];
       const updates = {};
+      const prevSwords = (cachedBoard?.swords || []).map(s => ({ color: s.color || 'white' }));
 
       if (questKey === 'excalibur') {
         for (let i = 0; i < 2; i++) await addSword('white', 'excalibur');
@@ -11365,6 +11517,9 @@ OUTPUT STYLE — read carefully:
       await clearQuestVictoryEffects(questKey);
       // Heroism extra sword
       await applyHeroismSword(questKey, 'white');
+      // Swords-change overlay (shows after the win cinematic drains)
+      const swOv = writeSwordOverlay(prevSwords, 'questWin');
+      if (swOv) await fbDb.ref('games/' + currentRoom + '/meta/swordOverlay').set(swOv);
       await checkGameEnd();
     }
 
