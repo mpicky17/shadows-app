@@ -799,6 +799,36 @@
       box-shadow: 0 1px 4px rgba(0,0,0,0.5);
     }
 
+    /* ── Dragon quest painted board: 9 numbered fight cards (A/B/C groups) + 5 dragon cards ──── */
+    /* Each card is an absolutely-positioned rotated wrapper (rotation baked into the inline
+       transform per slot). container-type lives on the card wrapper — NOT the board — to avoid
+       the size-containment collapse bug (see the Pict note above). */
+    .dragon-board { position: relative; width: 100%; max-width: 360px; margin: 0.25rem auto; }
+    .dragon-board .dragon-bg { width: 100%; height: auto; display: block; border-radius: 8px; }
+    /* Fight card: template + number overlaid in the "FIGHT __" header (like Pict). */
+    .dragon-fight-card {
+      position: absolute; width: 22.5%; transform: translate(-50%, -50%);
+      pointer-events: none; transition: opacity 1.4s ease; container-type: inline-size;
+    }
+    .dragon-fight-card img { width: 100%; display: block; border-radius: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.45); }
+    .dragon-fight-num {
+      position: absolute; left: 75%; top: 11%; transform: translate(-50%, -50%);
+      font-family: Georgia, 'Times New Roman', serif; font-weight: 700; color: #2a2118;
+      font-size: 14cqw; text-shadow: 0 1px 0 rgba(255,255,255,0.45); pointer-events: none;
+    }
+    /* Dragon (black) card: same art face-up or face-down; face-up overlays the dragon value in
+       the top-right medallion. */
+    .dragon-card-img {
+      position: absolute; width: 22%; transform: translate(-50%, -50%);
+      pointer-events: none; transition: opacity 1.4s ease; container-type: inline-size;
+    }
+    .dragon-card-img img { width: 100%; display: block; border-radius: 4px; box-shadow: 0 1px 4px rgba(0,0,0,0.5); }
+    .dragon-card-num {
+      position: absolute; left: 84%; top: 11%; transform: translate(-50%, -50%);
+      font-family: Georgia, 'Times New Roman', serif; font-weight: 700; color: #f2e2b0;
+      font-size: 11cqw; text-shadow: 0 1px 3px #000, 0 0 4px #000; pointer-events: none;
+    }
+
     /* ── Info / Quest-detail modals ─────────────────────────────────── */
     .info-modal {
       position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 210;
@@ -1185,7 +1215,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v128';
+    const APP_VERSION = 'shadows-v129';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -6514,9 +6544,23 @@ OUTPUT STYLE — read carefully:
       const nextLB = (next.lancelot?.blackCards || []).length;
       if ((prevLW !== nextLW || prevLB !== nextLB) && next.lancelot?.status === 'active') {
         if (nextLW === 0 && nextLB === 0) return; // Quest reset/transition — suppress popup
-        const phase = next.lancelot.phase === 'dragon' ? 'Dragon' : 'Lancelot';
-        const maxW = next.lancelot.phase === 'dragon' ? 9 : 5;
-        showQuestUpdatePopup('lancelot', next.lancelot, phase + ' \u2014 ' + nextLW + '/' + maxW + ' White, ' + nextLB + '/5 Black');
+        const isDragon = next.lancelot.phase === 'dragon';
+        const phase = isDragon ? 'Dragon' : 'Lancelot';
+        const maxW = isDragon ? 9 : 5;
+        const desc = phase + ' \u2014 ' + nextLW + '/' + maxW + ' White, ' + nextLB + '/5 Black';
+        let lExtra = null;
+        if (isDragon) {
+          const wCh = dragonChangedWhiteSlot(prev.lancelot?.whiteCards, next.lancelot?.whiteCards);
+          const bCh = wCh ? null : dragonChangedBlackSlot(prev.lancelot?.blackCards, next.lancelot?.blackCards);
+          lExtra = { dragonWhite: wCh, dragonBlack: bCh,
+                     prevWhite: prev.lancelot?.whiteCards || [], prevBlack: prev.lancelot?.blackCards || [] };
+        }
+        showQuestUpdatePopup('lancelot', next.lancelot, desc, lExtra);
+        // If the clickable detail overlay is open on the Dragon quest, update it live with the same fade.
+        const lDetail = $('quest-detail-overlay');
+        if (isDragon && questDetailKey === 'lancelot' && lDetail && !lDetail.classList.contains('hidden')) {
+          applyDragonBoardChange($('quest-detail-board'), next.lancelot, lExtra);
+        }
         return;
       }
       // Saxon War
@@ -6739,6 +6783,92 @@ OUTPUT STYLE — read carefully:
       return null;
     }
 
+    // ── Dragon quest painted board (lancelot quest in phase==='dragon') ──────────
+    // 9 Fight (white) cards in 3 fanned groups A/B/C (grouped by value: each group = one
+    // three-of-a-kind); 5 Dragon (black) cards fanned across the top. Coords are fractions of
+    // the board image, tuned via dragon-preview. Each entry is [x, y, rotation-deg].
+    const DRAGON_FIGHT_POS = [ // A(0-2) B(3-5) C(6-8)
+      [0.1576, 0.6669, -1], [0.1871, 0.6380, -1], [0.2235, 0.6204, -1],
+      [0.4841, 0.6631, -1], [0.5068, 0.6418, -1], [0.5409, 0.6220, -1],
+      [0.8008, 0.6509, 0],  [0.8311, 0.6319, 0],  [0.8644, 0.6151, 0],
+    ];
+    const DRAGON_BLACK_POS = [
+      [0.8364, 0.2173, 10], [0.7379, 0.1998, 6], [0.6409, 0.1922, 0],
+      [0.5333, 0.2013, -4], [0.4182, 0.2265, -9],
+    ];
+    // Group white fight cards by value into 3 three-of-a-kinds. Group index = first-appearance
+    // order; play order within a group. slot = group*3 + posInGroup → the A/B/C fan positions.
+    function buildDragonWhiteLayout(whiteCards) {
+      const groups = [], byVal = {};
+      for (const c of (whiteCards || [])) {
+        const v = c.value;
+        if (byVal[v] == null) { byVal[v] = groups.length; groups.push([]); }
+        groups[byVal[v]].push(c);
+      }
+      const slots = new Array(9).fill(null);
+      groups.forEach((g, gi) => g.forEach((c, pi) => {
+        const s = gi * 3 + pi;
+        if (s < 9) slots[s] = c;
+      }));
+      return slots;
+    }
+    // opts: { blackCards } overrides the black source (combat board-order vs shuffled);
+    // { hideValues } shows every black as a card back (shuffling stage); { revealAll } shows all
+    // values (revealed stage); otherwise each card's own faceDown flag is respected.
+    function dragonBoardHTML(q, opts) {
+      opts = opts || {};
+      let html = '<div class="dragon-board"><img class="dragon-bg" src="assets/dragon-board.jpg" width="820" height="815" alt="Dragon quest">';
+      const white = buildDragonWhiteLayout(q?.whiteCards || []);
+      for (let i = 0; i < 9; i++) {
+        const c = white[i];
+        if (!c) continue;
+        const p = DRAGON_FIGHT_POS[i];
+        html += '<div class="dragon-fight-card" data-slot="' + i + '" style="left:' + (p[0] * 100).toFixed(2) + '%;top:' + (p[1] * 100).toFixed(2) +
+          '%;transform:translate(-50%,-50%) rotate(' + p[2] + 'deg);z-index:' + (1 + i) + ';">' +
+          '<img src="assets/fight-card-template.jpg" alt=""><span class="dragon-fight-num">' + c.value + '</span></div>';
+      }
+      const black = opts.blackCards || q?.blackCards || [];
+      for (let i = 0; i < black.length && i < 5; i++) {
+        const c = black[i]; if (!c) continue;
+        const p = DRAGON_BLACK_POS[i];
+        const hidden = opts.hideValues || (!opts.revealAll && c.faceDown);
+        const val = (c.dragonValue != null) ? c.dragonValue : c.value;
+        html += '<div class="dragon-card-img" data-slot="' + i + '" style="left:' + (p[0] * 100).toFixed(2) + '%;top:' + (p[1] * 100).toFixed(2) +
+          '%;transform:translate(-50%,-50%) rotate(' + p[2] + 'deg);z-index:' + (11 + i) + ';">' +
+          '<img src="assets/dragon-card.jpg" alt="">' +
+          (hidden ? '' : '<span class="dragon-card-num">' + val + '</span>') + '</div>';
+      }
+      return html + '</div>';
+    }
+    // Diff two grouped white layouts (by id) → the single changed A/B/C slot + direction.
+    function dragonChangedWhiteSlot(prevW, nextW) {
+      const ps = buildDragonWhiteLayout(prevW || []), ns = buildDragonWhiteLayout(nextW || []);
+      for (let i = 0; i < 9; i++) if ((ps[i]?.id) !== (ns[i]?.id)) return { slot: i, dir: ns[i] ? 'in' : 'out' };
+      return null;
+    }
+    // Black cards are placed in board order (by index) — diff by index/id.
+    function dragonChangedBlackSlot(prevB, nextB) {
+      const p = prevB || [], n = nextB || [], max = Math.max(p.length, n.length);
+      for (let i = 0; i < max && i < 5; i++) if ((p[i]?.id) !== (n[i]?.id)) return { slot: i, dir: n[i] ? 'in' : 'out' };
+      return null;
+    }
+    // Render the Dragon board into `container`, fading the changed white/black slot in or out.
+    // extra = { dragonWhite, dragonBlack, prevWhite, prevBlack } (from detectQuestChange).
+    function applyDragonBoardChange(container, nextQ, extra) {
+      const wCh = extra?.dragonWhite, bCh = extra?.dragonBlack;
+      if (wCh && wCh.dir === 'out') {
+        container.innerHTML = dragonBoardHTML({ ...nextQ, whiteCards: extra.prevWhite || [] });
+        animateSaxonChange(container, '.dragon-fight-card[data-slot="' + wCh.slot + '"]', 0, 'out');
+      } else if (bCh && bCh.dir === 'out') {
+        container.innerHTML = dragonBoardHTML({ ...nextQ, blackCards: extra.prevBlack || [] });
+        animateSaxonChange(container, '.dragon-card-img[data-slot="' + bCh.slot + '"]', 0, 'out');
+      } else {
+        container.innerHTML = dragonBoardHTML(nextQ);
+        if (wCh) animateSaxonChange(container, '.dragon-fight-card[data-slot="' + wCh.slot + '"]', 0, 'in');
+        else if (bCh) animateSaxonChange(container, '.dragon-card-img[data-slot="' + bCh.slot + '"]', 0, 'in');
+      }
+    }
+
     // Build the quest board visual (Excalibur river / Grail slots / combat rows /
     // war fight cards). Shared by the transient popup and the clickable detail overlay.
     function renderQuestBoardVisual(questKey, questData) {
@@ -6870,6 +7000,9 @@ OUTPUT STYLE — read carefully:
           content.innerHTML = grailBoardHTML(questData);
           if (ch) animateSaxonChange(content, '.grail-card-img[data-slot="' + ch.slot + '"]', 0, 'in');
         }
+      } else if (questKey === 'lancelot' && questData.phase === 'dragon') {
+        // Painted Dragon board; fade the changed fight/dragon card IN (played) or OUT (removed).
+        applyDragonBoardChange(content, questData, extra);
       } else {
         content.innerHTML = renderQuestBoardVisual(questKey, questData);
       }
@@ -6893,6 +7026,7 @@ OUTPUT STYLE — read carefully:
         : questKey === 'saxonWar' ? saxonBoardHTML(q)
         : questKey === 'pictWar' ? pictBoardHTML(q)
         : questKey === 'holyGrail' ? grailBoardHTML(q)
+        : (questKey === 'lancelot' && q.phase === 'dragon') ? dragonBoardHTML(q)
         : renderQuestBoardVisual(questKey, q);
       const phase = questKey === 'lancelot' ? (q.phase || 'lancelot') : null;
       $('quest-detail-pattern').textContent = getQuestPatternText(questKey, phase);
@@ -10525,24 +10659,37 @@ OUTPUT STYLE — read carefully:
         ? '<p style="color:var(--gold);font-size:0.875rem;font-weight:600;margin-bottom:0.5rem;">' + patternText + '</p>'
         : '';
 
-      // White cards — always shown as they stand.
-      html += '<p style="color:var(--text-dim);font-size:1rem;">White Cards (Knights)</p>' +
-        '<div class="combat-cards">';
-      for (const c of (res.whiteCards || [])) {
-        html += '<div class="combat-card white-side"><div class="cc-val">' + (c.value || '?') + '</div><div style="font-size:0.625rem;">Fight</div></div>';
+      // Dragon phase uses the painted board (white + stage-aware black cards) instead of the
+      // text card rows; every other combat quest keeps the text rows.
+      const isDragon = res.questKey === 'lancelot' && cachedQuests?.lancelot?.phase === 'dragon';
+      const whiteTotalHtml = '<p style="color:var(--gold);font-size:1.25rem;font-weight:700;">' +
+        (isDragon ? 'White Total: ' : 'Total: ') + res.whiteSum + (res.excaliburBonus ? ' (incl. Excalibur +1)' : '') + '</p>';
+
+      if (!isDragon) {
+        // White cards — always shown as they stand.
+        html += '<p style="color:var(--text-dim);font-size:1rem;">White Cards (Knights)</p>' +
+          '<div class="combat-cards">';
+        for (const c of (res.whiteCards || [])) {
+          html += '<div class="combat-card white-side"><div class="cc-val">' + (c.value || '?') + '</div><div style="font-size:0.625rem;">Fight</div></div>';
+        }
+        html += '</div>' + whiteTotalHtml;
       }
-      html += '</div><p style="color:var(--gold);font-size:1.25rem;font-weight:700;">Total: ' + res.whiteSum + (res.excaliburBonus ? ' (incl. Excalibur +1)' : '') + '</p>';
 
       if (stage === 'preReveal') {
         // Black cards "as they stand" — board order, face-down hidden as "?".
         $('combat-title').textContent = questLabel + ' — Before Reveal';
-        html += '<p style="color:var(--text-dim);font-size:1rem;margin-top:0.5rem;">Black Cards (as they stand)</p>' +
-          '<div class="combat-cards">';
-        for (const c of (res.preRevealBlackCards || [])) {
-          const shown = c.faceDown ? '?' : blackCardValue(res, c);
-          html += '<div class="combat-card black-side' + (c.faceDown ? ' face-down' : '') + '"><div class="cc-val">' + shown + '</div><div style="font-size:0.625rem;">' + (c.faceDown ? 'Hidden' : 'Fight') + '</div></div>';
+        if (isDragon) {
+          html += dragonBoardHTML({ whiteCards: res.whiteCards, blackCards: res.preRevealBlackCards, phase: 'dragon' },
+            { blackCards: res.preRevealBlackCards }) + whiteTotalHtml;
+        } else {
+          html += '<p style="color:var(--text-dim);font-size:1rem;margin-top:0.5rem;">Black Cards (as they stand)</p>' +
+            '<div class="combat-cards">';
+          for (const c of (res.preRevealBlackCards || [])) {
+            const shown = c.faceDown ? '?' : blackCardValue(res, c);
+            html += '<div class="combat-card black-side' + (c.faceDown ? ' face-down' : '') + '"><div class="cc-val">' + shown + '</div><div style="font-size:0.625rem;">' + (c.faceDown ? 'Hidden' : 'Fight') + '</div></div>';
+          }
+          html += '</div>';
         }
-        html += '</div>';
         $('combat-content').innerHTML = html;
         $('combat-actions').innerHTML = '<p class="waiting-text">Revealing shortly...</p>';
         combatStageTimer = setTimeout(() => { try { const cur = roomData?.combatResolution; if (cur) renderCombatOverlay(cur); } catch (err) { debugLog('error', 'combat preReveal timer threw', { msg: err.message, stack: err.stack }); } },
@@ -10552,6 +10699,10 @@ OUTPUT STYLE — read carefully:
 
       if (stage === 'shuffling') {
         $('combat-title').textContent = questLabel + ' — Shuffling';
+        if (isDragon) {
+          html += dragonBoardHTML({ whiteCards: res.whiteCards, blackCards: res.preRevealBlackCards, phase: 'dragon' },
+            { blackCards: res.preRevealBlackCards, hideValues: true }) + whiteTotalHtml;
+        }
         html += '<div class="combat-shuffle-banner">🔀 Shuffling before reveal</div>';
         $('combat-content').innerHTML = html;
         $('combat-actions').innerHTML = '<p class="waiting-text">Shuffling the black cards...</p>';
@@ -10562,13 +10713,20 @@ OUTPUT STYLE — read carefully:
 
       // ── Revealed stage ──
       $('combat-title').textContent = questLabel + ' — Combat Resolution';
-      html += '<p style="color:var(--text-dim);font-size:1rem;margin-top:0.5rem;">Black Cards (Evil)</p>' +
-        '<div class="combat-cards">';
-      for (const c of (res.blackCards || [])) {
-        const val = blackCardValue(res, c);
-        html += '<div class="combat-card black-side"><div class="cc-val">' + val + '</div><div style="font-size:0.625rem;">Fight</div></div>';
+      if (isDragon) {
+        // Painted board with the shuffled black cards revealed (values shown).
+        html += dragonBoardHTML({ whiteCards: res.whiteCards, blackCards: res.blackCards, phase: 'dragon' },
+          { blackCards: res.blackCards, revealAll: true }) + whiteTotalHtml +
+          '<p style="color:var(--red-bright);font-size:1.25rem;font-weight:700;">Black Total: ' + res.blackSum + '</p>';
+      } else {
+        html += '<p style="color:var(--text-dim);font-size:1rem;margin-top:0.5rem;">Black Cards (Evil)</p>' +
+          '<div class="combat-cards">';
+        for (const c of (res.blackCards || [])) {
+          const val = blackCardValue(res, c);
+          html += '<div class="combat-card black-side"><div class="cc-val">' + val + '</div><div style="font-size:0.625rem;">Fight</div></div>';
+        }
+        html += '</div><p style="color:var(--red-bright);font-size:1.25rem;font-weight:700;">Total: ' + res.blackSum + '</p>';
       }
-      html += '</div><p style="color:var(--red-bright);font-size:1.25rem;font-weight:700;">Total: ' + res.blackSum + '</p>';
 
       // Result
       const winner = res.winner || (res.whiteSum > res.blackSum ? 'white' : 'black');
