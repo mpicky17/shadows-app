@@ -890,7 +890,7 @@
     .swords-board .swords-bg { width: 100%; height: auto; display: block; border-radius: 8px; }
     .swords-token {
       position: absolute; width: 9.25%; transform: translate(-50%, -50%);
-      pointer-events: none; transition: opacity 1.4s ease;
+      pointer-events: none; transition: opacity 1s ease;
     }
     .swords-token img { width: 100%; display: block; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.6)); }
     /* Full-screen dim behind the swords overlay; the inner panel reuses the quest-update-popup look. */
@@ -1314,7 +1314,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v138';
+    const APP_VERSION = 'shadows-v139';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -6835,7 +6835,7 @@ OUTPUT STYLE — read carefully:
     // loaded yet defer the flip to its `load` event. The caller un-hides the popup BEFORE
     // this runs so the start frame is painted on a visible board. (Excalibur avoids the
     // same gotcha differently — it reuses an already-loaded token paced by setTimeouts.)
-    function animateSaxonChange(container, selector, idx, dir) {
+    function animateSaxonChange(container, selector, idx, dir, delayMs = 60) {
       const els = container && container.querySelectorAll(selector);
       const el = els && els[idx];
       if (!el) return;
@@ -6846,7 +6846,7 @@ OUTPUT STYLE — read carefully:
       // freshly-inserted (not-yet-decoded) <img> often fails to paint the opacity:0 start
       // frame, so the piece snaps in with no fade. A short delay guarantees several painted
       // 0-frames first — the same mechanism the Excalibur token fade uses reliably.
-      const run = () => setTimeout(() => { el.style.opacity = end; }, 60);
+      const run = () => setTimeout(() => { el.style.opacity = end; }, delayMs);
       // For an <img>, wait until the bitmap is actually DECODED (not just `load`) before the
       // flip. On iOS Safari a loaded-but-not-yet-decoded img never paints its opacity:0 start
       // frame, so the fade is skipped — this is why token (img) fades were invisible while card
@@ -10948,10 +10948,15 @@ OUTPUT STYLE — read carefully:
       // Fade in every slot that changed vs prev (new sword, or a white→black flip).
       const prev = node.prev || [], next = node.swords || [];
       const changedSlots = [];
+      // Reveal-first: the overlay's container fade brings the board in showing the PRIOR swords, then
+      // the new/flipped swords fade in as a distinct, staggered later beat (~500ms, 900ms, 1300ms…) so
+      // players clearly see swords being added rather than the whole board appearing at once.
+      let k = 0;
       for (let i = 0; i < next.length && i < 15; i++) {
         if (i >= prev.length || (prev[i]?.color !== next[i]?.color)) {
           changedSlots.push(i);
-          animateSaxonChange(board, '.swords-token[data-slot="' + i + '"]', 0, 'in');
+          animateSaxonChange(board, '.swords-token[data-slot="' + i + '"]', 0, 'in', 500 + k * 400);
+          k++;
         }
       }
       debugLog('swordOverlay', 'rendered', { id: node.id, reason: node.reason, tokens: Math.min(next.length, 15), changedSlots });
@@ -10966,7 +10971,7 @@ OUTPUT STYLE — read carefully:
           debugLog('swordOverlay', 'faded out', { id: node.id, resultsDeferred });
           if (resultsDeferred) maybeShowResults(); // end-game chain: overlay done → results
         }, 500);
-      }, 3500);
+      }, 5000); // hold long enough for the staggered reveal-first sword fades to finish
     }
 
     // Persistent swords view: tapping the Round-Table sword HUD opens the board and keeps it up until
