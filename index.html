@@ -895,16 +895,26 @@
     .swords-token img { width: 100%; display: block; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.6)); }
     /* Full-screen dim behind the swords overlay; the inner panel reuses the quest-update-popup look. */
     .swords-overlay {
-      position: fixed; inset: 0; z-index: 185; display: flex; align-items: center; justify-content: center;
+      position: fixed; inset: 0; z-index: 260; display: flex; align-items: center; justify-content: center;
       background: rgba(8, 6, 3, 0.72); animation: overlayFadeIn 0.35s ease-out; pointer-events: none;
     }
     .swords-overlay.hidden { display: none; }
     .swords-overlay.fade-out { animation: popupFadeOut 0.5s ease-out forwards; }
+    /* Manual (tapped-from-HUD) mode: stays until the ✕ is pressed, so it needs pointer events. */
+    .swords-overlay.manual { pointer-events: auto; }
     .swords-overlay-panel {
+      position: relative;
       background: rgba(20, 15, 10, 0.96); border: 2px solid var(--gold); border-radius: 12px;
       padding: 1rem 1.25rem; text-align: center; max-width: 92vw;
     }
     .swords-overlay-title { font-weight: 700; font-size: 1.05rem; color: var(--gold); margin-bottom: 0.5rem; }
+    .swords-close {
+      position: absolute; top: 0.4rem; right: 0.5rem; width: 2rem; height: 2rem; line-height: 1;
+      background: var(--red-bright, #c0392b); color: #fff; border: none; border-radius: 50%;
+      font-size: 1.1rem; font-weight: 700; cursor: pointer; z-index: 2;
+    }
+    .swords-overlay .swords-close { display: none; }
+    .swords-overlay.manual .swords-close { display: block; }
 
     /* ── Info / Quest-detail modals ─────────────────────────────────── */
     .info-modal {
@@ -1231,6 +1241,7 @@
     </div>
     <div id="swords-overlay" class="swords-overlay hidden">
       <div class="swords-overlay-panel">
+        <button id="swords-overlay-close" class="swords-close" aria-label="Close">✕</button>
         <div id="swords-overlay-title" class="swords-overlay-title"></div>
         <div id="swords-overlay-board"></div>
       </div>
@@ -1303,7 +1314,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v137';
+    const APP_VERSION = 'shadows-v138';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -2827,6 +2838,7 @@
     $('btn-close-rules').addEventListener('click', closeRules);
     $('btn-info-modal-close').addEventListener('click', closeInfoModal);
     $('btn-quest-detail-close').addEventListener('click', () => $('quest-detail-overlay').classList.add('hidden'));
+    $('swords-overlay-close').addEventListener('click', closeSwordsView);
     $('btn-quest-detail-help').addEventListener('click', () => {
       if (questDetailKey) showInfoModal(getLocationLabel(questDetailKey), getQuestRulesSummary(questDetailKey));
     });
@@ -3896,6 +3908,9 @@
           '<div class="sword-pip ' + (s.color || 'white') + '"></div>'
         ).join('');
       }
+      // Tap the sword HUD to open the persistent swords board view (wire once — innerHTML rebuilds
+      // above don't replace the container element).
+      if (!swordsEl.dataset.wired) { swordsEl.dataset.wired = '1'; swordsEl.addEventListener('click', openSwordsView); }
     }
 
     function renderQuests() {
@@ -10926,7 +10941,8 @@ OUTPUT STYLE — read carefully:
       const board = $('swords-overlay-board');
       $('swords-overlay-title').textContent = SWORD_OVERLAY_REASON_TEXT[node.reason] || 'The swords change';
       // Un-hide BEFORE building so the fade-in start frame (opacity:0) paints on a visible overlay.
-      overlay.classList.remove('hidden', 'fade-out');
+      // Drop 'manual' so a synced change cleanly takes over from any tapped-open view.
+      overlay.classList.remove('hidden', 'fade-out', 'manual');
       board.innerHTML = camelotSwordsBoardHTML(node.swords || []);
       swordOverlayActive = true;
       // Fade in every slot that changed vs prev (new sword, or a white→black flip).
@@ -10951,6 +10967,24 @@ OUTPUT STYLE — read carefully:
           if (resultsDeferred) maybeShowResults(); // end-game chain: overlay done → results
         }, 500);
       }, 3500);
+    }
+
+    // Persistent swords view: tapping the Round-Table sword HUD opens the board and keeps it up until
+    // the ✕ is pressed (no auto-fade, no sync). Reuses the same overlay element + board builder.
+    function openSwordsView() {
+      const overlay = $('swords-overlay');
+      if (swordOverlayTimer) clearTimeout(swordOverlayTimer); // cancel any transient auto-fade
+      const swords = cachedBoard?.swords || [];
+      const wc = swords.filter(s => s.color !== 'black').length, bc = swords.length - wc;
+      $('swords-overlay-title').textContent = 'Swords on the Round Table (' + wc + ' White / ' + bc + ' Black)';
+      $('swords-overlay-board').innerHTML = camelotSwordsBoardHTML(swords);
+      overlay.classList.remove('hidden', 'fade-out');
+      overlay.classList.add('manual');
+    }
+    function closeSwordsView() {
+      const overlay = $('swords-overlay');
+      overlay.classList.add('hidden');
+      overlay.classList.remove('manual');
     }
 
     function onCombatResolutionChanged() {
