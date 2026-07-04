@@ -1345,7 +1345,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v146';
+    const APP_VERSION = 'shadows-v147';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1507,6 +1507,7 @@
     let logExpanded = false;
     let previousLogKeys = new Set();
     let dragState = null;
+    let suppressCardClick = false; // set after a mouse drag so the trailing click doesn't also select
     let joinRequestListener = null;
     let joinResponseListener = null;
     let pendingJoinKnight = null;
@@ -3748,11 +3749,13 @@
           showInfoModal(getCardDisplayName(card), getCardEffectDescription(card));
         });
         helpBtn.addEventListener('touchstart', e => e.stopPropagation(), { passive: true });
+        helpBtn.addEventListener('mousedown', e => e.stopPropagation());
         el.appendChild(helpBtn);
         el.dataset.cardIndex = myHand.indexOf(card);
         el.addEventListener('click', () => onCardTap(card.id));
-        // Long-press drag to reorder
+        // Long-press drag to reorder (touch) / click-drag (mouse)
         el.addEventListener('touchstart', onHandCardTouchStart, { passive: true });
+        el.addEventListener('mousedown', onHandCardMouseDown);
         container.appendChild(el);
       }
     }
@@ -3795,6 +3798,39 @@
       document.addEventListener('touchmove', onMove, { passive: false });
       document.addEventListener('touchend', onEnd);
       document.addEventListener('touchcancel', onEnd);
+    }
+
+    // Mouse (PC) reorder — click-drag (no long-press). Reuses the shared drag engine; the touch path
+    // above is left untouched. A press with no movement stays a plain click → onCardTap selects.
+    function onHandCardMouseDown(e) {
+      if (e.button !== 0) return; // primary (left) button only
+      const el = e.currentTarget;
+      const cardIndex = parseInt(el.dataset.cardIndex);
+      const startX = e.clientX, startY = e.clientY;
+      let started = false;
+
+      function onMove(ev) {
+        if (!started) {
+          if (Math.abs(ev.clientX - startX) > 6 || Math.abs(ev.clientY - startY) > 6) {
+            started = true;
+            startDrag(el, cardIndex, startX, startY);
+          } else return;
+        }
+        ev.preventDefault();
+        updateDrag(ev.clientX, ev.clientY);
+      }
+      function onUp() {
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+        if (started) {
+          finishDrag();
+          // Swallow the click that fires right after a drag so it doesn't also toggle selection.
+          suppressCardClick = true;
+          setTimeout(() => { suppressCardClick = false; }, 80);
+        }
+      }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
     }
 
     function startDrag(el, cardIndex, x, y) {
@@ -3876,6 +3912,7 @@
     }
 
     function onCardTap(cardId) {
+      if (suppressCardClick) { suppressCardClick = false; return; } // ignore the click right after a mouse drag
       if (roomData && roomData.status === 'setup' && !mySetupShared) {
         // Toggle selection for sharing
         selectedCardId = (selectedCardId === cardId) ? null : cardId;
