@@ -1303,7 +1303,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v136';
+    const APP_VERSION = 'shadows-v137';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -9343,6 +9343,7 @@ OUTPUT STYLE — read carefully:
       // after any camelotLose cinematic and before the results screen (maybeShowResults waits on it).
       if (prevSwords.some((s, i) => s.color !== swords[i]?.color)) {
         swordCountMeta.swordOverlay = { id: Date.now(), prev: prevSwords, swords: swords.map(s => ({ color: s.color || 'white' })), reason: 'endgame' };
+        debugLog('swordOverlay', 'writing node (endgame flip)', { id: swordCountMeta.swordOverlay.id, count: swords.length });
       }
       await fbDb.ref('games/' + currentRoom + '/meta').update(swordCountMeta);
       const msg = winner === 'loyal'
@@ -10881,7 +10882,7 @@ OUTPUT STYLE — read carefully:
         fbDb.ref('games/' + currentRoom + '/meta/cinematic').set(null);
       }
       // A swords-change overlay that was waiting for the cinematic to finish plays now (before results).
-      if (swordOverlayDeferred) { swordOverlayDeferred = false; onSwordOverlayChanged(); }
+      if (swordOverlayDeferred) { swordOverlayDeferred = false; debugLog('swordOverlay', 'draining deferred after cinematic'); onSwordOverlayChanged(); }
       // If the game ended during the cinematic(s), the summary was deferred — show it now.
       else if (resultsDeferred) maybeShowResults();
     }
@@ -10899,18 +10900,25 @@ OUTPUT STYLE — read carefully:
       const next = (cachedBoard?.swords || []).map(s => ({ color: s.color || 'white' }));
       // Nothing actually changed (e.g. Loyal accused with no White Sword to flip) → no overlay.
       const changed = next.length !== prev.length || next.some((s, i) => s.color !== prev[i]?.color);
-      if (!changed) return null;
-      return { id: Date.now(), prev, swords: next, reason: reason || 'questWin' };
+      if (!changed) { debugLog('swordOverlay', 'write skipped (no change)', { reason }); return null; }
+      const node = { id: Date.now(), prev, swords: next, reason: reason || 'questWin' };
+      debugLog('swordOverlay', 'writing node', { id: node.id, reason: node.reason, prev: prev.length, next: next.length });
+      return node;
     }
     function onSwordOverlayChanged() {
       const node = roomData?.swordOverlay;
       const overlay = $('swords-overlay');
       if (!node) { overlay.classList.add('hidden'); return; }
-      if (node.id === lastSwordOverlayId) return;
+      if (node.id === lastSwordOverlayId) { debugLog('swordOverlay', 'dedup skip', { id: node.id }); return; }
       // "After the video": while a cinematic is playing/queued/pending, defer until endCinematic re-fires us.
       const pendingCinematic = !!(roomData?.cinematic && CINEMATICS[roomData.cinematic.type]);
-      if (cinematicPlaying || cinematicQueue.length > 0 || pendingCinematic) { swordOverlayDeferred = true; return; }
+      if (cinematicPlaying || cinematicQueue.length > 0 || pendingCinematic) {
+        swordOverlayDeferred = true;
+        debugLog('swordOverlay', 'deferred behind cinematic', { id: node.id, reason: node.reason, cinematicPlaying, queueLen: cinematicQueue.length, pending: roomData?.cinematic?.type || null });
+        return;
+      }
       lastSwordOverlayId = node.id;
+      debugLog('swordOverlay', 'showing', { id: node.id, reason: node.reason, prev: (node.prev || []).length, next: (node.swords || []).length });
       showSwordOverlay(node);
     }
     function showSwordOverlay(node) {
@@ -10923,11 +10931,14 @@ OUTPUT STYLE — read carefully:
       swordOverlayActive = true;
       // Fade in every slot that changed vs prev (new sword, or a white→black flip).
       const prev = node.prev || [], next = node.swords || [];
+      const changedSlots = [];
       for (let i = 0; i < next.length && i < 15; i++) {
         if (i >= prev.length || (prev[i]?.color !== next[i]?.color)) {
+          changedSlots.push(i);
           animateSaxonChange(board, '.swords-token[data-slot="' + i + '"]', 0, 'in');
         }
       }
+      debugLog('swordOverlay', 'rendered', { id: node.id, reason: node.reason, tokens: Math.min(next.length, 15), changedSlots });
       if (swordOverlayTimer) clearTimeout(swordOverlayTimer);
       swordOverlayTimer = setTimeout(() => {
         overlay.classList.add('fade-out');
@@ -10936,6 +10947,7 @@ OUTPUT STYLE — read carefully:
           swordOverlayActive = false;
           // Only the acting player clears the shared node; id-dedupe stops replay for everyone else.
           if (isMyTurn() && currentRoom) fbDb.ref('games/' + currentRoom + '/meta/swordOverlay').set(null);
+          debugLog('swordOverlay', 'faded out', { id: node.id, resultsDeferred });
           if (resultsDeferred) maybeShowResults(); // end-game chain: overlay done → results
         }, 500);
       }, 3500);
