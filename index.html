@@ -1345,7 +1345,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v143';
+    const APP_VERSION = 'shadows-v144';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -3346,10 +3346,15 @@
       try {
         const currentKnight = roomData.currentTurnKnight;
         const turnOrder = roomData.turnOrder || [];
+        // Drive off the FRESH players snapshot, not the cached one: a suspended/reloaded host (iOS
+        // multi-tab) can hold a stale cache and re-offer/re-kill a knight already Grail-saved (3SSHNW).
+        const players = (await fbDb.ref('games/' + currentRoom + '/players').once('value')).val() || {};
+        const isDyingNow = (id) => { const p = players[id]; return p && p.alive !== false && !p.isRevealed && (p.life ?? 4) <= 0; };
+        const freshGrailHolder = () => turnOrder.find(id => players[id]?.relics?.holyGrail === true) || null;
         for (const kid of turnOrder) {
           if (kid === currentKnight) continue;   // their death waits for end of their own turn
-          if (!isDying(kid)) continue;
-          const grailHolder = findGrailHolder();
+          if (!isDyingNow(kid)) continue;
+          const grailHolder = freshGrailHolder();
           if (grailHolder) {
             debugLog('death', 'off-turn dying — offering Holy Grail', { dyingKnight: kid, grailHolder });
             await setPendingInteraction({
@@ -3377,8 +3382,16 @@
       const accepted = interaction.responses?.[interaction.holderKnight]?.accepted;
       await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').set(null);
       if (!accepted) {
-        await killKnight(interaction.dyingKnight);
-        if (roomData?.status === 'ended') return;
+        // Re-check from a FRESH read that the knight is still dying before killing. A suspended/reloaded
+        // host (iOS multi-tab) can re-offer + decline a knight who was already Grail-saved between the
+        // offer and the decision (3SSHNW t27: killed galahad at life 4). Never kill a non-dying knight.
+        const p = (await fbDb.ref('games/' + currentRoom + '/players/' + interaction.dyingKnight).once('value')).val() || {};
+        if (p.alive !== false && (p.life ?? 4) <= 0) {
+          await killKnight(interaction.dyingKnight);
+          if (roomData?.status === 'ended') return;
+        } else {
+          debugLog('death', 'skip off-turn kill — no longer dying', { dyingKnight: interaction.dyingKnight, life: p.life });
+        }
       }
       // Handle any remaining simultaneous deaths.
       await resolveImmediateDeaths();
