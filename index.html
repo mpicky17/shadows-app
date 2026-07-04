@@ -1314,7 +1314,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v139';
+    const APP_VERSION = 'shadows-v140';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -7016,10 +7016,12 @@ OUTPUT STYLE — read carefully:
       [0.2758, 0.3420, -10], [0.3856, 0.3290, -5], [0.4970, 0.3244, 0],
       [0.6098, 0.3213, 6],   [0.7136, 0.3451, 9],
     ];
-    // Group white fight cards by value into the full house. Groups ordered by size DESC (tie →
-    // first appearance) so the 3-of-a-kind fills group A (slots 0-2) and the pair fills group B
-    // (slots 3-4): slot = groupRank*3 + posInGroup. Size-desc avoids the overflow a first-appearance
-    // order would cause if the pair's value were played before the triple's.
+    // Group white fight cards by value into the full house (slots: group A = 0-2, group B = 3-4;
+    // slot = groupRank*3 + posInGroup). STABLE placement: keep first-appearance order — the first
+    // value played fills group A (3-slot side), the second fills group B (2-slot side) — and only
+    // flip when a group actually reaches 3 (the three-of-a-kind must occupy the 3-slot side A). This
+    // holds a card's position steady as later cards are played (at most one flip, only when the
+    // second value turns out to be the triple), instead of re-sorting by size on every card.
     function buildLancelotWhiteLayout(whiteCards) {
       const groups = [], byVal = {};
       for (const c of (whiteCards || [])) {
@@ -7027,7 +7029,11 @@ OUTPUT STYLE — read carefully:
         if (byVal[v] == null) { byVal[v] = groups.length; groups.push({ order: groups.length, cards: [] }); }
         groups[byVal[v]].cards.push(c);
       }
-      groups.sort((a, b) => (b.cards.length - a.cards.length) || (a.order - b.order));
+      groups.sort((a, b) => {
+        const aTriple = a.cards.length === 3, bTriple = b.cards.length === 3;
+        if (aTriple !== bTriple) return aTriple ? -1 : 1; // the 3-of-a-kind takes group A (3 slots)
+        return a.order - b.order;                          // otherwise keep first-appearance order
+      });
       const slots = new Array(5).fill(null);
       groups.forEach((g, rank) => g.cards.forEach((c, pi) => {
         const s = rank * 3 + pi;
