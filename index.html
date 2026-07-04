@@ -889,7 +889,7 @@
     .swords-board { position: relative; width: 100%; max-width: 420px; margin: 0.25rem auto; }
     .swords-board .swords-bg { width: 100%; height: auto; display: block; border-radius: 8px; }
     .swords-token {
-      position: absolute; width: 6%; transform: translate(-50%, -50%);
+      position: absolute; width: 9.25%; transform: translate(-50%, -50%);
       pointer-events: none; transition: opacity 1.4s ease;
     }
     .swords-token img { width: 100%; display: block; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.6)); }
@@ -1303,7 +1303,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v134';
+    const APP_VERSION = 'shadows-v135';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -7135,10 +7135,10 @@ OUTPUT STYLE — read carefully:
     // of the board image, tuned via camelot-swords-preview. Each entry is [x, y, rot-deg]. Swords fill
     // in array order (slot i = swords[i]); each is white or black from the live board/swords list.
     const CAMELOT_SWORDS_POS = [
-      [0.3000, 0.2000, 0], [0.4200, 0.1700, 0], [0.5400, 0.1700, 0], [0.6600, 0.2000, 0],
-      [0.7400, 0.3000, 0], [0.7800, 0.4200, 0], [0.7800, 0.5400, 0], [0.7400, 0.6600, 0],
-      [0.6600, 0.7400, 0], [0.5400, 0.7800, 0], [0.4200, 0.7800, 0], [0.3000, 0.7400, 0],
-      [0.2400, 0.6200, 0], [0.2200, 0.4800, 0], [0.2400, 0.3400, 0],
+      [0.6333, 0.2351, 17], [0.7364, 0.2851, 43], [0.7886, 0.3954, 71], [0.7848, 0.5248, 105],
+      [0.7250, 0.6176, 135], [0.6280, 0.6644, 161], [0.5174, 0.6414, -161], [0.4174, 0.5954, -137],
+      [0.3841, 0.4994, -103], [0.3583, 0.3891, -67], [0.4189, 0.2851, -45], [0.5182, 0.2359, -17],
+      [0.5705, 0.1605, -2], [0.7212, 0.1883, 35], [0.8311, 0.3057, 56],
     ];
     // Render the swords board from an array of { color:'white'|'black' } (up to 15).
     function camelotSwordsBoardHTML(swords) {
