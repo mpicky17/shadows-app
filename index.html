@@ -1345,7 +1345,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v144';
+    const APP_VERSION = 'shadows-v145';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -9928,6 +9928,13 @@ OUTPUT STYLE — read carefully:
       renderHand();
     }
 
+    // A valid Accuse / Arthur-exchange target exists only if another knight is still active (alive and
+    // not a revealed traitor). When the acting knight is the sole survivor, both options are hidden.
+    function hasOtherActiveKnights() {
+      return (roomData?.turnOrder || []).some(k =>
+        k !== roomData?.currentTurnKnight && cachedPlayers[k]?.alive !== false && !cachedPlayers[k]?.isRevealed);
+    }
+
     function renderHeroicMenu() {
       const area = $('turn-action-area');
       const loc = getMyLocation();
@@ -10024,7 +10031,7 @@ OUTPUT STYLE — read carefully:
       // Accuse
       const totalSwords = (cachedBoard?.swords || []).length;
       const traitorRevealed = Object.values(cachedPlayers).some(p => p && p.isRevealed);
-      const canAccuse = (siegeEngines >= 6 || totalSwords >= 6) && !cachedPlayers[myKnight]?.hasAccused && lastHeroicAction !== 'accuse' && !traitorRevealed;
+      const canAccuse = (siegeEngines >= 6 || totalSwords >= 6) && !cachedPlayers[myKnight]?.hasAccused && lastHeroicAction !== 'accuse' && !traitorRevealed && hasOtherActiveKnights();
       if (canAccuse) {
         html += '<button class="btn btn-evil" id="btn-accuse" style="margin-top:0.25rem;">Accuse a Knight</button>';
       }
@@ -10070,7 +10077,7 @@ OUTPUT STYLE — read carefully:
         }
       }
       // Arthur: card exchange
-      if (myKnight === 'arthur' && !roomData.arthurPowerUsed && myHand.length > 0) {
+      if (myKnight === 'arthur' && !roomData.arthurPowerUsed && myHand.length > 0 && hasOtherActiveKnights()) {
         html += '<button class="btn btn-heroic" id="btn-arthur-exchange" style="border-color:var(--gold);">Arthur: Exchange Card</button>';
       }
       // Tristan: free move from Round Table
