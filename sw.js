@@ -1,6 +1,7 @@
 // sw.js — Service Worker for Shadows Over Camelot PWA
 // Cache-first for assets, network-first for HTML.
 // Bump CACHE_NAME (and APP_VERSION in index.html) to invalidate cache on updates.
+// (v153 content unchanged; comment touched to force a fresh Pages deploy after a transient failure.)
 
 const CACHE_NAME = 'shadows-v153';
 
