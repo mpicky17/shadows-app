@@ -958,6 +958,15 @@
     .swords-overlay .swords-close { display: none; }
     .swords-overlay.manual .swords-close { display: block; }
 
+    /* ── Siege-engines change overlay: up to 12 engines on the realistic siege board (v152) ────── */
+    .siege-board { position: relative; width: 100%; max-width: 460px; margin: 0.25rem auto; }
+    .siege-board .siege-bg { width: 100%; height: auto; aspect-ratio: 1200 / 893; display: block; border-radius: 8px; }
+    .siege-token {
+      position: absolute; width: 8%; transform: translate(-50%, -50%);
+      pointer-events: none; transition: opacity 1s ease;
+    }
+    .siege-token img { width: 100%; display: block; filter: drop-shadow(0 2px 5px rgba(0,0,0,0.7)); }
+
     /* ── Info / Quest-detail modals ─────────────────────────────────── */
     .info-modal {
       position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 210;
@@ -1201,7 +1210,7 @@
       <div class="board-status">
         <div class="status-item">
           <span class="status-label">Siege Engines</span>
-          <span class="status-value" id="siege-count">0 / 12</span>
+          <span class="status-value" id="siege-count" style="cursor:pointer;" title="Tap to view the siege engines">0 / 12</span>
         </div>
         <div class="status-item">
           <span class="status-label">Swords</span>
@@ -1296,6 +1305,13 @@
         <div id="swords-overlay-board"></div>
       </div>
     </div>
+    <div id="siege-overlay" class="swords-overlay hidden">
+      <div class="swords-overlay-panel">
+        <button id="siege-overlay-close" class="swords-close" aria-label="Close">✕</button>
+        <div id="siege-overlay-title" class="swords-overlay-title"></div>
+        <div id="siege-overlay-board"></div>
+      </div>
+    </div>
     <div class="info-modal hidden" id="quest-detail-overlay">
       <div class="info-panel">
         <div class="info-header">
@@ -1364,7 +1380,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v151';
+    const APP_VERSION = 'shadows-v152';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1487,6 +1503,12 @@
     let swordOverlayActive = false;  // the swords overlay is currently on-screen (results wait for it)
     let swordOverlayDeferred = false;// swords overlay pending behind a still-playing cinematic
     let swordOverlayTimer = null;
+    // Siege-engines change overlay (v152) — mirrors the swords overlay; defers behind the swords one.
+    let lastSiegeOverlayId = null;
+    let siegeOverlayActive = false;
+    let siegeOverlayDeferred = false;
+    let siegeOverlayTimer = null;
+    let prevSiegeCount = null;       // board-listener diff to detect any add/removal
     let combatStageTimer = null; // drives the combat reveal animation (Change 2)
     let resolvingDeaths = false; // re-entry guard for off-turn death resolution (Change 5)
     // Percival's Lancelot's-Armor decline flow (client-local UI stage; only the acting player interacts)
@@ -2859,6 +2881,7 @@
           onQuestResultChanged();
           onCinematicChanged();
           onSwordOverlayChanged();
+          onSiegeOverlayChanged();
         }
     }
 
@@ -3118,6 +3141,7 @@
 
         // Board
         updates[gp + 'board/siegeEngines'] = 0;
+        updates[gp + 'meta/siegeOverlay'] = null; // clear any stale siege overlay (v152)
         updates[gp + 'board/swords'] = [];
 
         // Quests
@@ -3265,6 +3289,8 @@
     $('btn-info-modal-close').addEventListener('click', closeInfoModal);
     $('btn-quest-detail-close').addEventListener('click', () => $('quest-detail-overlay').classList.add('hidden'));
     $('swords-overlay-close').addEventListener('click', closeSwordsView);
+    $('siege-overlay-close').addEventListener('click', closeSiegeView);
+    $('siege-count').addEventListener('click', openSiegeView);
     $('btn-quest-detail-help').addEventListener('click', () => {
       if (questDetailKey) showInfoModal(getLocationLabel(questDetailKey), getQuestRulesSummary(questDetailKey));
     });
@@ -3703,13 +3729,32 @@
 
     function listenToBoard() {
       if (boardListener) return;
+      prevSiegeCount = null; // fresh attach — first snapshot only seeds the diff baseline (v152)
       boardListener = fbDb.ref('games/' + currentRoom + '/board').on('value', snap => {
-        cachedBoard = snap.val() || { siegeEngines: 0, swords: [] };
+        const newBoard = snap.val() || { siegeEngines: 0, swords: [] };
+        const nc = newBoard.siegeEngines || 0;
+        const prev = prevSiegeCount;
+        cachedBoard = newBoard;
         renderBoard();
         // On an ended game (reconnect/join to view results), meta won't tick again — refresh
         // the results stats once the board data arrives so sword/siege counts aren't 0.
         if (roomData?.status === 'ended') maybeShowResults();
+        // v152: fire the siege-engines change overlay on any add/removal (acting player writes it).
+        if (prev !== null && prev !== nc) onSiegeCountChanged(prev, nc);
+        prevSiegeCount = nc;
       });
+    }
+
+    // v152: the acting player publishes a synced siege overlay when the siege count changes.
+    function onSiegeCountChanged(prevCount, newCount) {
+      if (!currentRoom) return;
+      // Allow 'ended' too so the game-losing 12th engine still gets its overlay (results wait for it).
+      if (roomData?.status !== 'playing' && roomData?.status !== 'ended') return;
+      if (!isMyTurn()) return; // single writer — the turn player caused the change
+      const node = { id: Date.now(), prev: prevCount, next: newCount,
+        dir: newCount > prevCount ? 'add' : 'remove' };
+      debugLog('siegeOverlay', 'writing node', node);
+      fbDb.ref('games/' + currentRoom + '/meta/siegeOverlay').set(node).catch(() => {});
     }
 
     function listenToQuests() {
@@ -7711,6 +7756,26 @@ OUTPUT STYLE — read carefully:
       return html + '</div>';
     }
 
+    // ── Siege-engines board (v152; positions tuned via siege-preview.html) ──────────────
+    // Siege is a count 0–12 filling 12 fixed slots. [x, y, rotation, width%] fractions of the board.
+    const SIEGE_POS = [
+      [0.5000, 0.1800, 0, 8], [0.6900, 0.2260, 0, 8], [0.8290, 0.3500, 0, 8], [0.8800, 0.5200, 0, 8],
+      [0.8290, 0.6900, 0, 8], [0.6900, 0.8140, 0, 8], [0.5000, 0.8600, 0, 8], [0.3100, 0.8140, 0, 8],
+      [0.1710, 0.6900, 0, 8], [0.1200, 0.5200, 0, 8], [0.1710, 0.3500, 0, 8], [0.3100, 0.2260, 0, 8],
+    ];
+    // Render the siege board with the first `count` engines placed (up to 12).
+    function siegeBoardHTML(count) {
+      let html = '<div class="siege-board"><img class="siege-bg" src="assets/siege-board.png" width="1200" height="893" alt="Siege engines around Camelot">';
+      const n = Math.max(0, Math.min(12, count | 0));
+      for (let i = 0; i < n; i++) {
+        const p = SIEGE_POS[i] || SIEGE_POS[SIEGE_POS.length - 1];
+        html += '<img class="siege-token" data-slot="' + i + '" src="assets/siege-token.png" alt="" style="left:' +
+          (p[0] * 100).toFixed(2) + '%;top:' + (p[1] * 100).toFixed(2) + '%;width:' + p[3] +
+          '%;transform:translate(-50%,-50%) rotate(' + p[2] + 'deg);z-index:' + (1 + i) + ';">';
+      }
+      return html + '</div>';
+    }
+
     // Build the quest board visual (Excalibur river / Grail slots / combat rows /
     // war fight cards). Shared by the transient popup and the clickable detail overlay.
     function renderQuestBoardVisual(questKey, questData) {
@@ -9969,9 +10034,12 @@ OUTPUT STYLE — read carefully:
       // meta but not yet shown — e.g. deferred behind a cinematic), the endgame flip must play first.
       const pendingSwordOverlay = swordOverlayActive ||
         !!(roomData?.swordOverlay && roomData.swordOverlay.id !== lastSwordOverlayId);
-      if (cinematicPlaying || cinematicQueue.length > 0 || pendingCinematic || pendingSwordOverlay) {
+      // v152: also wait for a siege-engines overlay (on-screen or written-but-not-yet-shown).
+      const pendingSiegeOverlay = siegeOverlayActive ||
+        !!(roomData?.siegeOverlay && roomData.siegeOverlay.id !== lastSiegeOverlayId);
+      if (cinematicPlaying || cinematicQueue.length > 0 || pendingCinematic || pendingSwordOverlay || pendingSiegeOverlay) {
         resultsDeferred = true;
-        debugLog('cinematic', 'results deferred', { cinematicPlaying, queueLen: cinematicQueue.length, pending: roomData?.cinematic?.type || null, swordOverlay: pendingSwordOverlay });
+        debugLog('cinematic', 'results deferred', { cinematicPlaying, queueLen: cinematicQueue.length, pending: roomData?.cinematic?.type || null, swordOverlay: pendingSwordOverlay, siegeOverlay: pendingSiegeOverlay });
         return;
       }
       resultsDeferred = false;
@@ -11489,9 +11557,12 @@ OUTPUT STYLE — read carefully:
         fbDb.ref('games/' + currentRoom + '/meta/cinematic').set(null);
       }
       // A swords-change overlay that was waiting for the cinematic to finish plays now (before results).
-      if (swordOverlayDeferred) { swordOverlayDeferred = false; debugLog('swordOverlay', 'draining deferred after cinematic'); onSwordOverlayChanged(); }
+      let drained = false;
+      if (swordOverlayDeferred) { swordOverlayDeferred = false; debugLog('swordOverlay', 'draining deferred after cinematic'); onSwordOverlayChanged(); drained = true; }
+      // A siege overlay waiting behind the cinematic drains too (it re-defers behind the sword one if that just fired).
+      if (siegeOverlayDeferred) { siegeOverlayDeferred = false; debugLog('siegeOverlay', 'draining deferred after cinematic'); onSiegeOverlayChanged(); drained = true; }
       // If the game ended during the cinematic(s), the summary was deferred — show it now.
-      else if (resultsDeferred) maybeShowResults();
+      if (!drained && resultsDeferred) maybeShowResults();
     }
 
     // ── Swords-change overlay (synced via meta/swordOverlay) ─────────────────────
@@ -11580,6 +11651,74 @@ OUTPUT STYLE — read carefully:
     }
     function closeSwordsView() {
       const overlay = $('swords-overlay');
+      overlay.classList.add('hidden');
+      overlay.classList.remove('manual');
+    }
+
+    // ── Siege-engines change overlay (synced via meta/siegeOverlay, v152) ────────────────
+    // Mirrors the swords overlay. Plays after any siege add/removal, but DEFERS behind a
+    // win/loss cinematic AND behind the swords overlay (so on a Pict/Saxon loss the sword
+    // change plays first, then the +2 siege engines), then before the end-game results.
+    function onSiegeOverlayChanged() {
+      const node = roomData?.siegeOverlay;
+      const overlay = $('siege-overlay');
+      if (!node) { if (!overlay.classList.contains('manual')) overlay.classList.add('hidden'); return; }
+      if (node.id === lastSiegeOverlayId) return;
+      const pendingCinematic = !!(roomData?.cinematic && CINEMATICS[roomData.cinematic.type]);
+      const pendingSword = swordOverlayActive || swordOverlayDeferred ||
+        !!(roomData?.swordOverlay && roomData.swordOverlay.id !== lastSwordOverlayId);
+      if (cinematicPlaying || cinematicQueue.length > 0 || pendingCinematic || pendingSword) {
+        siegeOverlayDeferred = true;
+        debugLog('siegeOverlay', 'deferred', { id: node.id, cinematicPlaying, pendingSword });
+        return;
+      }
+      lastSiegeOverlayId = node.id;
+      debugLog('siegeOverlay', 'showing', { id: node.id, dir: node.dir, prev: node.prev, next: node.next });
+      showSiegeOverlay(node);
+    }
+    function showSiegeOverlay(node) {
+      const overlay = $('siege-overlay');
+      const board = $('siege-overlay-board');
+      const dir = node.dir || ((node.next | 0) > (node.prev | 0) ? 'add' : 'remove');
+      $('siege-overlay-title').textContent = dir === 'add'
+        ? 'The siege of Camelot tightens!' : 'A siege engine is destroyed!';
+      overlay.classList.remove('hidden', 'fade-out', 'manual');
+      const hi = Math.max(node.prev | 0, node.next | 0);
+      const lo = Math.min(node.prev | 0, node.next | 0);
+      board.innerHTML = siegeBoardHTML(hi); // render up to the higher count, then animate the delta
+      siegeOverlayActive = true;
+      // Reveal-first: added engines fade in as a staggered later beat; removed ones fade out.
+      let k = 0;
+      for (let i = lo; i < hi && i < 12; i++) {
+        animateSaxonChange(board, '.siege-token[data-slot="' + i + '"]', 0, dir === 'add' ? 'in' : 'out', 450 + k * 350);
+        k++;
+      }
+      debugLog('siegeOverlay', 'rendered', { id: node.id, dir, prev: node.prev, next: node.next });
+      if (siegeOverlayTimer) clearTimeout(siegeOverlayTimer);
+      siegeOverlayTimer = setTimeout(() => {
+        overlay.classList.add('fade-out');
+        setTimeout(() => {
+          overlay.classList.add('hidden');
+          overlay.classList.remove('fade-out');
+          siegeOverlayActive = false;
+          if (isMyTurn() && currentRoom) fbDb.ref('games/' + currentRoom + '/meta/siegeOverlay').set(null);
+          debugLog('siegeOverlay', 'faded out', { id: node.id, resultsDeferred });
+          if (resultsDeferred) maybeShowResults();
+        }, 500);
+      }, 4200);
+    }
+    // Persistent siege view: tap the '#/12' siege HUD to open the board until the ✕ is pressed.
+    function openSiegeView() {
+      const overlay = $('siege-overlay');
+      if (siegeOverlayTimer) clearTimeout(siegeOverlayTimer);
+      const n = cachedBoard?.siegeEngines || 0;
+      $('siege-overlay-title').textContent = 'Siege Engines (' + n + ' / 12)';
+      $('siege-overlay-board').innerHTML = siegeBoardHTML(n);
+      overlay.classList.remove('hidden', 'fade-out');
+      overlay.classList.add('manual');
+    }
+    function closeSiegeView() {
+      const overlay = $('siege-overlay');
       overlay.classList.add('hidden');
       overlay.classList.remove('manual');
     }
