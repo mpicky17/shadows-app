@@ -304,6 +304,18 @@
     }
     .toggle.on::after { transform: translateX(20px); }
 
+    /* Randomize player selection (v148) */
+    .grid-disabled .knight-card { opacity: 0.45; pointer-events: none; filter: grayscale(0.6); }
+    .lobby-settings.readonly .toggle { pointer-events: none; opacity: 0.85; cursor: default; }
+    #randomize-panel {
+      background: var(--bg-card); border: 1px solid var(--gold-dim);
+      border-radius: var(--radius); padding: 0.85rem; margin: 0.5rem 0 0.75rem;
+    }
+    #randomize-panel .rp-msg { font-size: 1rem; margin-bottom: 0.6rem; line-height: 1.35; }
+    #randomize-panel .rp-count { color: var(--gold); font-weight: 600; white-space: nowrap; }
+    #randomize-panel .rp-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    #randomize-panel .rp-actions .btn { flex: 1; min-width: 130px; font-size: 1rem; }
+
     .lobby-actions {
       display: flex; flex-direction: column; gap: 0.75rem;
       margin-top: auto;
@@ -1103,6 +1115,7 @@
     <p class="room-code-hint">Share this code with other players</p>
 
     <h3>Choose Your Knight</h3>
+    <div id="randomize-panel" style="display:none;"></div>
     <div class="knight-grid" id="knight-grid"></div>
 
     <h3>Players (<span id="player-count">0</span>/7)</h3>
@@ -1110,7 +1123,12 @@
     <div id="spectator-list" style="display:none;font-size:1rem;color:var(--text-dim);padding:0.5rem 0;"></div>
 
     <div class="lobby-settings" id="host-settings" style="display:none;">
-      <h3>Game Settings</h3>
+      <h3>Game Settings <span id="host-settings-readonly-note" style="display:none;font-size:0.75rem;color:var(--text-dim);font-weight:normal;">(host settings — read-only)</span></h3>
+      <div class="setting-row">
+        <label>Randomize player selection</label>
+        <div class="toggle" id="toggle-randomize" role="button" tabindex="0"></div>
+        <div style="font-size:0.75rem;color:var(--text-dim);width:100%;margin-top:0.25rem;">When on, no one hand-picks a knight — each player is assigned a random one at start. Players who haven't chosen get a Play/Spectate prompt (auto-spectate after 60s). Spectating is still allowed.</div>
+      </div>
       <div class="setting-row">
         <label>Include Traitor Card</label>
         <div class="toggle on" id="toggle-traitor" role="button" tabindex="0"></div>
@@ -1194,6 +1212,7 @@
       <div class="loyalty-badge" id="loyalty-display"></div>
 
       <div class="game-players" id="game-players"></div>
+      <div id="game-spectator-list" style="display:none;font-size:0.95rem;color:var(--text-dim);padding:0.4rem 0;"></div>
       <div id="board-summary"></div>
       <button class="btn btn-primary" id="btn-join-as-player" style="display:none;">Join as Player</button>
 
@@ -1345,7 +1364,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v147';
+    const APP_VERSION = 'shadows-v148';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1422,6 +1441,14 @@
     let gameListener = null;    // Firebase listener handle
     let playersListener = null;
     let roomData = null;        // cached room meta
+
+    // Randomize player selection (v148) — synced host toggle assigns random knights at start.
+    let lobbyPlayers = {};             // cached players snapshot (for start gating)
+    let lobbySpectators = {};          // cached spectators snapshot
+    let lobbyMembers = {};             // "wants to play, randomize me" pool {uid:{uid,displayName}}
+    let randomizePromptTimer = null;   // 60s auto-spectate countdown handle
+    let randomizePromptRemaining = 0;
+    let lastRandomizeRevealId = null;  // dedupe the synced reveal animation
 
     // Game state (Phase 2+)
     let inGameScreen = false;
@@ -1943,6 +1970,7 @@
         traitorAmongUs: false,
         grailSelfSave: false,
         desolationBlocksMerlin: false,
+        randomizeSelection: false,
       });
 
       promptForName('create');
@@ -2149,13 +2177,17 @@
     async function enterLobby() {
       $('lobby-code').textContent = currentRoom;
 
-      // Show/hide host controls
-      $('host-settings').style.display = isHost ? '' : 'none';
+      // Host settings: hosts edit; everyone else sees them live but read-only (v148).
+      $('host-settings').style.display = '';
+      $('host-settings').classList.toggle('readonly', !isHost);
+      $('host-settings-readonly-note').style.display = isHost ? 'none' : '';
+      $('setting-analysis-key').style.display = isHost ? '' : 'none';
       $('btn-start').style.display = isHost ? '' : 'none';
       refreshAnalysisKeyStatus();
 
       // Build knight selection grid
       renderKnightGrid();
+      renderRandomizeLobbyMode();
 
       // Listen for room updates
       listenToRoom();
@@ -2262,6 +2294,8 @@
 
     async function selectKnight(knightId) {
       if (!currentRoom || !myUid) return;
+      // Manual picking is disabled while the host's Randomize toggle is ON (v148).
+      if (roomData && roomData.randomizeSelection) return;
 
       // Check if already taken
       const playersSnap = await fbDb.ref('games/' + currentRoom + '/players').once('value');
@@ -2305,6 +2339,229 @@
       saveSession();
     }
 
+    // ── Randomize player selection (v148) ────────────────────────────────────
+    // When the host's toggle is ON: the knight grid is grayed for everyone, each
+    // committed/opted-in player is assigned a random distinct knight at start, and
+    // undecided players get a Play/Spectate panel with a 60s auto-spectate countdown.
+    // The panel stays switchable (Play <-> Spectate) until the host starts.
+    function renderRandomizeLobbyMode() {
+      const on = !!(roomData && roomData.randomizeSelection);
+      const grid = $('knight-grid');
+      const panel = $('randomize-panel');
+      const randomBtn = document.getElementById('btn-random-knight');
+      if (grid) grid.classList.toggle('grid-disabled', on);
+      if (randomBtn) randomBtn.style.display = on ? 'none' : '';
+
+      if (!on) {
+        panel.style.display = 'none';
+        clearRandomizePrompt();
+        return;
+      }
+
+      const playing = !!myKnight || !!(myUid && lobbyMembers[myUid]);
+      const spectating = isSpectator;
+      const undecided = !playing && !spectating;
+
+      panel.style.display = '';
+      let html;
+      if (undecided) {
+        html = `
+          <div class="rp-msg">Knight selection is randomized — do you want to play or spectate?
+            <span class="rp-count" id="rp-countdown"></span></div>
+          <div class="rp-actions">
+            <button class="btn btn-primary" id="rp-play">Play (random knight)</button>
+            <button class="btn" id="rp-spectate">Spectate</button>
+          </div>`;
+      } else if (playing) {
+        html = `
+          <div class="rp-msg">You're in — a random knight will be assigned when the host starts.</div>
+          <div class="rp-actions">
+            <button class="btn" id="rp-spectate">Switch to Spectate</button>
+          </div>`;
+      } else {
+        html = `
+          <div class="rp-msg">You're spectating this game.</div>
+          <div class="rp-actions">
+            <button class="btn btn-primary" id="rp-play">Switch to Play (random)</button>
+          </div>`;
+      }
+      panel.innerHTML = html;
+      const playBtn = document.getElementById('rp-play');
+      const specBtn = document.getElementById('rp-spectate');
+      if (playBtn) playBtn.addEventListener('click', randomizePlayAction);
+      if (specBtn) specBtn.addEventListener('click', randomizeSpectateAction);
+
+      if (undecided) startRandomizePrompt();
+      else clearRandomizePrompt();
+    }
+
+    function startRandomizePrompt() {
+      updateRandomizeCountdownLabel();
+      if (randomizePromptTimer) return; // keep the running countdown across re-renders
+      randomizePromptRemaining = 60;
+      updateRandomizeCountdownLabel();
+      randomizePromptTimer = setInterval(() => {
+        randomizePromptRemaining--;
+        updateRandomizeCountdownLabel();
+        if (randomizePromptRemaining <= 0) {
+          clearRandomizePrompt();
+          randomizeSpectateAction(); // auto-spectate on timeout
+        }
+      }, 1000);
+    }
+    function updateRandomizeCountdownLabel() {
+      const el = document.getElementById('rp-countdown');
+      if (el) el.textContent = ` (auto-spectate in ${Math.max(0, randomizePromptRemaining)}s)`;
+    }
+    function clearRandomizePrompt() {
+      if (randomizePromptTimer) { clearInterval(randomizePromptTimer); randomizePromptTimer = null; }
+    }
+
+    async function randomizePlayAction() {
+      if (!currentRoom || !myUid) return;
+      clearRandomizePrompt();
+      isSpectator = false;
+      lobbyMembers[myUid] = { uid: myUid, displayName: myName || 'Player' }; // optimistic
+      await fbDb.ref('games/' + currentRoom + '/spectators/' + myUid).remove().catch(() => {});
+      const ref = fbDb.ref('games/' + currentRoom + '/lobbyMembers/' + myUid);
+      await ref.set({ uid: myUid, displayName: myName || 'Player' });
+      ref.onDisconnect().remove();
+      saveSession();
+      renderRandomizeLobbyMode();
+      updateStartButton();
+    }
+    async function randomizeSpectateAction() {
+      if (!currentRoom || !myUid) return;
+      clearRandomizePrompt();
+      delete lobbyMembers[myUid]; // optimistic
+      await fbDb.ref('games/' + currentRoom + '/lobbyMembers/' + myUid).remove().catch(() => {});
+      await enterSpectatorMode();
+      renderRandomizeLobbyMode();
+      updateStartButton();
+    }
+
+    // Start-button gating — shared by the OFF path (player count) and the ON path
+    // (distinct eligible uids across players + opt-in pool, minus spectators).
+    function updateStartButton() {
+      if (!isHost) return;
+      const startBtn = $('btn-start');
+      if (!startBtn) return;
+      let count;
+      if (roomData && roomData.randomizeSelection) {
+        const eligible = new Set();
+        for (const p of Object.values(lobbyPlayers)) if (p && p.uid) eligible.add(p.uid);
+        for (const uid of Object.keys(lobbyMembers)) eligible.add(uid);
+        for (const uid of Object.keys(lobbySpectators)) eligible.delete(uid);
+        count = eligible.size;
+      } else {
+        count = Object.keys(lobbyPlayers).length;
+      }
+      startBtn.disabled = count < 3 || count > 7;
+      startBtn.textContent = count < 3
+        ? `Start Game (need ${3 - count} more player${3 - count > 1 ? 's' : ''})`
+        : (count > 7 ? `Too many players (${count}/7)` : `Start Game (${count} players)`);
+    }
+
+    // The synced "for show" reveal — host writes meta/randomizeReveal after assigning
+    // knights; every lobby client plays a cosmetic slot-machine sweep once per id.
+    function maybePlayRandomizeReveal() {
+      const rev = roomData && roomData.randomizeReveal;
+      if (!rev || !rev.id) return;
+      if (rev.id === lastRandomizeRevealId) return;
+      lastRandomizeRevealId = rev.id;
+      if (inGameScreen) return; // lobby-screen cosmetic only
+      playRandomizeReveal();
+    }
+    function playRandomizeReveal() {
+      const cards = Array.from(document.querySelectorAll('.knight-card'));
+      if (cards.length === 0) return;
+      const order = KNIGHT_ORDER.filter(k =>
+        document.querySelector('.knight-card[data-knight-id="' + k + '"]'));
+      if (order.length === 0) return;
+      const steps = [];
+      const totalSteps = 26;
+      for (let i = 0; i < totalSteps; i++) steps.push(order[i % order.length]);
+      let i = 0;
+      (function step() {
+        cards.forEach(c => c.classList.remove('random-highlight'));
+        const card = document.querySelector('.knight-card[data-knight-id="' + steps[i] + '"]');
+        if (card) card.classList.add('random-highlight');
+        i++;
+        if (i < steps.length) {
+          const progress = i / steps.length;
+          setTimeout(step, 80 + Math.pow(progress, 2) * 350);
+        } else {
+          setTimeout(() => cards.forEach(c => c.classList.remove('random-highlight')), 600);
+        }
+      })();
+    }
+
+    // Host action: assign every eligible player a distinct random knight, trigger the
+    // synced reveal, then start. Spectators (incl. a spectator host) are excluded.
+    async function randomizeAndStart() {
+      if (!isHost || !currentRoom) return;
+      const base = 'games/' + currentRoom + '/';
+      const [playersSnap, membersSnap, specsSnap] = await Promise.all([
+        fbDb.ref(base + 'players').once('value'),
+        fbDb.ref(base + 'lobbyMembers').once('value'),
+        fbDb.ref(base + 'spectators').once('value'),
+      ]);
+      const players = playersSnap.val() || {};
+      const members = membersSnap.val() || {};
+      const specUids = new Set(Object.keys(specsSnap.val() || {}));
+
+      const existingByUid = {};
+      for (const p of Object.values(players)) if (p && p.uid) existingByUid[p.uid] = p;
+
+      // Build eligible uid -> displayName (an existing player entry wins for the name).
+      const eligible = {};
+      for (const p of Object.values(players)) {
+        if (p && p.uid && !specUids.has(p.uid)) eligible[p.uid] = p.displayName || 'Player';
+      }
+      for (const [uid, m] of Object.entries(members)) {
+        if (specUids.has(uid) || eligible[uid]) continue;
+        eligible[uid] = (m && m.displayName) || 'Player';
+      }
+      const eligibleUids = Object.keys(eligible);
+      if (eligibleUids.length < 3) { showToast('Need at least 3 players.'); return; }
+      if (eligibleUids.length > 7) { showToast('Maximum 7 players.'); return; }
+
+      // Assign a distinct random knight to each eligible uid.
+      const knights = shuffle(KNIGHT_ORDER.slice());
+      const newPlayers = {};
+      eligibleUids.forEach((uid, idx) => {
+        const kid = knights[idx];
+        const ex = existingByUid[uid] || {};
+        newPlayers[kid] = {
+          uid,
+          displayName: eligible[uid],
+          knightId: kid,
+          version: ex.version || APP_VERSION,
+          browser: ex.browser || (uid === myUid ? BROWSER_ID : ''),
+          life: 4,
+          location: 'roundTable',
+          alive: true,
+          hasAccused: false,
+          relics: { excalibur: false, holyGrail: false, lancelotArmor: false },
+          isRevealed: false,
+        };
+      });
+
+      // Replace players wholesale + trigger the synced reveal, atomically.
+      const updates = {};
+      updates[base + 'players'] = newPlayers;
+      updates[base + 'meta/randomizeReveal'] = { id: Date.now() };
+      await fbDb.ref().update(updates);
+
+      // Adopt my own assignment locally so startGame's spectator-host normalization
+      // and deck keys line up.
+      const mine = Object.entries(newPlayers).find(([, p]) => p.uid === myUid);
+      if (mine) { myKnight = mine[0]; isSpectator = false; saveSession(); }
+      else { myKnight = null; } // host is a spectator this game
+
+      setTimeout(() => { startGame(); }, 2400); // let the reveal play, then deal
+    }
+
     function listenToRoom() {
       if (gameListener) {
         fbDb.ref('games/' + currentRoom + '/meta').off('value', gameListener);
@@ -2319,17 +2576,27 @@
       const metaRef = fbDb.ref('games/' + currentRoom + '/meta');
       gameListener = metaRef.on('value', applyMetaSnapshot);
 
-      // Listen to spectators (for lobby display)
+      // Listen to spectators (lobby list + in-game awareness list, v148)
       fbDb.ref('games/' + currentRoom + '/spectators').on('value', snap => {
         const specs = snap.val() || {};
-        const specEl = $('spectator-list');
+        lobbySpectators = specs;
         const names = Object.values(specs).map(s => s.displayName);
-        if (names.length > 0) {
-          specEl.style.display = '';
-          specEl.textContent = 'Spectators: ' + names.join(', ');
-        } else {
-          specEl.style.display = 'none';
+        const label = 'Spectators: ' + names.join(', ');
+        const specEl = $('spectator-list');
+        if (names.length > 0) { specEl.style.display = ''; specEl.textContent = label; }
+        else { specEl.style.display = 'none'; }
+        const gameSpecEl = $('game-spectator-list');
+        if (gameSpecEl) {
+          if (names.length > 0) { gameSpecEl.style.display = ''; gameSpecEl.textContent = label; }
+          else { gameSpecEl.style.display = 'none'; }
         }
+        if (!inGameScreen) { renderRandomizeLobbyMode(); updateStartButton(); }
+      });
+
+      // Listen to the randomize "wants to play" pool (v148)
+      fbDb.ref('games/' + currentRoom + '/lobbyMembers').on('value', snap => {
+        lobbyMembers = snap.val() || {};
+        if (!inGameScreen) { renderRandomizeLobbyMode(); updateStartButton(); }
       });
 
       // Listen to players
@@ -2437,6 +2704,11 @@
         // Grail self-save toggle (Change 5)
         $('toggle-grail-self-save').classList.toggle('on', !!roomData.grailSelfSave);
         $('toggle-desolation-merlin').classList.toggle('on', !!roomData.desolationBlocksMerlin);
+        $('toggle-randomize').classList.toggle('on', !!roomData.randomizeSelection);
+        // Randomize-selection lobby UI (grid grey-out + Play/Spectate panel + start gating) and the
+        // synced "for show" reveal animation. Only meaningful while on the lobby screen.
+        if (!inGameScreen) { renderRandomizeLobbyMode(); updateStartButton(); }
+        maybePlayRandomizeReveal();
         // Host-only "Export ALL players' logs" button (Change 6)
         $('btn-export-all-debug').style.display = isHost ? '' : 'none';
 
@@ -2475,20 +2747,18 @@
     }
 
     function updateLobbyUI(players) {
+      lobbyPlayers = players || {};
       const playerEntries = Object.entries(players);
       const count = playerEntries.length;
 
       // Update player count
       $('player-count').textContent = count;
 
-      // Update start button
-      const startBtn = $('btn-start');
-      if (isHost) {
-        startBtn.disabled = count < 3;
-        startBtn.textContent = count < 3
-          ? `Start Game (need ${3 - count} more player${3 - count > 1 ? 's' : ''})`
-          : `Start Game (${count} players)`;
-      }
+      // Update start button (gating differs when Randomize is ON — v148)
+      updateStartButton();
+
+      // Keep the randomize panel in sync with newly committed/left players
+      if (!inGameScreen && roomData && roomData.randomizeSelection) renderRandomizeLobbyMode();
 
       // Update knight grid
       document.querySelectorAll('.knight-card').forEach(card => {
@@ -2706,6 +2976,9 @@
         // setup in this room (a stale cardShare pendingInteraction would hide the setup overlay).
         updates[gp + 'setup'] = null;
         updates[gp + 'meta/pendingInteraction'] = null;
+        // Clear randomize-selection lobby state (v148)
+        updates[gp + 'meta/randomizeReveal'] = null;
+        updates[gp + 'lobbyMembers'] = null;
 
         // Meta
         updates[gp + 'meta/status'] = 'setup';
@@ -2879,7 +3152,10 @@
         leaveRoom(false);
       }
     });
-    $('btn-start').addEventListener('click', startGame);
+    $('btn-start').addEventListener('click', () => {
+      if (roomData && roomData.randomizeSelection) randomizeAndStart();
+      else startGame();
+    });
     $('btn-join-as-player').addEventListener('click', showKnightPickerForJoin);
     $('btn-premature-death').addEventListener('click', () => {
       if (!myKnight || isSpectator) return;
@@ -2918,6 +3194,13 @@
       const toggle = $('toggle-desolation-merlin');
       const newVal = !toggle.classList.contains('on');
       fbDb.ref('games/' + currentRoom + '/meta/desolationBlocksMerlin').set(newVal);
+    });
+
+    // Randomize player selection toggle — host-only lobby setting (v148)
+    $('toggle-randomize').addEventListener('click', () => {
+      if (!isHost || !currentRoom) return;
+      const newVal = !$('toggle-randomize').classList.contains('on');
+      fbDb.ref('games/' + currentRoom + '/meta/randomizeSelection').set(newVal);
     });
 
     // Detailed debug log controls (Change 6) — per-device. The toggle is DISPLAY-only;
