@@ -1364,7 +1364,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v149';
+    const APP_VERSION = 'shadows-v150';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1447,8 +1447,9 @@
     let lobbySpectators = {};          // cached spectators snapshot
     let lobbyMembers = {};             // "wants to play, randomize me" pool {uid:{uid,displayName}}
     let randomizePromptTimer = null;   // 60s auto-spectate countdown handle
-    let randomizePromptRemaining = 0;
+    let randomizePromptDeadline = 0;   // wall-clock ms when auto-spectate fires (v150)
     let lastRandomizeRevealId = null;  // dedupe the synced reveal animation
+    let myRandomizeChoice = null;      // 'play' | 'spectate' | null — sticky lobby intent (v150)
 
     // Game state (Phase 2+)
     let inGameScreen = false;
@@ -1656,7 +1657,11 @@
     }
 
     function saveSession() {
-      if (currentRoom && (myKnight || isSpectator)) {
+      // v150: persist the room whenever we're in one — even a randomize "Play" opt-in that
+      // has no knight yet and isn't a spectator. Previously this required (myKnight||isSpectator),
+      // so a late-joiner who froze before its knight was assigned saved nothing and couldn't
+      // reconnect. tryReconnect/joinRoom recover the knight by uid from the players node.
+      if (currentRoom) {
         localStorage.setItem('shadows-room-code', currentRoom);
         localStorage.setItem('shadows-knight-id', myKnight || '');
         localStorage.setItem('shadows-is-host', isHost ? 'true' : 'false');
@@ -1669,14 +1674,18 @@
       localStorage.removeItem('shadows-knight-id');
       localStorage.removeItem('shadows-is-host');
       localStorage.removeItem('shadows-is-spectator');
+      localStorage.removeItem('shadows-randomize-choice'); // v150
+      myRandomizeChoice = null;
     }
 
     async function tryReconnect() {
       const savedRoom = localStorage.getItem('shadows-room-code');
-      const savedKnight = localStorage.getItem('shadows-knight-id');
+      let savedKnight = localStorage.getItem('shadows-knight-id');
       const savedHost = localStorage.getItem('shadows-is-host');
       const savedSpectator = localStorage.getItem('shadows-is-spectator');
-      if (!savedRoom || (!savedKnight && savedSpectator !== 'true') || !myUid) return false;
+      // v150: a room alone is enough to attempt recovery — a randomize "Play" opt-in may have no
+      // saved knight yet; we resolve it by uid from the players node below.
+      if (!savedRoom || !myUid) return false;
 
       try {
         // Validate room still exists
@@ -1712,6 +1721,40 @@
             listenToRoom();
           }
           return true;
+        }
+
+        // v150: recover-by-uid. If we have no valid saved knight (a randomize "Play" opt-in that
+        // froze before its assignment persisted), look up the knight the host assigned to my uid.
+        if (!savedKnight) {
+          const playersSnap = await fbDb.ref('games/' + savedRoom + '/players').once('value');
+          const players = playersSnap.val() || {};
+          let mine = null;
+          for (const [kid, p] of Object.entries(players)) {
+            if (p && p.uid === myUid) { mine = kid; break; }
+          }
+          if (mine) {
+            savedKnight = mine; // fall through to the normal knight-restore path below
+          } else if (meta.status === 'setup' || meta.status === 'playing') {
+            // I don't own a knight but the game is underway — reconnect as a spectator to watch.
+            currentRoom = savedRoom;
+            myKnight = null;
+            isHost = savedHost === 'true' && meta.hostUid === myUid;
+            isSpectator = true;
+            roomData = meta;
+            saveSession();
+            listenToRoom();
+            return true;
+          } else {
+            // Lobby with no knight — return to the lobby rather than discarding the session.
+            currentRoom = savedRoom;
+            myKnight = null;
+            isHost = savedHost === 'true' && meta.hostUid === myUid;
+            isSpectator = false;
+            roomData = meta;
+            showScreen('lobby-screen');
+            enterLobby();
+            return true;
+          }
         }
 
         // Validate our knight entry still exists and belongs to us
@@ -1756,7 +1799,9 @@
       const savedRoom = localStorage.getItem('shadows-room-code');
       const savedKnight = localStorage.getItem('shadows-knight-id');
       const savedSpectator = localStorage.getItem('shadows-is-spectator');
-      const hasSession = !!(savedRoom && (savedKnight || savedSpectator === 'true'));
+      // v150: a room alone counts as a recoverable session — a randomize "Play" opt-in may have
+      // no knight yet (assigned/recovered by uid on reconnect).
+      const hasSession = !!(savedRoom && myUid);
 
       $('home-actions').style.display = hasSession ? 'none' : '';
       $('home-recovery').style.display = hasSession ? '' : 'none';
@@ -1764,7 +1809,9 @@
       if (hasSession) {
         const label = savedSpectator === 'true'
           ? 'Room: ' + savedRoom + ' | Spectating'
-          : 'Room: ' + savedRoom + ' | ' + (KNIGHTS[savedKnight]?.name || savedKnight);
+          : savedKnight
+            ? 'Room: ' + savedRoom + ' | ' + (KNIGHTS[savedKnight]?.name || savedKnight)
+            : 'Room: ' + savedRoom;
         $('recovery-info').textContent = label;
       }
     }
@@ -2002,6 +2049,27 @@
         listenToRoom(); // meta listener → enterGameScreen (ended) → renderResultsScreen
         return;
       }
+      // v150: reconnect-by-uid. If a setup/playing game already has a knight owned by my uid (e.g. a
+      // randomize assignment I never adopted because my tab froze), rejoin THAT knight instead of
+      // blocking with "Game is starting" or creating a duplicate midgame joiner.
+      if (meta.status === 'setup' || meta.status === 'playing') {
+        const pSnap = await fbDb.ref('games/' + code + '/players').once('value');
+        const players = pSnap.val() || {};
+        let mine = null;
+        for (const [kid, p] of Object.entries(players)) {
+          if (p && p.uid === myUid) { mine = kid; break; }
+        }
+        if (mine) {
+          currentRoom = code;
+          myKnight = mine;
+          isHost = (meta.hostUid === myUid);
+          isSpectator = false;
+          roomData = meta;
+          saveSession();
+          listenToRoom(); // meta listener → enterGameScreen
+          return;
+        }
+      }
       if (meta.status === 'setup') { showToast('Game is starting — try again in a moment.'); return; }
 
       // Check player count
@@ -2176,6 +2244,8 @@
 
     async function enterLobby() {
       $('lobby-code').textContent = currentRoom;
+      // v150: restore my sticky Play/Spectate intent (survives a refresh into the lobby).
+      try { myRandomizeChoice = localStorage.getItem('shadows-randomize-choice') || null; } catch (e) {}
 
       // Host settings: hosts edit; everyone else sees them live but read-only (v148).
       $('host-settings').style.display = '';
@@ -2355,10 +2425,13 @@
       if (!on) {
         panel.style.display = 'none';
         clearRandomizePrompt();
+        if (myRandomizeChoice !== null) setRandomizeChoice(null); // randomize off — intent meaningless
         return;
       }
 
-      const playing = !!myKnight || !!(myUid && lobbyMembers[myUid]);
+      // v150: intent ('play') makes the choice sticky — a background disconnect can transiently drop
+      // the lobbyMembers entry (onDisconnect), but we still show "You're in" and re-assert it.
+      const playing = !!myKnight || !!(myUid && lobbyMembers[myUid]) || myRandomizeChoice === 'play';
       const spectating = isSpectator;
       const undecided = !playing && !spectating;
 
@@ -2395,23 +2468,40 @@
       else clearRandomizePrompt();
     }
 
+    // v150: persist the sticky Play/Spectate intent so it survives a refresh too.
+    function setRandomizeChoice(choice) {
+      myRandomizeChoice = choice;
+      try {
+        if (choice) localStorage.setItem('shadows-randomize-choice', choice);
+        else localStorage.removeItem('shadows-randomize-choice');
+      } catch (e) {}
+    }
+
+    // v150: only arm for a player who has NEVER chosen; drive by a wall-clock deadline (robust to
+    // background timer throttling) and re-check state before firing so a transient lobbyMembers
+    // removal or a throttled tick can't flip a Play-chooser / assigned player to spectator.
     function startRandomizePrompt() {
+      if (myRandomizeChoice !== null || myKnight || isSpectator) { clearRandomizePrompt(); return; }
       updateRandomizeCountdownLabel();
       if (randomizePromptTimer) return; // keep the running countdown across re-renders
-      randomizePromptRemaining = 60;
+      randomizePromptDeadline = Date.now() + 60000;
       updateRandomizeCountdownLabel();
       randomizePromptTimer = setInterval(() => {
-        randomizePromptRemaining--;
         updateRandomizeCountdownLabel();
-        if (randomizePromptRemaining <= 0) {
+        if (Date.now() >= randomizePromptDeadline) {
           clearRandomizePrompt();
-          randomizeSpectateAction(); // auto-spectate on timeout
+          // Only auto-spectate if still genuinely undecided.
+          if (myRandomizeChoice === null && !myKnight && !isSpectator && !(myUid && lobbyMembers[myUid])) {
+            randomizeSpectateAction();
+          }
         }
       }, 1000);
     }
     function updateRandomizeCountdownLabel() {
       const el = document.getElementById('rp-countdown');
-      if (el) el.textContent = ` (auto-spectate in ${Math.max(0, randomizePromptRemaining)}s)`;
+      if (!el) return;
+      const secs = Math.max(0, Math.ceil((randomizePromptDeadline - Date.now()) / 1000));
+      el.textContent = ` (auto-spectate in ${secs}s)`;
     }
     function clearRandomizePrompt() {
       if (randomizePromptTimer) { clearInterval(randomizePromptTimer); randomizePromptTimer = null; }
@@ -2420,6 +2510,7 @@
     async function randomizePlayAction() {
       if (!currentRoom || !myUid) return;
       clearRandomizePrompt();
+      setRandomizeChoice('play');
       isSpectator = false;
       lobbyMembers[myUid] = { uid: myUid, displayName: myName || 'Player' }; // optimistic
       await fbDb.ref('games/' + currentRoom + '/spectators/' + myUid).remove().catch(() => {});
@@ -2433,11 +2524,27 @@
     async function randomizeSpectateAction() {
       if (!currentRoom || !myUid) return;
       clearRandomizePrompt();
+      setRandomizeChoice('spectate');
       delete lobbyMembers[myUid]; // optimistic
       await fbDb.ref('games/' + currentRoom + '/lobbyMembers/' + myUid).remove().catch(() => {});
       await enterSpectatorMode();
       renderRandomizeLobbyMode();
       updateStartButton();
+    }
+
+    // v150: re-assert a "Play" opt-in after a background disconnect wiped the lobbyMembers entry
+    // (onDisconnect). Without this the player silently reverts to undecided and can be auto-spectated,
+    // and the host's start gating wouldn't count / assign them.
+    function reassertRandomizeChoice() {
+      if (!currentRoom || !myUid || inGameScreen) return;
+      if (!(roomData && roomData.randomizeSelection)) return;
+      if (myRandomizeChoice === 'play' && !myKnight && !isSpectator && !lobbyMembers[myUid]) {
+        lobbyMembers[myUid] = { uid: myUid, displayName: myName || 'Player' }; // optimistic
+        const ref = fbDb.ref('games/' + currentRoom + '/lobbyMembers/' + myUid);
+        ref.set({ uid: myUid, displayName: myName || 'Player' }).catch(() => {});
+        ref.onDisconnect().remove();
+        debugLog('setup', 're-asserted randomize Play after disconnect', {});
+      }
     }
 
     // Start-button gating — shared by the OFF path (player count) and the ON path
@@ -2596,6 +2703,7 @@
       // Listen to the randomize "wants to play" pool (v148)
       fbDb.ref('games/' + currentRoom + '/lobbyMembers').on('value', snap => {
         lobbyMembers = snap.val() || {};
+        reassertRandomizeChoice(); // v150: heal an onDisconnect-wiped Play opt-in
         if (!inGameScreen) { renderRandomizeLobbyMode(); updateStartButton(); }
       });
 
@@ -2707,8 +2815,14 @@
         $('toggle-randomize').classList.toggle('on', !!roomData.randomizeSelection);
         // Randomize-selection lobby UI (grid grey-out + Play/Spectate panel + start gating) and the
         // synced "for show" reveal animation. Only meaningful while on the lobby screen.
-        if (!inGameScreen) { renderRandomizeLobbyMode(); updateStartButton(); }
-        maybePlayRandomizeReveal();
+        // v150: wrapped so a throw here can NEVER prevent the game-screen transition below (a stuck
+        // lobby was the 5Y7WYW symptom).
+        try {
+          if (!inGameScreen) { renderRandomizeLobbyMode(); updateStartButton(); }
+          maybePlayRandomizeReveal();
+        } catch (e) {
+          debugLog('setup', 'randomize lobby UI error (non-fatal)', { error: String(e && e.message || e) });
+        }
         // Host-only "Export ALL players' logs" button (Change 6)
         $('btn-export-all-debug').style.display = isHost ? '' : 'none';
 
@@ -2748,6 +2862,11 @@
 
     function updateLobbyUI(players) {
       lobbyPlayers = players || {};
+      // v150: adopt + persist my randomly-assigned knight the instant the host writes it — while
+      // still on the lobby screen, before any transition or tab freeze. This persists the session
+      // (so refresh can recover) and makes renderRandomizeLobbyMode show "You're in" rather than
+      // "undecided", so the auto-spectate countdown can't delete an assigned player's knight.
+      adoptAssignedKnight(lobbyPlayers);
       const playerEntries = Object.entries(players);
       const count = playerEntries.length;
 
@@ -3411,6 +3530,8 @@
       freshRead('setup', s => {
         if (roomData?.status === 'setup') renderSetupShared(s.val() || {});
       }, 'setup (refocus)');
+      // v150: after a background disconnect, re-assert my "Play" opt-in that onDisconnect wiped.
+      reassertRandomizeChoice();
       if (inGameScreen && roomData) {
         console.log('[SOC] tab refocused', { isHost, myKnight });
         renderGamePlayers();
@@ -3537,6 +3658,7 @@
       }
       myKnight = mine;
       isSpectator = false;
+      setRandomizeChoice('play'); // v150: I'm a player now — keep the sticky intent consistent
       saveSession();
       debugLog('setup', 'adopted randomized knight', { knight: myKnight });
       if (inGameScreen) {
