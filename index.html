@@ -1364,7 +1364,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v150';
+    const APP_VERSION = 'shadows-v151';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -1456,6 +1456,8 @@
     let myLoyalty = null;
     let myHand = [];
     let handLoaded = false;     // true once the private-hand listener has delivered at least once
+    let myMerlinOffers = [];        // v151: Merlin cards I've offered in the current merlinCancel vote
+    let lastMerlinInteractionId = null; // v151: dedupe/reset myMerlinOffers per merlinCancel
     let selectedCardId = null;  // card selected in hand (for setup)
     let mySetupShared = false;  // have I shared a card in setup?
     // Quest cinematics: map event → video file (static assets at repo root, streamed from network).
@@ -8432,11 +8434,32 @@ OUTPUT STYLE — read carefully:
         return;
       }
 
+      // F1 (v151): reset the local offer tracker when a NEW merlinCancel vote begins.
+      if (interaction.id && interaction.id !== lastMerlinInteractionId) {
+        lastMerlinInteractionId = interaction.id;
+        myMerlinOffers = [];
+      }
+
+      // F3 (v151): spectators (and the knightless spectator host) observe only — never write a vote
+      // response. Previously the write routed to responses/_spectator, polluting the tally + refunds.
+      if (!myKnight || isSpectator) {
+        area.innerHTML = (overlayVisible ? '' : '<div class="interaction-panel">') +
+          '<h3 style="color:var(--gold);font-size:1rem;margin-bottom:0.5rem;">Merlin Cancellation Vote</h3>' +
+          '<p style="font-size:1.25rem;font-weight:700;color:var(--gold);margin:0.5rem 0;">' +
+          (interaction.totalMerlins || 0) + ' / 3 Merlins offered</p>' +
+          '<p style="color:var(--text-dim);font-size:1rem;">Spectating…</p>' +
+          (overlayVisible ? '' : '</div>');
+        return;
+      }
+
       const total = interaction.totalMerlins || 0;
       const myResponse = interaction.responses?.[myKnight];
       const myDone = myResponse?.done;
       const myOffered = myResponse?.merlinsOffered || 0;
       const merlinCount = myHand.filter(c => c.type === 'special' && c.name === 'Merlin').length;
+      // F1 (v151): trust the larger of the synced count and our local in-flight offers, so a lagging
+      // echo of our own offer can't make us look "unoffered" and trigger a card-dropping auto-pass.
+      const effOffered = Math.max(myOffered, myMerlinOffers.length);
 
       let html = '';
       if (!overlayVisible) html += '<div class="interaction-panel">';
@@ -8465,32 +8488,29 @@ OUTPUT STYLE — read carefully:
       }
       html += '</div>';
 
-      if (!myDone && cachedPlayers[myKnight]?.isRevealed) {
-        // Revealed traitor auto-passes — no white cards to offer
+      if (!myDone && cachedPlayers[myKnight]?.isRevealed && effOffered === 0) {
+        // Revealed traitor with nothing offered auto-passes — no white cards to offer
         html += '<p style="color:var(--text-dim);font-size:1rem;">You are revealed — auto-passing...</p>';
         if (!overlayVisible) html += '</div>';
         area.innerHTML = html;
-        fbDb.ref(interactionResponsePath())
-          .set({ done: true, merlinsOffered: 0 });
+        safeAutoPassMerlin();
         return;
-      } else if (!myDone && merlinCount === 0 && myOffered === 0) {
-        // No Merlins and nothing offered — auto-pass. (Must check myOffered: a player who
-        // offered their LAST Merlin has merlinCount 0 but still has offeredCards on the table —
-        // auto-passing here would overwrite the response and drop offeredCards, losing the card
-        // on a failed vote. They fall through to the button branch to confirm or undo instead.)
+      } else if (!myDone && merlinCount === 0 && effOffered === 0) {
+        // No Merlins and nothing offered — auto-pass. safeAutoPassMerlin re-reads the response fresh
+        // and refuses to pass if an offer is actually in flight (the 9V7Q4M lost-Merlin bug: a lagging
+        // echo of an offered LAST Merlin let this overwrite the response and drop its offeredCards).
         if (!overlayVisible) html += '</div>';
         area.innerHTML = html;
-        fbDb.ref(interactionResponsePath())
-          .set({ done: true, merlinsOffered: 0 });
+        safeAutoPassMerlin();
         return;
       } else if (!myDone) {
         if (merlinCount > 0) {
           html += '<button class="btn btn-merlin" id="btn-offer-merlin" style="margin-right:0.5rem;">Offer Merlin (' + merlinCount + ' left)</button>';
         }
-        if (myOffered > 0) {
-          html += '<button class="btn btn-confirm" id="btn-done-merlin" style="margin-right:0.5rem;">Done Offering (' + myOffered + ')</button>';
+        if (effOffered > 0) {
+          html += '<button class="btn btn-confirm" id="btn-done-merlin" style="margin-right:0.5rem;">Done Offering (' + effOffered + ')</button>';
         }
-        html += '<button class="btn" id="btn-pass-merlin">' + (myOffered > 0 ? 'Undo & Pass' : 'Pass') + '</button>';
+        html += '<button class="btn" id="btn-pass-merlin">' + (effOffered > 0 ? 'Undo & Pass' : 'Pass') + '</button>';
       } else {
         html += '<p style="color:var(--text-dim);font-size:1rem;">Waiting for other players...</p>';
       }
@@ -8512,6 +8532,7 @@ OUTPUT STYLE — read carefully:
 
       // Remove from hand (but do NOT discard yet — only discard on successful cancel)
       myHand = myHand.filter(c => c.id !== merlinCard.id);
+      myMerlinOffers.push(merlinCard); // F1 (v151): local record so a lagging echo can't drop it
       await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
 
       // Increment totalMerlins atomically
@@ -8552,17 +8573,42 @@ OUTPUT STYLE — read carefully:
         await fbDb.ref('private/' + currentRoom + '/' + myKnight + '/hand').set(myHand);
         renderHand();
       }
+      myMerlinOffers = []; // F1 (v151): took my cards back — no in-flight offer anymore
       await fbDb.ref(interactionResponsePath())
         .set({ done: true, merlinsOffered: 0 });
+    }
+
+    // F1 (v151): auto-pass only if we truly have no offer in flight. The cached myOffered lagged
+    // during Galahad's reconnect in 9V7Q4M, so a re-render's blind pass overwrote the response and
+    // dropped its offeredCards. Re-read fresh AND check our local myMerlinOffers before passing.
+    async function safeAutoPassMerlin() {
+      try {
+        const prev = (await fbDb.ref(interactionResponsePath()).once('value')).val() || {};
+        if ((prev.merlinsOffered || 0) > 0 || (prev.offeredCards && prev.offeredCards.length) ||
+            myMerlinOffers.length > 0) {
+          return; // an offer is in flight — don't pass it away
+        }
+        await fbDb.ref(interactionResponsePath()).set({ done: true, merlinsOffered: 0 });
+      } catch (e) { debugLog('sync', 'safeAutoPassMerlin failed', { error: String(e && e.message || e) }); }
     }
 
     async function checkMerlinResolution(interaction) {
       if (!isMyTurn()) return; // Only active player resolves
 
+      // F2 (v151): resolve from an AUTHORITATIVE snapshot, not the cached `interaction`. In 9V7Q4M an
+      // offerer's connection lagged, so the cached responses were missing a just-offered card's
+      // offeredCards and the failed vote never refunded it. Re-read fresh and drop the inert
+      // spectator-host phantom (responses/_spectator) before computing discards/refunds.
+      const freshSnap = await fbDb.ref('games/' + currentRoom + '/meta/pendingInteraction').once('value');
+      const fresh = freshSnap.val();
+      if (!fresh || fresh.type !== 'merlinCancel') return; // interaction changed or already resolved
+      interaction = fresh;
+
       const total = interaction.totalMerlins || 0;
       const turnOrder = roomData?.turnOrder || [];
       const aliveKnights = turnOrder.filter(kid => cachedPlayers[kid]?.alive !== false && !cachedPlayers[kid]?.isRevealed);
       const responses = interaction.responses || {};
+      delete responses._spectator;
       const allDone = aliveKnights.every(kid => responses[kid]?.done);
 
       if (!allDone) return;
