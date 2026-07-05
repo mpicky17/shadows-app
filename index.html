@@ -1364,7 +1364,7 @@
 
   <script>
     'use strict';
-    const APP_VERSION = 'shadows-v148';
+    const APP_VERSION = 'shadows-v149';
     document.getElementById('app-version').textContent = APP_VERSION;
 
     // ═══════════════════════════════════════════════════════════════════
@@ -3237,6 +3237,16 @@
       // before the isSpectator-gated setup below so a reload — or a start where "Spectator"
       // was never toggled — engages the spectator UI/listeners and skips null-knight reads.
       if (isHost && !myKnight && !isSpectator) { isSpectator = true; saveSession(); }
+      // v149: a randomized non-host client enters with myKnight=null — adopt the knight
+      // the host assigned to my uid (from the lobby players cache, populated during the
+      // reveal window) BEFORE the private-hand listener attaches below, so it binds to the
+      // right path the first time. The reactive backstop in listenToGamePlayers covers
+      // late-arriving assignments and rejoins.
+      if (!isHost && !isSpectator && (!myKnight || lobbyPlayers[myKnight]?.uid !== myUid)) {
+        for (const [kid, p] of Object.entries(lobbyPlayers || {})) {
+          if (p && p.uid === myUid) { myKnight = kid; isSpectator = false; saveSession(); break; }
+        }
+      }
       showScreen('game-screen');
       debugLog('setup', 'enterGameScreen', { status: roomData?.status, knight: myKnight, isHost, isSpectator });
 
@@ -3506,6 +3516,39 @@
         });
     }
 
+    // v149: In the randomize-selection flow the host assigns knights by rewriting the
+    // players node — but a non-host client never learns which knight is its own, so
+    // myKnight stays null and the hand/loyalty listener binds to private/{room}/null
+    // ("Waiting for cards…"). Adopt the knight the host assigned to my uid, mirroring the
+    // join-accept flow. No-op for the host, a genuine spectator, or an already-correct owner.
+    function adoptAssignedKnight(players) {
+      if (isHost || isSpectator || !myUid || !currentRoom) return;
+      players = players || {};
+      if (myKnight && players[myKnight] && players[myKnight].uid === myUid) return; // already mine
+      let mine = null;
+      for (const [kid, p] of Object.entries(players)) {
+        if (p && p.uid === myUid) { mine = kid; break; }
+      }
+      if (!mine || mine === myKnight) return;
+      // Detach any stale private listener bound to the previous (often null) knight path.
+      if (privateListener) {
+        fbDb.ref('private/' + currentRoom + '/' + myKnight).off('value', privateListener);
+        privateListener = null;
+      }
+      myKnight = mine;
+      isSpectator = false;
+      saveSession();
+      debugLog('setup', 'adopted randomized knight', { knight: myKnight });
+      if (inGameScreen) {
+        $('hand-area').style.display = '';
+        $('loyalty-display').style.display = '';
+        const joinBtn = document.getElementById('btn-join-as-player');
+        if (joinBtn) joinBtn.style.display = 'none';
+        listenToPrivateData();
+        listenForDrawResults();
+      }
+    }
+
     function listenToPrivateData() {
       if (privateListener) return;
       const ref = fbDb.ref('private/' + currentRoom + '/' + myKnight);
@@ -3579,6 +3622,10 @@
       const ref = fbDb.ref('games/' + currentRoom + '/players');
       ref.on('value', snap => {
         cachedPlayers = snap.val() || {};
+        // v149: reactive backstop — adopt the knight the host randomly assigned to me if I
+        // don't already own a matching one (entered before the assignment arrived, refreshed,
+        // or rejoined). Re-binds the private hand/loyalty listener to the correct path.
+        adoptAssignedKnight(cachedPlayers);
         // Version-skew check against other players (records carry version/browser since v81
         // and are re-stamped on every game entry, so they track reloads).
         for (const [kid, p] of Object.entries(cachedPlayers)) {
